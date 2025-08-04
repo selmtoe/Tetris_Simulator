@@ -1,0 +1,1999 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1a2e">
+<link rel="manifest" id="manifest-link">
+<title>Tetris Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+<style>
+    :root {
+        --bg-color: #1a1a2e; --primary-color: #4b4b7c; --primary-hover-color: #6a6aff;
+        --font-color: #e0e0e0; --border-color: #4b4b7c; --canvas-bg-color: #0f0f18;
+        --font-display: 'Orbitron', sans-serif; --font-ui: 'Noto Sans JP', sans-serif;
+    }
+    html, body {
+        margin: 0;
+        padding: 0;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        -webkit-tap-highlight-color: transparent;
+    }
+    body {
+        background-color: var(--bg-color);
+        color: var(--font-color);
+        font-family: var(--font-ui);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    .main-container {
+        text-align: center;
+        transform-origin: center center;
+    }
+    #editor-container {
+        display: flex; flex-direction: column; gap: 15px; background-color: rgba(15, 15, 24, 0.8);
+        padding: 20px; border-radius: 10px; border: 2px solid var(--border-color);
+        width: 100%; max-width: 1200px; margin-bottom: 20px;
+    }
+    #game-container { display: none; }
+    canvas {
+        background-color: var(--canvas-bg-color); border-radius: 8px;
+        border: 2px solid var(--border-color);
+    }
+    h2 {
+        font-family: var(--font-display); color: var(--primary-hover-color); margin: 0 0 10px 0;
+        border-bottom: 2px solid var(--primary-color); padding-bottom: 5px; text-align: center;
+    }
+    .button, button, label.button {
+        background-color: var(--primary-color); color: var(--font-color); border: none;
+        padding: 8px 12px; border-radius: 5px; cursor: pointer; font-size: 14px;
+        font-family: var(--font-display); transition: background-color 0.2s;
+        text-align: center; display: inline-block;
+    }
+    .button:hover, button:hover, label.button:hover { background-color: var(--primary-hover-color); }
+    input[type="file"] { display: none; }
+
+    .edit-section { background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; }
+    .top-controls { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; }
+    .mode-selection { display: flex; gap: 10px; align-items: center;}
+    .mode-selection .button.active { background-color: var(--primary-hover-color); box-shadow: 0 0 10px var(--primary-hover-color); }
+
+    .player-editors { display: flex; justify-content: space-around; gap: 20px; flex-wrap: nowrap; margin-top: 15px; }
+    .editor-column { flex: 1; min-width: 320px; display: flex; flex-direction: column; gap: 15px; }
+
+    .mino-icons, .color-palette { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .mino-icon, .color-swatch {
+        width: 40px; height: 40px; border-radius: 4px; cursor: pointer;
+        border: 2px solid transparent; transition: all 0.2s; box-sizing: border-box;
+    }
+    .mino-icon:hover, .color-swatch:hover { transform: scale(1.1); }
+    .color-swatch.active { border-color: #fff; box-shadow: 0 0 8px #fff; }
+
+    .next-queue-display {
+        background-color: rgba(0,0,0,0.3); padding: 8px; border-radius: 5px; min-height: 38px;
+        display: flex; gap: 5px; flex-wrap: wrap; border: 1px solid var(--primary-color);
+    }
+    .next-queue-display .mino-icon { cursor: default; }
+    .editor-column .button-group { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+
+    .field-editor canvas { margin-bottom: 10px; cursor: crosshair; touch-action: none; }
+    .field-controls { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;}
+
+    #startGameBtn { font-size: 24px; padding: 12px 25px; background-color: #00a000; }
+    #startGameBtn:hover { background-color: #00c000; }
+
+    #scan-instructions {
+        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.8); color: white; padding: 10px 20px;
+        border-radius: 10px; font-size: 18px; z-index: 100;
+    }
+    
+    #key-config-modal, #settings-modal {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0, 0, 0, 0.75);
+        display: none; justify-content: center; align-items: center; z-index: 200;
+    }
+    .modal-content {
+        background-color: var(--bg-color); padding: 25px; border-radius: 10px;
+        border: 2px solid var(--primary-color); width: 90%; max-width: 500px;
+        font-family: var(--font-ui);
+    }
+    .modal-content h2, .modal-content h3 { font-size: 24px; }
+    .modal-content h3 { font-size: 20px; margin-top: 25px; border-top: 1px solid var(--primary-color); padding-top: 15px; }
+    #key-config-list, #settings-list { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
+    .key-config-item, .setting-item { display: flex; justify-content: space-between; align-items: center; padding: 5px; border-radius: 4px; }
+    .key-config-item:nth-child(odd), .setting-item:nth-child(odd) { background-color: rgba(255,255,255,0.05); }
+    .key-config-item span, .setting-item span, .setting-item label { font-size: 16px; color: var(--font-color); }
+    .key-config-item button, .setting-item input { min-width: 150px; text-align: center; }
+    .setting-item input[type="number"] { background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 5px; border-radius: 4px; font-family: var(--font-display); }
+    .setting-item input[type="checkbox"] { width: 20px; height: 20px; min-width: 20px; }
+    .setting-item label { display: flex; align-items: center; gap: 10px; }
+    .modal-controls { text-align: center; margin-top: 15px; }
+
+    #share-modal {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0, 0, 0, 0.75);
+        display: none; justify-content: center; align-items: center; z-index: 200;
+    }
+    .share-section h3 {
+        font-family: var(--font-display);
+        color: var(--primary-hover-color);
+        margin-top: 0;
+        margin-bottom: 10px;
+        border-bottom: 1px solid var(--primary-color);
+        padding-bottom: 5px;
+    }
+    .share-item {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    #share-modal .modal-content input, #share-modal .modal-content textarea {
+        background-color: var(--primary-color);
+        color: var(--font-color);
+        border: 1px solid var(--border-color);
+        padding: 8px;
+        border-radius: 4px;
+        font-family: var(--font-ui);
+    }
+    
+   
+    #virtual-controller-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 150;
+        display: none;
+    }
+    #virtualControllerCanvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background-color: transparent;
+        border: none;
+    }
+    #vc-edit-controls {
+        position: fixed;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 151;
+        background: rgba(50, 50, 50, 0.9);
+        padding: 10px 20px;
+        border-radius: 8px;
+        display: flex;
+        gap: 15px;
+        align-items: center;
+    }
+
+</style>
+</head>
+<body>
+
+<div class="main-container">
+    <div id="editor-container">
+        <div class="edit-section top-controls">
+            <div class="mode-selection">
+                <h2>MODE</h2>
+                <div class="button active" id="mode-1p">1P</div>
+                <div class="button" id="mode-2p">2P</div>
+                <div class="button" id="mode-ai" style="opacity: 0.5; cursor: not-allowed;" title="実装予定">AI</div>
+                 <button id="settingsBtn" class="button" style="margin-left: 15px;">設定</button>
+                 <button id="shareBtn" class="button" style="margin-left: 5px;">共有</button>
+            </div>
+            <button id="startGameBtn" class="button">START GAME</button>
+        </div>
+
+        <div class="player-editors">
+            <div class="editor-column" id="p1-editor-col">
+                <div class="edit-section next-editor">
+                    <h2>PLAYER 1 - NEXT</h2>
+                    <div class="mino-icons" id="p1-next-icons"></div>
+                    <div class="next-queue-display" id="p1-next-queue"></div>
+                    <div class="button-group"> <button class="button" id="p1-next-clear">Clear</button> </div>
+                </div>
+                <div class="edit-section field-editor">
+                    <h2>PLAYER 1 - FIELD</h2>
+                    <div class="color-palette" id="p1-palette"></div>
+                    <canvas id="field-editor-canvas-p1"></canvas>
+                    <div class="field-controls">
+                        <button class="button" id="p1-field-shift-up">↑ Up</button>
+                        <button class="button" id="p1-field-shift-down">↓ Down</button>
+                        <button class="button" id="p1-field-clear">Clear</button>
+                        <label for="imageLoader-p1" class="button">Load Img</label>
+                        <input type="file" id="imageLoader-p1" data-player="p1" accept="image/*">
+                    </div>
+                    <div class="key-config-controls" style="margin-top: 15px; text-align: center;">
+                        <button class="button" id="p1-key-config-btn">操作設定</button>
+                    </div>
+                </div>
+            </div>
+            <div class="editor-column" id="p2-editor-col" style="display: none;">
+                <div class="edit-section next-editor">
+                    <h2>PLAYER 2 - NEXT</h2>
+                    <div class="mino-icons" id="p2-next-icons"></div>
+                    <div class="next-queue-display" id="p2-next-queue"></div>
+                    <div class="button-group"> <button class="button" id="p2-next-clear">Clear</button> </div>
+                </div>
+                <div class="edit-section field-editor">
+                    <h2>PLAYER 2 - FIELD</h2>
+                    <div class="color-palette" id="p2-palette"></div>
+                    <canvas id="field-editor-canvas-p2"></canvas>
+                    <div class="field-controls">
+                        <button class="button" id="p2-field-shift-up">↑ Up</button>
+                        <button class="button" id="p2-field-shift-down">↓ Down</button>
+                        <button class="button" id="p2-field-clear">Clear</button>
+                        <label for="imageLoader-p2" class="button">Load Img</label>
+                        <input type="file" id="imageLoader-p2" data-player="p2" accept="image/*">
+                    </div>
+                    <div class="key-config-controls" style="margin-top: 15px; text-align: center;">
+                        <button class="button" id="p2-key-config-btn">操作設定</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="game-container">
+        <canvas id="mainCanvas"></canvas>
+        <div id="scan-instructions" style="display: none;"></div>
+        <div id="scan-controls" style="display: none; margin-top: 15px; gap: 10px; justify-content:center;">
+             <button id="scanConfirmBtn" class="button">次へ</button>
+             <button id="scanCancelBtn" class="button">キャンセル</button>
+        </div>
+    </div>
+</div>
+
+<div id="game-controls" style="display: none; position: fixed; top: 10px; right: 10px; z-index: 160; gap: 10px;">
+     <button id="retryBtn" class="button">リトライ</button>
+     <button id="backToEditorBtn" class="button">戻る</button>
+</div>
+
+<div id="virtual-controller-container">
+
+    <div id="vc-edit-controls" style="display: none;">
+        <button id="vc-save-and-close-btn" class="button">保存して閉じる</button>
+    </div>
+    <canvas id="virtualControllerCanvas"></canvas>
+</div>
+
+
+<div id="key-config-modal">
+    <div class="modal-content">
+        <h2 id="key-config-title">操作設定</h2>
+        <p></p>
+        <div id="key-config-list"></div>
+        
+        <h3><br>タッチ操作設定 (P1)</h3>
+        <p></p>
+        <div class="modal-controls" style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+            <button id="vc-edit-layout-btn" class="button">ボタン配置モードへ</button>
+            <button id="vc-copy-layout-btn" class="button">配置をコピー</button>
+            <button id="vc-paste-layout-btn" class="button">配置をインポート</button>
+        </div>
+        
+        <div class="modal-controls">
+            <button id="key-config-close" class="button">保存して閉じる</button>
+        </div>
+    </div>
+</div>
+
+<div id="settings-modal">
+    <div class="modal-content">
+        <h2>ゲーム設定</h2>
+        <p></p>
+        <div id="settings-list">
+       
+        </div>
+        
+        <div class="modal-controls">
+            <button id="settings-close" class="button">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<div id="share-modal">
+    <div class="modal-content">
+        <h2>共有</h2>
+        
+        <div class="share-section">
+            <h3>エクスポート</h3>
+            <p></p>
+            <div class="share-item">
+                <span>共有リンク</span>
+                <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box;">
+                <button id="copy-link-btn" class="button">リンクをコピー</button>
+            </div>
+             <div class="share-item" style="margin-top: 15px;">
+                <span>生データ (JSON)</span>
+                <textarea id="share-raw-data-textarea" readonly style="width: 100%; height: 80px; margin-top: 5px; margin-bottom: 5px; background-color: var(--canvas-bg-color); color: var(--font-color); border: 1px solid var(--border-color); resize: vertical; box-sizing: border-box;"></textarea>
+                <button id="copy-raw-data-btn" class="button">生データをコピー</button>
+            </div>
+        </div>
+        
+        <hr style="border-color: var(--primary-color); margin: 20px 0;">
+        
+
+        <div class="share-section">
+            <h3>インポート</h3>
+            <p></p>
+            <button id="import-from-data-btn" class="button">クリップボードからインポート</button>
+        </div>
+
+
+        <div class="modal-controls">
+            <button id="share-close" class="button">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<script>
+
+const virtualController = (() => {
+
+    let container, canvas, ctx, editControls;
+
+    let mode = 'play';
+    let layouts = {};
+    let buttons = {};
+    let selectedButtonId = null;
+    let isDraggingButton = false;
+    let isDraggingSlider = false;
+    const activeTouches = {};
+
+   
+    const defaultLayout = {
+        portrait: {
+            'left':      { label: '←', x: 0.12, y: 0.82, r: 0.08 },
+            'right':     { label: '→', x: 0.32, y: 0.82, r: 0.08 },
+            'softDrop':  { label: '↓', x: 0.22, y: 0.92, r: 0.07 },
+            'hardDrop':  { label: '↑', x: 0.22, y: 0.72, r: 0.07 },
+            'rotateCCW': { label: 'L',  x: 0.65, y: 0.85, r: 0.10 },
+            'rotateCW':  { label: 'R',  x: 0.85, y: 0.85, r: 0.10 },
+            'hold':      { label: 'H',  x: 0.75, y: 0.68, r: 0.09 },
+        },
+        landscape: {
+            'left':      { label: '←', x: 0.10, y: 0.75, r: 0.08 },
+            'right':     { label: '→', x: 0.25, y: 0.75, r: 0.08 },
+            'softDrop':  { label: '↓', x: 0.175,y: 0.90, r: 0.07 },
+            'hardDrop':  { label: '↑', x: 0.175,y: 0.60, r: 0.07 },
+            'rotateCCW': { label: 'L',  x: 0.80, y: 0.85, r: 0.10 },
+            'rotateCW':  { label: 'R',  x: 0.90, y: 0.65, r: 0.10 },
+            'hold':      { label: 'H',  x: 0.08, y: 0.45, r: 0.09 },
+        }
+    };
+    
+    function init() {
+        container = document.getElementById('virtual-controller-container');
+        canvas = document.getElementById('virtualControllerCanvas');
+        ctx = canvas.getContext('2d');
+        editControls = document.getElementById('vc-edit-controls');
+
+        loadLayouts();
+        handleResize();
+
+        window.addEventListener('resize', handleResize);
+        window.addEventListener('orientationchange', handleResize);
+
+        canvas.addEventListener('touchstart', handleStart, { passive: false });
+        canvas.addEventListener('touchmove', handleMove, { passive: false });
+        canvas.addEventListener('touchend', handleEnd, { passive: false });
+        canvas.addEventListener('touchcancel', handleEnd, { passive: false });
+        
+
+        let isMouseDown = false;
+        const convertMouseEvent = (e) => ({ changedTouches: [{ clientX: e.clientX, clientY: e.clientY, identifier: -1 }], preventDefault: () => {} });
+        canvas.addEventListener('mousedown', (e) => { isMouseDown = true; handleStart(convertMouseEvent(e)); });
+        canvas.addEventListener('mousemove', (e) => { if (isMouseDown) handleMove(convertMouseEvent(e)); });
+        window.addEventListener('mouseup', (e) => { if (isMouseDown) { isMouseDown = false; handleEnd(convertMouseEvent(e)); } });
+    }
+
+    function show() { if (container) container.style.display = 'block'; handleResize(); }
+    function hide() { if (container) container.style.display = 'none'; }
+
+    function startEditMode() {
+        show();
+        mode = 'edit';
+        editControls.style.display = 'flex';
+        selectedButtonId = null;
+        draw();
+    }
+
+    function endEditMode() {
+        mode = 'play';
+        editControls.style.display = 'none';
+        saveLayouts();
+        if (gameState !== 'PLAYING') {
+            hide();
+        }
+        draw();
+    }
+    
+    function handleResize() {
+        if (!canvas) return;
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const orientation = (canvas.width > canvas.height) ? 'landscape' : 'portrait';
+       
+        if (!layouts[orientation] || Object.keys(layouts[orientation]).length === 0) {
+            layouts[orientation] = JSON.parse(JSON.stringify(defaultLayout[orientation]));
+        }
+        
+        buttons = layouts[orientation];
+       
+        for(const id in buttons) {
+            if (buttons[id].isPressed === undefined) {
+                buttons[id].isPressed = false;
+            }
+        }
+        
+        draw();
+    }
+
+    function draw() {
+        if (!ctx) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const shortSide = Math.min(canvas.width, canvas.height);
+
+        for (const id in buttons) {
+            const btn = buttons[id];
+            const x = btn.x * canvas.width;
+            const y = btn.y * canvas.height;
+            const r = btn.r * shortSide;
+
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, 2 * Math.PI);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 3;
+            if (btn.isPressed || (mode === 'edit' && id === selectedButtonId)) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.fill();
+            }
+            ctx.stroke();
+
+            ctx.fillStyle = 'white';
+            ctx.font = `bold ${r * 0.7}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(btn.label, x, y);
+        }
+
+        if (mode === 'edit' && selectedButtonId) {
+            drawSizeSlider(shortSide);
+        }
+    }
+
+    function drawSizeSlider(shortSide) {
+        const centerX = canvas.width / 2;
+        const y = canvas.height / 2;
+        const sliderWidth = shortSide * 0.5;
+        const minR = 0.04, maxR = 0.20;
+
+        ctx.beginPath();
+        ctx.moveTo(centerX - sliderWidth / 2, y);
+        ctx.lineTo(centerX + sliderWidth / 2, y);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.lineWidth = 5;
+        ctx.stroke();
+
+        const btn = buttons[selectedButtonId];
+        const ratio = (btn.r - minR) / (maxR - minR);
+        const handleX = (centerX - sliderWidth / 2) + sliderWidth * ratio;
+        
+        ctx.beginPath();
+        ctx.arc(handleX, y, shortSide * 0.03, 0, 2 * Math.PI);
+        ctx.fillStyle = 'white';
+        ctx.fill();
+    }
+
+    function handleStart(e) {
+        e.preventDefault();
+        const touches = e.changedTouches;
+        const shortSide = Math.min(canvas.width, canvas.height);
+
+        for (let i = 0; i < touches.length; i++) {
+            const touch = touches[i];
+            const touchX = touch.clientX, touchY = touch.clientY;
+
+            if (mode === 'play') {
+                const buttonId = getButtonAt(touchX, touchY, shortSide);
+                if (buttonId) {
+                    pressButton(buttonId);
+                    activeTouches[touch.identifier] = buttonId;
+                }
+            } else {
+                const sliderHit = checkSliderHit(touchX, touchY, shortSide);
+                if (sliderHit) {
+                    isDraggingSlider = true;
+                    activeTouches[touch.identifier] = 'slider';
+                    updateSlider(touchX, shortSide);
+                    return;
+                }
+                const buttonId = getButtonAt(touchX, touchY, shortSide);
+                if (buttonId) {
+                    selectedButtonId = buttonId;
+                    isDraggingButton = true;
+                    activeTouches[touch.identifier] = buttonId;
+                } else {
+                    selectedButtonId = null;
+                }
+            }
+        }
+        draw();
+    }
+
+    function handleMove(e) {
+        e.preventDefault();
+        const touches = e.changedTouches;
+        const shortSide = Math.min(canvas.width, canvas.height);
+
+        for (let i = 0; i < touches.length; i++) {
+            const touch = touches[i];
+            const touchId = touch.identifier;
+            const touchX = touch.clientX, touchY = touch.clientY;
+
+            if (mode === 'play') {
+                const prevButtonId = activeTouches[touchId];
+                const currentButtonId = getButtonAt(touchX, touchY, shortSide);
+                if (prevButtonId !== currentButtonId) {
+                    if (prevButtonId) releaseButton(prevButtonId);
+                    if (currentButtonId) pressButton(currentButtonId);
+                    activeTouches[touchId] = currentButtonId;
+                }
+            } else {
+                if (isDraggingSlider && activeTouches[touchId] === 'slider') {
+                    updateSlider(touchX, shortSide);
+                } else if (isDraggingButton && activeTouches[touchId] === selectedButtonId) {
+                    const btn = buttons[selectedButtonId];
+                    btn.x = touchX / canvas.width;
+                    btn.y = touchY / canvas.height;
+                }
+            }
+        }
+        draw();
+    }
+
+    function handleEnd(e) {
+        e.preventDefault();
+        const touches = e.changedTouches;
+        for (let i = 0; i < touches.length; i++) {
+            const touchId = touches[i].identifier;
+            if (mode === 'play') {
+                const buttonId = activeTouches[touchId];
+                if (buttonId) releaseButton(buttonId);
+            } else {
+                if (isDraggingButton) isDraggingButton = false;
+                if (isDraggingSlider) isDraggingSlider = false;
+            }
+            delete activeTouches[touchId];
+        }
+        draw();
+    }
+
+    function getButtonAt(x, y, shortSide) {
+     
+        const buttonIds = Object.keys(buttons).reverse();
+        for (const id of buttonIds) {
+            const btn = buttons[id];
+            const btnX = btn.x * canvas.width;
+            const btnY = btn.y * canvas.height;
+            const btnR = btn.r * shortSide;
+            if (Math.sqrt((x - btnX) ** 2 + (y - btnY) ** 2) <= btnR) {
+                return id;
+            }
+        }
+        return null;
+    }
+
+    function pressButton(id) {
+        const btn = buttons[id];
+        if (btn && !btn.isPressed) {
+            btn.isPressed = true;
+
+            if (['hardDrop', 'rotateCW', 'rotateCCW', 'hold'].includes(id)) {
+                if(players.length > 0) players[0].handlePress(id);
+            }
+        }
+    }
+    
+    function releaseButton(id) {
+        const btn = buttons[id];
+        if (btn) btn.isPressed = false;
+    }
+
+    function checkSliderHit(x, y, shortSide) {
+        if (!selectedButtonId) return false;
+        const centerX = canvas.width / 2, sliderY = canvas.height / 2;
+        const sliderWidth = shortSide * 0.5, handleRadius = shortSide * 0.03;
+        const minR = 0.04, maxR = 0.20;
+        const ratio = (buttons[selectedButtonId].r - minR) / (maxR - minR);
+        const handleX = (centerX - sliderWidth / 2) + sliderWidth * ratio;
+        return Math.sqrt((x - handleX) ** 2 + (y - sliderY) ** 2) <= handleRadius;
+    }
+
+    function updateSlider(touchX, shortSide) {
+        if (!selectedButtonId) return;
+        const centerX = canvas.width / 2, sliderWidth = shortSide * 0.5;
+        const sliderStart = centerX - sliderWidth / 2;
+        const clampedX = Math.max(sliderStart, Math.min(touchX, sliderStart + sliderWidth));
+        const newRatio = (clampedX - sliderStart) / sliderWidth;
+        const minR = 0.04, maxR = 0.20;
+        buttons[selectedButtonId].r = minR + (maxR - minR) * newRatio;
+    }
+
+    function saveLayouts() {
+        try {
+            localStorage.setItem('tetrisVirtualPadLayouts', JSON.stringify(layouts));
+        } catch (e) {
+            console.error("Failed to save virtual pad layouts:", e);
+        }
+    }
+
+    function loadLayouts() {
+        try {
+            const savedLayouts = JSON.parse(localStorage.getItem('tetrisVirtualPadLayouts'));
+            if (savedLayouts && savedLayouts.portrait && savedLayouts.landscape) {
+                layouts = savedLayouts;
+            } else {
+                layouts = JSON.parse(JSON.stringify(defaultLayout));
+            }
+        } catch (e) {
+            console.error("Failed to load virtual pad layouts:", e);
+            layouts = JSON.parse(JSON.stringify(defaultLayout));
+        }
+    }
+
+    async function copyLayoutsToClipboard() {
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(layouts, null, 2));
+            alert('ボタン配置をクリップボードにコピーしました。');
+        } catch (err) {
+            alert('コピーに失敗しました。');
+            console.error('Failed to copy layouts: ', err);
+        }
+    }
+
+    async function importLayoutsFromClipboard() {
+        if (!confirm('クリップボードからボタン配置を読み込みますか？現在の配置は上書きされます。')) return;
+        try {
+            const text = await navigator.clipboard.readText();
+            const newLayouts = JSON.parse(text);
+            if (newLayouts && newLayouts.portrait && newLayouts.landscape) {
+                layouts = newLayouts;
+                saveLayouts();
+                handleResize();
+                alert('ボタン配置をインポートしました。');
+            } else {
+                alert('無効なデータ形式です。');
+            }
+        } catch (err) {
+            alert('インポートに失敗しました。');
+            console.error('Failed to paste layouts: ', err);
+        }
+    }
+    
+    return {
+        init,
+        show,
+        hide,
+        startEditMode,
+        endEditMode,
+        isButtonPressed: (action) => buttons[action]?.isPressed || false,
+        copyLayoutsToClipboard,
+        importLayoutsFromClipboard
+    };
+})();
+
+const RESOLUTION_SCALE = 2;
+const BLOCK_SIZE = 28;
+const EDITOR_BLOCK_SIZE = 50;
+const BOARD_WIDTH = 10;
+const BOARD_VISIBLE_HEIGHT = 20;
+const BOARD_HEIGHT = 40; 
+const HOLD_AREA_WIDTH = 5 * BLOCK_SIZE;
+const PLAYFIELD_WIDTH = BOARD_WIDTH * BLOCK_SIZE;
+const NEXT_AREA_WIDTH = 5 * BLOCK_SIZE;
+const PADDING = 20;
+const PLAYER_CANVAS_WIDTH = HOLD_AREA_WIDTH + PLAYFIELD_WIDTH + NEXT_AREA_WIDTH + PADDING * 2;
+const CANVAS_HEIGHT = (BOARD_VISIBLE_HEIGHT + 0.5) * BLOCK_SIZE;
+const PLAYFIELD_X_OFFSET = HOLD_AREA_WIDTH + PADDING;
+const AXIS_THRESHOLD = 0.8;
+
+let gameSettings = {
+    das: 140,
+    arr: 30,
+    sdf: 20,
+    lineClearDelay: 500,
+    gravity: 1000,
+    lockDelay: 500,
+    garbageGrace: 1000,
+    garbageRandomness: 0.3,
+    maxNext: 5,
+    showEffects: true,
+    touchControlsEnabled: 'ontouchstart' in window,
+};
+
+const COLORS = { 'I': '#00f0f0', 'O': '#f0f000', 'T': '#a000f0', 'L': '#f0a000', 'J': '#0000f0', 'S': '#00f000', 'Z': '#f00000', 'G': '#999999' };
+
+const SCAN_COLOR_PALETTE = {
+    'NULL': ['#000000', '#302838'],
+    'G':    ['#999999', '#D8D8D8'],
+    'I':    ['#019899', '#0199D5'],
+    'O':    ['#999A02', '#F9B900'],
+    'T':    ['#980099', '#871E88'],
+    'L':    ['#996700', '#F56100'],
+    'J':    ['#0000BB', '#004BA5'],
+    'S':    ['#10971F', '#5CB523'],
+    'Z':    ['#990000', '#DA1822']
+};
+
+const hexToRgb = (hex) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return { r, g, b };
+};
+
+const PARSED_SCAN_COLORS = {};
+for (const key in SCAN_COLOR_PALETTE) {
+    PARSED_SCAN_COLORS[key] = SCAN_COLOR_PALETTE[key].map(hexToRgb);
+}
+
+
+const SCAN_COLORS = { ...COLORS, 'O': '#999A02', 'L': '#f0a000' };
+const MINO_SKINS = { default: COLORS };
+let activeSkin = MINO_SKINS.default;
+
+const EDITOR_COLORS = {...COLORS, 'EMPTY': '#000000'};
+const TETROMINOS = {
+    'I': { shape: [[0, 0], [1, 0], [2, 0], [3, 0]], center: [1.5, 0.5] }, 'O': { shape: [[0, 0], [1, 0], [0, -1], [1, -1]], center: [0.5, -0.5] },
+    'T': { shape: [[0, 0], [-1, 0], [0, -1], [1, 0]], center: [0, 0] }, 'L': { shape: [[-1, 0], [0, 0], [1, 0], [1, -1]], center: [0, 0] },
+    'J': { shape: [[0, 0], [-1, 0], [1, 0], [-1, -1]], center: [0, 0] }, 'S': { shape: [[1, -1], [-1, 0], [0, 0], [0, -1]], center: [0, 0] },
+    'Z': { shape: [[0, 0], [1, 0], [0, -1], [-1, -1]], center: [0, 0] }
+};
+const SRS_OFFSETS = { "JLSTZ": { "0_1": [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]], "1_0": [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]], "1_2": [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]], "2_1": [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]], "2_3": [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]], "3_2": [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]], "3_0": [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]], "0_3": [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]], }, "I": { "0_1": [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]], "1_0": [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]], "1_2": [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]], "2_1": [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]], "2_3": [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]], "3_2": [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]], "3_0": [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]], "0_3": [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]], } };
+
+let players = [], gameMode = '1P', gameState = 'EDITING', lastTime = 0, mainCanvas, ctx;
+
+let keyBindings = {
+    p1: {
+        left:      { type: 'key', value: 'a',           label: 'a' },
+        right:     { type: 'key', value: 'd',           label: 'd' },
+        softDrop:  { type: 'key', value: 's',           label: 's' },
+        hardDrop:  { type: 'key', value: ' ',           label: 'Space' },
+        rotateCW:  { type: 'key', value: 'e',           label: 'e' },
+        rotateCCW: { type: 'key', value: 'q',           label: 'q' },
+        hold:      { type: 'key', value: 'w',           label: 'w' },
+    },
+    p2: {
+        left:      { type: 'key', value: 'arrowleft',   label: 'ArrowLeft' },
+        right:     { type: 'key', value: 'arrowright',  label: 'ArrowRight' },
+        softDrop:  { type: 'key', value: 'arrowdown',   label: 'ArrowDown' },
+        hardDrop:  { type: 'key', value: 'enter',       label: 'Enter' },
+        rotateCW:  { type: 'key', value: 'arrowup',     label: 'ArrowUp' },
+        rotateCCW: { type: 'key', value: '.',           label: '.' },
+        hold:      { type: 'key', value: '/',           label: '/' },
+    }
+};
+const keyActionLabels = {
+    left: '左移動', right: '右移動', softDrop: 'ソフトドロップ',
+    rotateCW: '右回転', rotateCCW: '左回転',
+    hardDrop: 'ハードドロップ', hold: 'ホールド'
+};
+let isBindingKey = false, bindingPlayer = null, bindingAction = null;
+let gamepads = {}, prevGamepads = {};
+
+const editorData = {
+    p1: { board: null, nextQueue: [], viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I' },
+    p2: { board: null, nextQueue: [], viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I' }
+};
+let scanState = { image: null, bottomLeft: null, topRight: null, currentMousePos: {x: 0, y: 0}, targetPlayerId: null, parsedColors: null };
+
+function* createMinoGenerator(customQueue) {
+    if (customQueue && customQueue.length > 0) {
+        yield* customQueue;
+    }
+    const bag = [];
+    const pieces = Object.keys(TETROMINOS);
+    while (true) {
+        if (bag.length === 0) {
+            const newBag = [...pieces];
+            for (let i = newBag.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newBag[i], newBag[j]] = [newBag[j], newBag[i]];
+            }
+            bag.push(...newBag);
+        }
+        yield bag.shift();
+    }
+}
+
+class Player {
+    constructor(id, offsetX, keyBindings, padIndex) {
+        this.id = id; this.offsetX = offsetX; this.keyBindings = keyBindings; this.padIndex = padIndex;
+        this.keys = {};
+        this.board = editorData[`p${id}`].board.map(row => [...row]);
+        this.minoGenerator = createMinoGenerator(editorData[`p${id}`].nextQueue);
+        this.opponent = null;
+        this.reset();
+    }
+
+    reset() {
+        this.player = { x: 0, y: 0, pieceType: null, rotation: 0 };
+        this.nextQueue = [];
+        for (let i = 0; i < gameSettings.maxNext; i++) {
+            this.nextQueue.push(this.minoGenerator.next().value);
+        }
+        this.holdPiece = null; this.canHold = true; this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
+        this.dasTimer = 0; this.arrTimer = 0; this.sdfTimer = 0; this.dasDirection = 0;
+        this.isGrounded = false; this.gameOver = false; this.isClearingLine = false; this.lineClearDelayTimer = 0;
+        this.viewY = BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT;
+        this.pendingGarbage = 0; this.garbageQueue = []; this.ren = -1; this.isB2B = false;
+        this.lastMoveWasRotation = false; this.lastSrsKickIndex = -1;
+        this.specialMoveText = [];
+        this.specialMoveTextTimer = 0;
+        this.lastGarbageHoleX = -1;
+        this.spawnNewPiece();
+    }
+    
+    spawnNewPiece() {
+        this.player.pieceType = this.nextQueue.shift();
+        this.nextQueue.push(this.minoGenerator.next().value);
+        
+        this.player.rotation = 0;
+        this.canHold = true;
+        this.lastMoveWasRotation = false;
+        this.player.x = Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[this.player.pieceType].center[0]) -1;
+
+        const shape = this.getShape(this.player.pieceType, this.player.rotation);
+        this.player.y = 19;
+        if (this.checkCollision(this.player.x, this.player.y, shape)) {
+            this.player.y = 18;
+            if (this.checkCollision(this.player.x, this.player.y, shape)) {
+
+                 this.gameOver = true;
+            }
+        }
+    }
+
+    isActionPressed(action) {
+        const binding = this.keyBindings[action];
+        if (binding?.type === 'key' && this.keys[binding.value]) return true;
+        
+        if (this.padIndex !== null && gamepads[this.padIndex]) {
+            if (binding?.type === 'pad_button' && gamepads[this.padIndex].buttons[binding.value]) return true;
+            if (binding?.type === 'pad_axis') {
+                const [axis, dir] = [parseInt(binding.value[0]), binding.value[1]];
+                const axisValue = gamepads[this.padIndex].axes[axis];
+                if ((dir === '+' && axisValue > AXIS_THRESHOLD) || (dir === '-' && axisValue < -AXIS_THRESHOLD)) return true;
+            }
+        }
+        
+
+        if (this.id === '1' && gameSettings.touchControlsEnabled) {
+            if (virtualController.isButtonPressed(action)) return true;
+        }
+
+        return false;
+    }
+
+    handlePress(action) {
+        if (this.gameOver || this.isClearingLine) return;
+        switch (action) {
+            case 'rotateCCW': this.rotate(-1); break;
+            case 'rotateCW':  this.rotate(1); break;
+            case 'hardDrop':  this.hardDrop(); break;
+            case 'hold':      this.hold(); break;
+        }
+    }
+
+    update(dt) {
+        if (this.gameOver) return;
+        if (this.specialMoveTextTimer > 0) {
+            this.specialMoveTextTimer -= dt;
+        }
+
+        this.processGarbageQueue();
+
+        const left = this.isActionPressed('left');
+        const right = this.isActionPressed('right');
+        const horizDir = left ? -1 : (right ? 1 : 0);
+
+        if (horizDir !== 0) {
+            if (this.dasDirection !== horizDir) { 
+                this.dasTimer = 0;
+                this.arrTimer = 0;
+                if (!this.isClearingLine) this.move(horizDir, 0);
+            } else { 
+                this.dasTimer += dt;
+                if (this.dasTimer >= gameSettings.das) {
+                    if (gameSettings.arr === 0) {
+                        if (!this.isClearingLine) {
+                            let successfulMoves = 0;
+                            while (!this.checkCollision(this.player.x + horizDir, this.player.y, this.getShape(this.player.pieceType, this.player.rotation))) {
+                                this.player.x += horizDir;
+                                successfulMoves++;
+                            }
+                            if (successfulMoves > 0) {
+                               this.lockTimer = 0;
+                               this.lastMoveWasRotation = false;
+                            }
+                        }
+                    } else {
+                        this.arrTimer += dt;
+                        if (this.arrTimer >= gameSettings.arr) {
+                            if (!this.isClearingLine) this.move(horizDir, 0);
+                            this.arrTimer -= gameSettings.arr;
+                        }
+                    }
+                }
+            }
+        }
+        this.dasDirection = horizDir;
+
+        if (this.isClearingLine) {
+            this.lineClearDelayTimer -= dt;
+            if (this.lineClearDelayTimer <= 0) { this.isClearingLine = false; this.riseGarbage(); this.spawnNewPiece(); }
+            return;
+        }
+
+        if (this.isActionPressed('softDrop')) {
+             if (gameSettings.sdf > 0) {
+                this.sdfTimer += dt;
+                if (this.sdfTimer >= gameSettings.sdf) {
+                    this.move(0, 1);
+                    this.sdfTimer -= gameSettings.sdf;
+                }
+             } else { 
+                const ghostY = this.getGhostY();
+                if (this.player.y < ghostY) {
+                    this.player.y = ghostY;
+                    this.lockTimer = 0;
+                }
+             }
+        } else {
+            this.sdfTimer = 0;
+        }
+        
+        this.isGrounded = this.checkCollision(this.player.x, this.player.y + 1, this.getShape(this.player.pieceType, this.player.rotation));
+        if (this.isGrounded) {
+            this.lockTimer += dt;
+            if (this.lockTimer >= gameSettings.lockDelay) {
+                this.lockPiece();
+            }
+        } else {
+            this.lockTimer = 0;
+            if (!this.isActionPressed('softDrop')) {
+                 if (gameSettings.gravity > 0) {
+                    this.gravityTimer -= dt;
+                    if (this.gravityTimer <= 0) {
+                        this.move(0, 1, false);
+                        this.gravityTimer += gameSettings.gravity;
+                    }
+                 } else { 
+                    this.player.y = this.getGhostY();
+                 }
+            }
+        }
+    }
+
+    draw() {
+        ctx.save(); ctx.translate(this.offsetX, 0);
+        this.drawUI();
+
+        ctx.save(); ctx.translate(PLAYFIELD_X_OFFSET, 0.5 * BLOCK_SIZE);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, PLAYFIELD_WIDTH, CANVAS_HEIGHT);
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 0.5;
+        for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
+            for (let x = 0; x < BOARD_WIDTH; x++) {
+                ctx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+            }
+        }
+        ctx.strokeStyle = '#4b4b7c'; ctx.lineWidth = 2; ctx.strokeRect(1, 1, PLAYFIELD_WIDTH - 2, CANVAS_HEIGHT - 2);
+        for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) { for (let x = 0; x < BOARD_WIDTH; x++) { const boardY = y + this.viewY; if (this.board[boardY]?.[x]) { this.drawBlock(this.board[boardY][x], x * BLOCK_SIZE, y * BLOCK_SIZE); } } }
+
+
+        if (!this.gameOver && !this.isClearingLine && this.player.pieceType) { const shape = this.getShape(this.player.pieceType, this.player.rotation); const ghostY = this.getGhostY(); if (ghostY > this.player.y) this.drawPiece(shape, this.player.x, ghostY, this.player.pieceType, true); this.drawPiece(shape, this.player.x, this.player.y, this.player.pieceType, false); }
+        this.drawSpecialMoveText();
+        if (this.gameOver) this.drawMessage("GAME OVER");
+        ctx.restore(); ctx.restore();
+    }
+    
+    getShape(p, r) { if(!p) return []; const o=TETROMINOS[p].shape; if(r===0||p==='O')return o; const c=TETROMINOS[p].center; return o.map(b=>{let [x,y]=[b[0]-c[0],b[1]-c[1]]; for(let i=0;i<r;i++){[x,y]=[-y,x];} return [x+c[0]+(p==='O'?0.5:0),y+c[1]+(p==='O'?0.5:0)];});}
+    checkCollision(x,y,s) { for(const b of s) { const bx=Math.floor(x+b[0]), by=Math.floor(y+b[1]); if(bx<0||bx>=BOARD_WIDTH||by>=BOARD_HEIGHT||(by>=0&&this.board[by]?.[bx])) return true; } return false; }
+    rotate(d) { if(this.gameOver||!this.player.pieceType||this.player.pieceType==='O')return; const oR=this.player.rotation, nR=(oR+d+4)%4; const oD=(this.player.pieceType==='I'?SRS_OFFSETS.I:SRS_OFFSETS.JLSTZ)[`${oR}_${nR}`]; const nS=this.getShape(this.player.pieceType,nR); for(let i=0;i<oD.length;i++){const t=oD[i];const oX=t[0],oY=-t[1]; if(!this.checkCollision(this.player.x+oX,this.player.y+oY,nS)){this.player.x+=oX;this.player.y+=oY;this.player.rotation=nR;this.lockTimer=0;this.lastMoveWasRotation=true;this.lastSrsKickIndex=i;return;}}}
+    move(dx,dy,isPlayer=true) { if(this.gameOver||!this.player.pieceType)return; const s=this.getShape(this.player.pieceType,this.player.rotation); if(!this.checkCollision(this.player.x+dx,this.player.y+dy,s)){this.player.x+=dx;this.player.y+=dy;if(isPlayer){this.lockTimer=0;this.lastMoveWasRotation=false;}}}
+    getGhostY() {if(!this.player.pieceType) return this.player.y; const s=this.getShape(this.player.pieceType,this.player.rotation); let y=this.player.y; while(!this.checkCollision(this.player.x,y+1,s))y++; return y;}
+    
+    hardDrop() {
+        if (this.gameOver) return;
+        const originalY = this.player.y;
+        this.player.y = this.getGhostY();
+        if (this.player.y > originalY) {
+            this.lastMoveWasRotation = false;
+        }
+        this.lockPiece();
+    }
+    
+    hold() {
+        if (this.gameOver || !this.canHold) return;
+        this.canHold = false;
+        this.lastMoveWasRotation = false;
+        if (this.holdPiece) {
+            [this.player.pieceType, this.holdPiece] = [this.holdPiece, this.player.pieceType];
+            this.player.rotation = 0;
+            this.lockTimer = 0;
+            
+            this.player.x = Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[this.player.pieceType].center[0]) -1;
+            const shape = this.getShape(this.player.pieceType, this.player.rotation);
+            this.player.y = 19;
+            if (this.checkCollision(this.player.x, this.player.y, shape)) {
+                this.player.y = 18;
+                if (this.checkCollision(this.player.x, this.player.y, shape)) {
+                     this.gameOver = true;
+                }
+            }
+        } else {
+            this.holdPiece = this.player.pieceType;
+            this.spawnNewPiece();
+        }
+    }
+    
+    lockPiece() {
+        if (!this.player.pieceType) return;
+        const tspinResult = this.checkForTSpin();
+        const shape = this.getShape(this.player.pieceType, this.player.rotation);
+
+        this.specialMoveText = [];
+        let moveText = '';
+
+        for (const b of shape) { const bx = Math.floor(this.player.x + b[0]), by = Math.floor(this.player.y + b[1]); if (by >= 0) this.board[by][bx] = this.player.pieceType; }
+        
+        const lines = this.clearLines();
+        const isPC = lines > 0 && this.board.every(row => row.every(cell => cell === null));
+        
+        let attack = 0;
+        let isAction = false;
+        
+        if (isPC) {
+            attack = 10;
+            isAction = true;
+            this.ren++;
+            this.isB2B = true;
+            this.specialMoveText.push("PERFECT CLEAR");
+        } else if (lines > 0) {
+            isAction = true; this.ren++;
+            
+            if (tspinResult === 'TSPIN') {
+                attack = [0, 2, 4, 6][lines];
+                moveText = ['', 'T-Spin Single', 'T-Spin Double', 'T-Spin Triple'][lines];
+            } else if (tspinResult === 'MINI_TSPIN') {
+                attack = [0, 0, 1, 2, 4][lines];
+                moveText = ['', 'T-Spin Mini Single', 'T-Spin Mini Double'][lines] || 'T-Spin Mini';
+            } else {
+                attack = [0, 0, 1, 2, 4][lines];
+                moveText = ['', 'Single', 'Double', 'Triple', 'Tetris'][lines];
+            }
+            
+            const isB2BEligible = (lines === 4) || (tspinResult && lines > 0);
+            if (isB2BEligible) {
+                if (this.isB2B) {
+                    attack++;
+                    this.specialMoveText.push("Back-to-Back");
+                }
+                this.isB2B = true;
+            } else {
+                this.isB2B = false;
+            }
+            const renBonus = [0,0,1,1,2,2,3,3,4,4,4,4,4,5][Math.min(this.ren, 13)];
+            if(renBonus > 0) {
+                attack += renBonus;
+            }
+            if (this.ren >= 1) {
+                 this.specialMoveText.push(`${this.ren} REN`);
+            }
+        } else if (tspinResult) {
+            isAction = false; 
+            this.ren = -1;
+            this.isB2B = false; 
+            moveText = (tspinResult === 'MINI_TSPIN') ? 'T-Spin Mini' : 'T-Spin';
+        }
+        
+        if (!isAction) this.ren = -1;
+        if (moveText) this.specialMoveText.push(moveText);
+
+        if (this.opponent && attack > 0) {
+            let remainingAttack = attack;
+             if (isPC) {
+                this.opponent.addGarbage(remainingAttack);
+            } else {
+                if (this.pendingGarbage > 0) { const offset = Math.min(this.pendingGarbage, remainingAttack); this.pendingGarbage -= offset; remainingAttack -= offset; }
+                if (remainingAttack > 0) { for (let i=0; i < this.garbageQueue.length && remainingAttack > 0; i++) { const offset = Math.min(this.garbageQueue[i].lines, remainingAttack); this.garbageQueue[i].lines -= offset; remainingAttack -= offset; } this.garbageQueue = this.garbageQueue.filter(g => g.lines > 0); }
+                if (remainingAttack > 0) { this.opponent.addGarbage(remainingAttack); }
+            }
+        }
+
+        if (this.specialMoveText.length > 0) {
+            this.specialMoveTextTimer = 1500;
+        }
+
+        this.lockTimer = 0;
+        if (lines > 0) { this.isClearingLine = true; this.lineClearDelayTimer = gameSettings.lineClearDelay; } 
+        else { this.riseGarbage(); this.spawnNewPiece(); }
+    }
+    
+    checkForTSpin() {
+        if (this.player.pieceType !== 'T' || !this.lastMoveWasRotation) return null;
+        const centerX = this.player.x + TETROMINOS['T'].center[0];
+        const centerY = this.player.y + TETROMINOS['T'].center[1];
+        const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+        let occupiedCorners = 0;
+        corners.forEach(([cx, cy]) => {
+            const boardX = Math.round(centerX + cx);
+            const boardY = Math.round(centerY + cy);
+            if (boardX < 0 || boardX >= BOARD_WIDTH || boardY < 0 || boardY >= BOARD_HEIGHT || this.board[boardY]?.[boardX]) occupiedCorners++;
+        });
+        if (occupiedCorners < 3) return null;
+        const frontCornerDefs = { 0: [[-1, -1], [1, -1]], 1: [[1, -1], [1, 1]], 2: [[-1, 1], [1, 1]], 3: [[-1, -1], [-1, 1]] };
+        const frontCorners = frontCornerDefs[this.player.rotation];
+        let occupiedFrontCorners = 0;
+        frontCorners.forEach(([cx, cy]) => {
+            const boardX = Math.round(centerX + cx);
+            const boardY = Math.round(centerY + cy);
+            if (boardX < 0 || boardX >= BOARD_WIDTH || boardY < 0 || boardY >= BOARD_HEIGHT || this.board[boardY]?.[boardX]) occupiedFrontCorners++;
+        });
+        if (occupiedFrontCorners === 2 || this.lastSrsKickIndex === 4) return 'TSPIN';
+        return 'MINI_TSPIN';
+    }
+
+    clearLines() {let cl=0; for(let y=this.board.length-1;y>=0;y--){if(this.board[y].every(c=>c!==null)){this.board.splice(y,1);cl++;}} for(let i=0;i<cl;i++){this.board.unshift(Array(BOARD_WIDTH).fill(null));} return cl;}
+    addGarbage(lines) { if (this.opponent) { this.garbageQueue.push({ lines, receivedTime: performance.now() }); } }
+    processGarbageQueue() { const now = performance.now(); for (let i = this.garbageQueue.length - 1; i >= 0; i--) { if (now - this.garbageQueue[i].receivedTime > gameSettings.garbageGrace) { this.pendingGarbage += this.garbageQueue[i].lines; this.garbageQueue.splice(i, 1); } } }
+    
+    riseGarbage() {
+        if (this.pendingGarbage <= 0) return;
+        
+        if (this.lastGarbageHoleX === -1) {
+            this.lastGarbageHoleX = Math.floor(Math.random() * BOARD_WIDTH);
+        }
+        
+        for (let i = 0; i < this.pendingGarbage; i++) {
+            if (this.board[0].some(cell => cell !== null)) {
+                this.gameOver = true;
+                return;
+            }
+            if (Math.random() < gameSettings.garbageRandomness) {
+                this.lastGarbageHoleX = Math.floor(Math.random() * BOARD_WIDTH);
+            }
+            
+            this.board.shift();
+            const newRow = Array(BOARD_WIDTH).fill('G');
+            newRow[this.lastGarbageHoleX] = null;
+            this.board.push(newRow);
+        }
+        this.pendingGarbage = 0;
+    }
+
+    drawBlock(p,x,y,isGhost=false) {
+        if(y<-BLOCK_SIZE)return;
+        ctx.fillStyle=activeSkin[p]||'#FFF';
+        ctx.globalAlpha=isGhost?0.3:1.0;
+        ctx.fillRect(x,y,BLOCK_SIZE,BLOCK_SIZE);
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(x,y,BLOCK_SIZE,BLOCK_SIZE);
+        ctx.globalAlpha=1.0;
+    }
+
+    drawPiece(s,x,y,p,g) {s.forEach(b=>{const px=Math.floor(x+b[0])*BLOCK_SIZE, py=(Math.floor(y+b[1])-this.viewY)*BLOCK_SIZE; this.drawBlock(p,px,py,g);});}
+    
+    drawUI() {
+        ctx.textAlign = 'center'; ctx.fillStyle = '#FFF'; ctx.font = `bold ${BLOCK_SIZE * 0.8}px "Orbitron"`;
+        ctx.fillText('HOLD', HOLD_AREA_WIDTH / 2, 40);
+        if (this.holdPiece) { const s = this.getShape(this.holdPiece, 0); s.forEach(b => { const px = (HOLD_AREA_WIDTH / 2) - (TETROMINOS[this.holdPiece].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE), py = 70 - (TETROMINOS[this.holdPiece].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE); this.drawBlock(this.holdPiece, px, py); }); }
+        
+        if (this.opponent) {
+            const meterX = PLAYFIELD_X_OFFSET - 12; const meterWidth = 8; const meterMaxHeight = BOARD_VISIBLE_HEIGHT * BLOCK_SIZE;
+            const pendingHeight = Math.min(this.pendingGarbage, BOARD_VISIBLE_HEIGHT) * BLOCK_SIZE;
+            if (pendingHeight > 0) { ctx.fillStyle = 'red'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight + (0.5 * BLOCK_SIZE), meterWidth, pendingHeight); }
+            const queuedLines = this.garbageQueue.reduce((sum, g) => sum + g.lines, 0);
+            const queuedHeight = Math.min(queuedLines, BOARD_VISIBLE_HEIGHT - this.pendingGarbage) * BLOCK_SIZE;
+            if (queuedHeight > 0) { ctx.fillStyle = '#f0f000'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight - queuedHeight + (0.5*BLOCK_SIZE), meterWidth, queuedHeight); }
+        }
+
+        ctx.fillStyle = '#FFF'; const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
+        ctx.fillText('NEXT', rX, 40);
+        for (let i = 0; i < gameSettings.maxNext; i++) {
+            const pT = this.nextQueue[i]; if (!pT) continue;
+            const s = this.getShape(pT, 0);
+            s.forEach(b => {
+                const px = rX - (TETROMINOS[pT].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE);
+                const py = 70 + (i * BLOCK_SIZE * 2.5) - (TETROMINOS[pT].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE);
+                this.drawBlock(pT, px, py);
+            });
+        }
+    }
+    
+    drawSpecialMoveText() {
+        if (this.specialMoveTextTimer <= 0 || this.specialMoveText.length === 0 || !gameSettings.showEffects) return;
+        
+        const centerX = PLAYFIELD_WIDTH / 2;
+        const startY = CANVAS_HEIGHT / 2 - (this.specialMoveText.length * 18);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        for (let i = 0; i < this.specialMoveText.length; i++) {
+            const text = this.specialMoveText[i];
+            const y = startY + (i * 35);
+            
+            ctx.font = `bold ${BLOCK_SIZE}px "Orbitron"`;
+            ctx.fillStyle = '#FFFFFF';
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 4;
+
+            ctx.strokeText(text, centerX, y);
+            ctx.fillText(text, centerX, y);
+        }
+        ctx.textBaseline = 'alphabetic';
+    }
+
+    drawMessage(t) { const cX = PLAYFIELD_WIDTH / 2; const cY = CANVAS_HEIGHT / 2; ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, -0.5*BLOCK_SIZE, PLAYFIELD_WIDTH, CANVAS_HEIGHT); ctx.fillStyle = '#FFF'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `bold ${BLOCK_SIZE * 1.5}px "Orbitron"`; ctx.fillText(t, cX, cY); ctx.textBaseline = 'alphabetic'; }
+}
+
+function setupEditors() { ['p1', 'p2'].forEach(setupPlayerEditor); }
+function setupPlayerEditor(playerId) {
+    editorData[playerId].board = Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
+    const nextIcons = document.getElementById(`${playerId}-next-icons`);
+    Object.keys(TETROMINOS).forEach(key => { const icon = document.createElement('div'); icon.className = 'mino-icon'; icon.style.backgroundColor = activeSkin[key]; icon.addEventListener('click', () => { editorData[playerId].nextQueue.push(key); updateNextQueueDisplay(playerId); }); nextIcons.appendChild(icon); });
+    document.getElementById(`${playerId}-next-clear`).addEventListener('click', () => { editorData[playerId].nextQueue = []; updateNextQueueDisplay(playerId); });
+    const palette = document.getElementById(`${playerId}-palette`);
+    Object.keys(EDITOR_COLORS).forEach(key => { const swatch = document.createElement('div'); swatch.className = 'color-swatch'; swatch.style.backgroundColor = key === 'EMPTY' ? '#333' : EDITOR_COLORS[key]; if (key === 'EMPTY') { swatch.style.border = '1px dashed #fff'; swatch.title = 'Eraser'; } if (key === editorData[playerId].activeColor) swatch.classList.add('active'); swatch.addEventListener('click', () => { editorData[playerId].activeColor = key; palette.querySelector('.active')?.classList.remove('active'); swatch.classList.add('active'); }); palette.appendChild(swatch); });
+
+   const canvas = document.getElementById(`field-editor-canvas-${playerId}`);
+    canvas.width = BOARD_WIDTH * EDITOR_BLOCK_SIZE; canvas.height = BOARD_VISIBLE_HEIGHT * EDITOR_BLOCK_SIZE;
+    let isDrawing = false;
+    let isEraserMode = false;
+
+    const getCoordsFromEvent = e => {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const relativeX = (clientX - rect.left) / rect.width;
+        const relativeY = (clientY - rect.top) / rect.height;
+        const x = Math.floor(relativeX * BOARD_WIDTH);
+        const y = Math.floor(relativeY * BOARD_VISIBLE_HEIGHT);
+        return { x, y };
+    };
+    
+    const applyDraw = (x, y) => {
+        if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_VISIBLE_HEIGHT) {
+            const boardY = y + editorData[playerId].viewY;
+            if (isEraserMode) {
+                editorData[playerId].board[boardY][x] = null;
+            } else {
+                const color = editorData[playerId].activeColor;
+                editorData[playerId].board[boardY][x] = (color === 'EMPTY') ? null : color;
+            }
+            drawEditorField(playerId);
+        }
+    };
+
+    const handleDrawStart = e => {
+        e.preventDefault();
+        isDrawing = true;
+        const { x, y } = getCoordsFromEvent(e);
+        if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_VISIBLE_HEIGHT) {
+            const boardY = y + editorData[playerId].viewY;
+            const currentCellColor = editorData[playerId].board[boardY][x];
+            const selectedColor = editorData[playerId].activeColor;
+            isEraserMode = (selectedColor === 'EMPTY' || currentCellColor === selectedColor);
+        }
+        applyDraw(x, y);
+    };
+
+    const handleDrawMove = e => {
+        if (!isDrawing) return;
+        e.preventDefault();
+        const { x, y } = getCoordsFromEvent(e);
+        applyDraw(x, y);
+    };
+
+    const handleDrawEnd = () => {
+        if (!isDrawing) return;
+        isDrawing = false;
+        isEraserMode = false;
+    };
+
+    canvas.addEventListener('mousedown', handleDrawStart);
+    canvas.addEventListener('mouseup', handleDrawEnd);
+    canvas.addEventListener('mouseleave', handleDrawEnd);
+    canvas.addEventListener('mousemove', handleDrawMove);
+    canvas.addEventListener('touchstart', handleDrawStart, { passive: false });
+    canvas.addEventListener('touchend', handleDrawEnd, { passive: false });
+    canvas.addEventListener('touchcancel', handleDrawEnd, { passive: false });
+    canvas.addEventListener('touchmove', handleDrawMove, { passive: false });
+    
+    document.getElementById(`${playerId}-field-shift-up`).addEventListener('click', () => shiftField(playerId, 'up'));
+    document.getElementById(`${playerId}-field-shift-down`).addEventListener('click', () => shiftField(playerId, 'down'));
+    document.getElementById(`${playerId}-field-clear`).addEventListener('click', () => { editorData[playerId].board.forEach(row => row.fill(null)); drawEditorField(playerId); });
+    drawEditorField(playerId);
+}
+
+function shiftField(playerId, direction) {
+    const board = editorData[playerId].board;
+    if (direction === 'up') {
+        board.shift();
+        board.push(Array(BOARD_WIDTH).fill(null));
+    } else {
+        board.pop();
+        board.unshift(Array(BOARD_WIDTH).fill(null));
+    }
+    drawEditorField(playerId);
+}
+
+function updateNextQueueDisplay(playerId) { const qd = document.getElementById(`${playerId}-next-queue`); qd.innerHTML = ''; editorData[playerId].nextQueue.forEach(key => { const icon = document.createElement('div'); icon.className = 'mino-icon'; icon.style.backgroundColor = activeSkin[key]; qd.appendChild(icon); }); }
+function drawEditorField(playerId) {
+    const canvas = document.getElementById(`field-editor-canvas-${playerId}`),
+        ctx = canvas.getContext('2d'),
+        data = editorData[playerId];
+    ctx.fillStyle = '#0f0f18';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#444'; 
+    ctx.lineWidth = 1;
+    for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
+        for (let x = 0; x < BOARD_WIDTH; x++) {
+            const pieceType = data.board[y + data.viewY]?.[x];
+            if (pieceType) {
+                ctx.fillStyle = activeSkin[pieceType];
+                ctx.fillRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
+            }
+            ctx.strokeRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
+        }
+    }
+}
+
+function openKeyConfigModal(playerId) {
+    bindingPlayer = playerId;
+    const modal = document.getElementById('key-config-modal');
+    const title = document.getElementById('key-config-title');
+    const list = document.getElementById('key-config-list');
+
+    title.textContent = `PLAYER ${playerId.slice(-1)} - 操作設定`;
+    list.innerHTML = ''; 
+
+    Object.keys(keyBindings[bindingPlayer]).forEach(action => {
+        const item = document.createElement('div');
+        item.className = 'key-config-item';
+        const label = document.createElement('span');
+        label.textContent = keyActionLabels[action];
+        const btn = document.createElement('button');
+        btn.className = 'button';
+        btn.textContent = keyBindings[bindingPlayer][action].label;
+        
+        btn.onclick = () => {
+            isBindingKey = true;
+            bindingAction = action;
+            btn.textContent = '入力待機中...';
+            list.querySelectorAll('button').forEach(b => { if (b !== btn) b.disabled = true; });
+        };
+        
+        item.appendChild(label);
+        item.appendChild(btn);
+        list.appendChild(item);
+    });
+    modal.style.display = 'flex';
+}
+
+function bindKey(binding) {
+    if (!isBindingKey || !bindingPlayer || !bindingAction) return;
+    
+    keyBindings[bindingPlayer][bindingAction] = binding;
+    isBindingKey = false;
+    bindingAction = null;
+    openKeyConfigModal(bindingPlayer);
+}
+
+function loadKeyBindings() {
+    try {
+        const savedBindings = JSON.parse(localStorage.getItem('tetrisKeyBindings'));
+        if (savedBindings) {
+            if (savedBindings.p1) Object.assign(keyBindings.p1, savedBindings.p1);
+            if (savedBindings.p2) Object.assign(keyBindings.p2, savedBindings.p2);
+        }
+    } catch (e) { console.error("Failed to load key bindings from localStorage:", e); }
+}
+
+function saveGameSettings() {
+    try {
+        localStorage.setItem('tetrisGameSettings', JSON.stringify(gameSettings));
+    } catch (e) { console.error("Failed to save game settings to localStorage:", e); }
+}
+
+function loadGameSettings() {
+    try {
+        const saved = localStorage.getItem('tetrisGameSettings');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            Object.assign(gameSettings, parsed);
+        }
+    } catch(e) { console.error('Failed to load settings from localStorage:', e); }
+}
+
+function openSettingsModal() {
+    const list = document.getElementById('settings-list');
+    list.innerHTML = '';
+    const settingDetails = {
+        das: { label: 'DAS (ms)', min: 0, max: 500, step: 10 },
+        arr: { label: 'ARR (ms)', min: 0, max: 100, step: 1 },
+        sdf: { label: 'SDF (ms)', min: 0, max: 100, step: 1 },
+        lineClearDelay: { label: 'Line Clear Delay (ms)', min: 0, max: 2000, step: 50 },
+        gravity: { label: 'Gravity Interval (ms)', min: 0, max: 5000, step: 50 },
+        lockDelay: { label: 'Lock Delay (ms)', min: 0, max: 3000, step: 50 },
+        maxNext: { label: 'Max NEXT Display', min: 1, max: 10, step: 1 },
+        garbageGrace: { label: 'Garbage Grace (ms)', min: 0, max: 5000, step: 100 },
+        garbageRandomness: { label: 'Garbage Hole Randomness (%)', min: 0, max: 100, step: 1 }
+    };
+    Object.keys(settingDetails).forEach(key => {
+        const item = document.createElement('div');
+        item.className = 'setting-item';
+        const label = document.createElement('span');
+        label.textContent = settingDetails[key].label;
+        const input = document.createElement('input');
+        input.type = 'number';
+        Object.assign(input, settingDetails[key]);
+        let currentValue = gameSettings[key];
+        if (key === 'garbageRandomness') {
+            currentValue *= 100;
+        }
+        input.value = currentValue;
+
+        input.onchange = e => {
+            let val = parseFloat(e.target.value);
+            if (key === 'garbageRandomness') {
+                gameSettings[key] = Math.max(0, Math.min(100, val)) / 100;
+            } else {
+                gameSettings[key] = Math.max(settingDetails[key].min, Math.min(settingDetails[key].max, val));
+            }
+            saveGameSettings();
+        };
+        item.append(label, input);
+        list.appendChild(item);
+    });
+    
+    const checkboxSettings = {
+        showEffects: 'エフェクトを表示する',
+        touchControlsEnabled: 'タッチ操作を有効にする (P1)'
+    };
+
+    Object.entries(checkboxSettings).forEach(([key, text], index) => {
+        const item = document.createElement('div');
+        item.className = 'setting-item';
+        if (index === 0) { 
+            item.style.marginTop = '20px';
+            item.style.borderTop = '1px solid var(--primary-color)';
+            item.style.paddingTop = '15px';
+        }
+
+        const label = document.createElement('label');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `setting-${key}`;
+        checkbox.checked = !!gameSettings[key];
+
+        checkbox.onchange = e => {
+            gameSettings[key] = e.target.checked;
+            saveGameSettings();
+        };
+        
+        const span = document.createElement('span');
+        span.textContent = text;
+        
+        label.append(checkbox, span);
+        item.appendChild(label);
+        list.appendChild(item);
+    });
+
+    document.getElementById('settings-modal').style.display = 'flex';
+}
+
+
+
+function startScanProcess(file, playerId) { const reader = new FileReader(); reader.onload = e => { scanState.image = new Image(); scanState.image.onload = () => { scanState.targetPlayerId = playerId; scanState.bottomLeft = null; scanState.topRight = null; gameState = 'SCAN_BL'; document.getElementById('editor-container').style.display = 'none'; document.getElementById('game-container').style.display = 'block'; document.getElementById('scan-controls').style.display = 'flex'; 
+const ar = scanState.image.naturalWidth / scanState.image.naturalHeight; const displayMaxWidth = window.innerWidth * 0.9; const displayMaxHeight = window.innerHeight * 0.8; let displayWidth = displayMaxWidth; let displayHeight = displayWidth / ar; if (displayHeight > displayMaxHeight) { displayHeight = displayMaxHeight; displayWidth = displayHeight * ar; } const canvasWidth = Math.min(2048, scanState.image.naturalWidth); mainCanvas.width = canvasWidth; mainCanvas.height = canvasWidth / ar; mainCanvas.style.width = `${displayWidth}px`; mainCanvas.style.height = `${displayHeight}px`; updateScanUI(); }; scanState.image.src = e.target.result; }; reader.readAsDataURL(file); }
+function endScanProcess() { gameState = 'EDITING'; scanState.image = null; mainCanvas.style.width = ''; mainCanvas.style.height = ''; document.getElementById('editor-container').style.display = 'flex'; document.getElementById('game-container').style.display = 'none'; document.getElementById('scan-controls').style.display = 'none'; ['p1', 'p2'].forEach(drawEditorField); setTimeout(updateScale, 0); }
+function updateScanUI() { const instructions = document.getElementById('scan-instructions'), confirmBtn = document.getElementById('scanConfirmBtn'); instructions.style.display = 'block'; mainCanvas.style.cursor = 'crosshair'; if (gameState === 'SCAN_BL') { instructions.textContent = '画像の盤面の「左下」をクリック'; confirmBtn.style.visibility = scanState.bottomLeft ? 'visible' : 'hidden'; } else if (gameState === 'SCAN_TR') { instructions.textContent = '「右上」をクリック →「読込開始」'; confirmBtn.style.visibility = scanState.topRight ? 'visible' : 'hidden'; if (scanState.topRight) confirmBtn.textContent = '読込開始'; else confirmBtn.textContent = '次へ'; } }
+function drawScanner() { if (!scanState.image) return; ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height); ctx.drawImage(scanState.image, 0, 0, mainCanvas.width, mainCanvas.height); if (scanState.bottomLeft) { ctx.fillStyle = 'lime'; ctx.beginPath(); ctx.arc(scanState.bottomLeft.x, scanState.bottomLeft.y, 10, 0, Math.PI * 2); ctx.fill(); } if (scanState.topRight) { const {x: blx, y: bly} = scanState.bottomLeft, {x: trx, y: try_} = scanState.topRight; ctx.strokeStyle = 'fuchsia'; ctx.lineWidth = 4; ctx.strokeRect(blx, try_, trx - blx, bly - try_); } }
+function processAndLoadBoard() { const tempC = document.createElement('canvas'); tempC.width = scanState.image.naturalWidth; tempC.height = scanState.image.naturalHeight; const tempCtx = tempC.getContext('2d', { willReadFrequently: true }); tempCtx.drawImage(scanState.image, 0, 0); const sX = scanState.image.naturalWidth / mainCanvas.width, sY = scanState.image.naturalHeight / mainCanvas.height; const iBL = { x: scanState.bottomLeft.x*sX, y: scanState.bottomLeft.y*sY }, iTR = { x: scanState.topRight.x*sX, y: scanState.topRight.y*sY }; const bW_px = iTR.x - iBL.x, bH_px = iBL.y - iTR.y, blW_px = bW_px/BOARD_WIDTH, blH_px = bH_px/BOARD_VISIBLE_HEIGHT; const targetBoard = editorData[scanState.targetPlayerId].board; targetBoard.forEach(row => row.fill(null)); for (let r = 0; r < BOARD_VISIBLE_HEIGHT; r++) { for (let c = 0; c < BOARD_WIDTH; c++) { const cX = iBL.x + (c+0.5)*blW_px, cY = iTR.y + (r+0.5)*blH_px; const sampleSize = Math.max(1, Math.floor(blW_px * 0.25)); const iD = tempCtx.getImageData(cX-sampleSize/2, cY-sampleSize/2, sampleSize, sampleSize).data; let avgR=0, avgG=0, avgB=0; for(let i=0; i<iD.length; i+=4){ avgR+=iD[i]; avgG+=iD[i+1]; avgB+=iD[i+2]; } const pCount = iD.length/4; avgR/=pCount; avgG/=pCount; avgB/=pCount; targetBoard[BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT + r][c] = findClosestColor(avgR, avgG, avgB); } } endScanProcess(); }
+
+function findClosestColor(r, g, b) {
+    const inputColor = { r, g, b };
+    const colorDistanceSq = (c1, c2) => {
+        return Math.pow(c1.r - c2.r, 2) + Math.pow(c1.g - c2.g, 2) + Math.pow(c1.b - c2.b, 2);
+    };
+    for (const nullColor of PARSED_SCAN_COLORS.NULL) {
+        if (colorDistanceSq(inputColor, nullColor) < 6000) {
+            return null;
+        }
+    }
+    for (const gColor of PARSED_SCAN_COLORS.G) {
+        if (colorDistanceSq(inputColor, gColor) < 10000) {
+            return 'G';
+        }
+    }
+    let minDistance = Infinity;
+    let closestKey = null;
+    const minoKeys = Object.keys(PARSED_SCAN_COLORS).filter(k => k !== 'NULL' && k !== 'G');
+    for (const key of minoKeys) {
+        for (const targetColor of PARSED_SCAN_COLORS[key]) {
+            const distance = colorDistanceSq(inputColor, targetColor);
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestKey = key;
+            }
+        }
+    }
+    return (minDistance > 25000) ? null : closestKey;
+}
+
+function boardToString(board) {
+    return board.map(row => 
+        row.map(cell => cell === null ? '_' : cell).join('')
+    ).join('');
+}
+
+function stringToBoard(str) {
+    const board = [];
+    if (!str || str.length !== BOARD_WIDTH * BOARD_HEIGHT) {
+        console.error('Invalid board string length. Returning empty board.');
+        return Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
+    }
+    for (let i = 0; i < BOARD_HEIGHT; i++) {
+        const rowStr = str.substring(i * BOARD_WIDTH, (i + 1) * BOARD_WIDTH);
+        const row = rowStr.split('').map(char => (char === '_') ? null : char);
+        board.push(row);
+    }
+    return board;
+}
+
+function getGameStateForExport() {
+    const data = {
+        v: 1, 
+        m: gameMode,
+        p1: {
+            b: boardToString(editorData.p1.board),
+            n: editorData.p1.nextQueue.join('')
+        }
+    };
+    if (gameMode === '2P') {
+        data.p2 = {
+            b: boardToString(editorData.p2.board),
+            n: editorData.p2.nextQueue.join('')
+        };
+    }
+    return data;
+}
+
+function applyGameState(data) {
+    try {
+        if (!data || data.v !== 1) {
+            alert('無効または非対応のデータです。');
+            return false;
+        }
+        gameMode = data.m || '1P';
+        document.getElementById('mode-1p').classList.toggle('active', gameMode === '1P');
+        document.getElementById('mode-2p').classList.toggle('active', gameMode === '2P');
+        document.getElementById('p2-editor-col').style.display = (gameMode === '2P') ? 'flex' : 'none';
+        if (data.p1) {
+            editorData.p1.board = stringToBoard(data.p1.b);
+            editorData.p1.nextQueue = data.p1.n ? data.p1.n.split('') : [];
+            drawEditorField('p1');
+            updateNextQueueDisplay('p1');
+        }
+        if (gameMode === '2P' && data.p2) {
+            editorData.p2.board = stringToBoard(data.p2.b);
+            editorData.p2.nextQueue = data.p2.n ? data.p2.n.split('') : [];
+            drawEditorField('p2');
+            updateNextQueueDisplay('p2');
+        }
+        updateScale();
+        return true;
+    } catch (e) {
+        console.error('Failed to apply game state:', e);
+        alert('データの読み込みに失敗しました。');
+        return false;
+    }
+}
+
+function loadStateFromURL() {
+    if (window.location.hash) {
+        try {
+            const base64Data = window.location.hash.substring(1);
+            const binaryString = atob(base64Data);
+            const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
+            const jsonString = new TextDecoder().decode(bytes);
+            const data = JSON.parse(jsonString);
+            if(applyGameState(data)) {
+                alert('URLから盤面を読み込みました。');
+            }
+            history.pushState("", document.title, window.location.pathname + window.location.search);
+        } catch (e) {
+            console.error('Failed to load state from URL hash:', e);
+            alert('URLからのデータ読み込みに失敗しました。');
+             history.pushState("", document.title, window.location.pathname + window.location.search);
+        }
+    }
+}
+
+
+function openShareModal() {
+    const stateData = getGameStateForExport();
+    const jsonString = JSON.stringify(stateData);
+    const uint8Array = new TextEncoder().encode(jsonString);
+    const base64Data = btoa(String.fromCharCode.apply(null, uint8Array));
+    const url = new URL(window.location);
+    url.hash = base64Data;
+    document.getElementById('share-link-input').value = url.href;
+    document.getElementById('share-raw-data-textarea').value = jsonString;
+    document.getElementById('share-modal').style.display = 'flex';
+}
+function pollGamepads() {
+    const rawPads = navigator.getGamepads();
+    if (!rawPads) return;
+
+    for (let i = 0; i < rawPads.length; i++) {
+        const pad = rawPads[i];
+        if (!pad) {
+            delete gamepads[i];
+            delete prevGamepads[i];
+            continue;
+        };
+
+        gamepads[i] = { buttons: pad.buttons.map(b => b.pressed), axes: [...pad.axes] };
+
+        if (isBindingKey) {
+            if (prevGamepads[i]) {
+                for (let j = 0; j < pad.buttons.length; j++) {
+                    if (gamepads[i].buttons[j] && !prevGamepads[i].buttons[j]) {
+                        bindKey({ type: 'pad_button', value: j, label: `Pad${i}-Btn${j}` });
+                        return;
+                    }
+                }
+                for (let j = 0; j < pad.axes.length; j++) {
+                    const val = gamepads[i].axes[j], prevVal = prevGamepads[i].axes[j];
+                    if (Math.abs(val) > AXIS_THRESHOLD && Math.abs(prevVal) < AXIS_THRESHOLD) {
+                        const dir = val > 0 ? '+' : '-';
+                        bindKey({ type: 'pad_axis', value: `${j}${dir}`, label: `Pad${i}-Axis${j}${dir}` });
+                        return;
+                    }
+                }
+            }
+        } else if (gameState === 'PLAYING') {
+             players.forEach(p => {
+                if(p.padIndex === i) {
+                    Object.keys(p.keyBindings).forEach(action => {
+                        const binding = p.keyBindings[action];
+                        if (binding.type === 'pad_button' && gamepads[i].buttons[binding.value] && !prevGamepads[i]?.buttons[binding.value]) {
+                           p.handlePress(action);
+                        }
+                    });
+                }
+            });
+        }
+    }
+    Object.keys(gamepads).forEach(i => {
+        prevGamepads[i] = { buttons: [...gamepads[i].buttons], axes: [...gamepads[i].axes] };
+    });
+}
+
+
+function gameLoop(currentTime) {
+    if (!ctx) return;
+    pollGamepads();
+    const dt = currentTime - lastTime;
+    lastTime = currentTime;
+    ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+    if (gameState === 'PLAYING') {
+        players.forEach(p => p.update(dt || 0));
+        players.forEach(p => p.draw());
+    } else if (gameState.startsWith('SCAN')) {
+        drawScanner();
+    }
+    requestAnimationFrame(gameLoop);
+}
+
+const mainContainer = document.querySelector('.main-container');
+
+function updateScale() {
+    if (gameState.startsWith('SCAN')) {
+        mainContainer.style.transform = '';
+        return;
+    }
+
+    mainContainer.style.transform = 'none';
+
+    const rect = mainContainer.getBoundingClientRect();
+    const nativeWidth = rect.width;
+    const nativeHeight = rect.height;
+    
+    if (nativeWidth === 0 || nativeHeight === 0) {
+        mainContainer.style.transform = '';
+        return;
+    }
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    const scale = Math.min(
+        viewportWidth / nativeWidth,
+        viewportHeight / nativeHeight
+    ) * 0.98;
+
+    mainContainer.style.transform = `scale(${scale})`;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    mainCanvas = document.getElementById('mainCanvas'); ctx = mainCanvas.getContext('2d');
+    
+    virtualController.init();
+
+    loadKeyBindings();
+    loadGameSettings();
+
+    document.getElementById('shareBtn').addEventListener('click', openShareModal);
+    document.getElementById('share-close').addEventListener('click', () => {
+        document.getElementById('share-modal').style.display = 'none';
+    });
+    
+    document.getElementById('copy-link-btn').addEventListener('click', () => {
+        const input = document.getElementById('share-link-input');
+        input.select();
+        navigator.clipboard.writeText(input.value)
+            .then(() => alert('共有リンクをクリップボードにコピーしました！'))
+            .catch(err => alert('コピーに失敗しました: ' + err));
+    });
+    
+    document.getElementById('copy-raw-data-btn').addEventListener('click', () => {
+        const textarea = document.getElementById('share-raw-data-textarea');
+        textarea.select();
+        navigator.clipboard.writeText(textarea.value)
+            .then(() => alert('生データをクリップボードにコピーしました！'))
+            .catch(err => alert('コピーに失敗しました: ' + err));
+    });
+
+        document.getElementById('import-from-data-btn').addEventListener('click', async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            if (!text) {
+                alert('クリップボードが空です。');
+                return;
+            }
+
+            let data;
+
+                if (text.startsWith('http') && text.includes('#')) {
+                const base64Data = text.substring(text.indexOf('#') + 1);
+                const binaryString = atob(base64Data);
+                const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
+                const jsonString = new TextDecoder().decode(bytes);
+                data = JSON.parse(jsonString);
+            } else {
+                data = JSON.parse(text);
+            }
+            
+            if(applyGameState(data)) {
+                 alert('クリップボードから盤面を読み込みました。');
+                 document.getElementById('share-modal').style.display = 'none';
+            }
+
+        } catch (e) {
+            alert('クリップボードのデータが無効か、読み込みに失敗しました。');
+            console.error('Failed to import from clipboard:', e);
+        }
+    });
+
+
+    document.getElementById('mode-1p').addEventListener('click', () => { 
+        gameMode = '1P'; 
+        document.getElementById('mode-1p').classList.add('active'); 
+        document.getElementById('mode-2p').classList.remove('active'); 
+        document.getElementById('p2-editor-col').style.display = 'none'; 
+        setTimeout(updateScale, 0);
+    });
+    document.getElementById('mode-2p').addEventListener('click', () => { 
+        gameMode = '2P'; 
+        document.getElementById('mode-2p').classList.add('active'); 
+        document.getElementById('mode-1p').classList.remove('active'); 
+        document.getElementById('p2-editor-col').style.display = 'flex';
+        setTimeout(updateScale, 0);
+    });
+    
+    document.getElementById('startGameBtn').addEventListener('click', () => {
+        gameState = 'PLAYING'; 
+        document.getElementById('editor-container').style.display = 'none'; 
+        document.getElementById('game-container').style.display = 'block';
+        document.getElementById('scan-controls').style.display = 'none';
+        document.getElementById('game-controls').style.display = 'flex';
+        
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+        players = [];
+        if (gameMode === '1P') {
+            mainCanvas.width = PLAYER_CANVAS_WIDTH * RESOLUTION_SCALE; 
+            mainCanvas.height = CANVAS_HEIGHT * RESOLUTION_SCALE;
+            mainCanvas.style.width = PLAYER_CANVAS_WIDTH + 'px';
+            mainCanvas.style.height = CANVAS_HEIGHT + 'px';
+            players.push(new Player('1', 0, keyBindings.p1, 0));
+        }
+        else {
+            const totalWidth = PLAYER_CANVAS_WIDTH * 2;
+            mainCanvas.width = totalWidth * RESOLUTION_SCALE; 
+            mainCanvas.height = CANVAS_HEIGHT * RESOLUTION_SCALE;
+            mainCanvas.style.width = totalWidth + 'px';
+            mainCanvas.style.height = CANVAS_HEIGHT + 'px';
+            const p1 = new Player('1', 0, keyBindings.p1, 0);
+            const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1);
+            p1.opponent = p2; 
+            p2.opponent = p1;
+            players.push(p1, p2);
+        }
+        
+        ctx.scale(RESOLUTION_SCALE, RESOLUTION_SCALE);
+
+        if (gameSettings.touchControlsEnabled) {
+            virtualController.show();
+        }
+
+        setTimeout(updateScale, 0);
+    });
+
+
+    document.getElementById('backToEditorBtn').addEventListener('click', () => {
+        gameState = 'EDITING';
+        players = [];
+        document.getElementById('game-container').style.display = 'none';
+        document.getElementById('game-controls').style.display = 'none';
+        document.getElementById('editor-container').style.display = 'flex';
+        
+        virtualController.hide();
+        
+        setTimeout(updateScale, 0);
+    });
+    
+    ['p1', 'p2'].forEach(pId => { 
+        document.getElementById(`imageLoader-${pId}`).addEventListener('change', e => { 
+            if (e.target.files && e.target.files[0]) {
+                startScanProcess(e.target.files[0], e.target.dataset.player);
+                setTimeout(updateScale, 0);
+            }
+        }); 
+    });
+    document.getElementById('scanCancelBtn').addEventListener('click', endScanProcess);
+    document.getElementById('scanConfirmBtn').addEventListener('click', () => { if (gameState === 'SCAN_BL' && scanState.bottomLeft) gameState = 'SCAN_TR'; else if (gameState === 'SCAN_TR' && scanState.topRight) processAndLoadBoard(); updateScanUI(); });
+    mainCanvas.addEventListener('click', e => { if (!gameState.startsWith('SCAN')) return; const rect = mainCanvas.getBoundingClientRect();
+    const scaleX = mainCanvas.width / rect.width;
+    const scaleY = mainCanvas.height / rect.height;
+    const pos = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+    if (gameState==='SCAN_BL') scanState.bottomLeft=pos; else if (gameState==='SCAN_TR') scanState.topRight=pos; updateScanUI(); });
+    
+    document.getElementById('p1-key-config-btn').addEventListener('click', () => openKeyConfigModal('p1'));
+    document.getElementById('p2-key-config-btn').addEventListener('click', () => openKeyConfigModal('p2'));
+    
+    document.getElementById('key-config-close').addEventListener('click', () => {
+        try { localStorage.setItem('tetrisKeyBindings', JSON.stringify(keyBindings)); } catch (e) { console.error("Failed to save key bindings to localStorage:", e); }
+        document.getElementById('key-config-modal').style.display = 'none';
+        isBindingKey = false; bindingPlayer = null; bindingAction = null;
+    });
+
+    document.getElementById('settingsBtn').addEventListener('click', openSettingsModal);
+    document.getElementById('settings-close').addEventListener('click', () => {
+        document.getElementById('settings-modal').style.display = 'none';
+    });
+
+    document.getElementById('vc-edit-layout-btn').addEventListener('click', () => {
+        document.getElementById('key-config-modal').style.display = 'none';
+        virtualController.startEditMode();
+    });
+    document.getElementById('vc-save-and-close-btn').addEventListener('click', () => {
+        virtualController.endEditMode();
+    });
+    document.getElementById('vc-copy-layout-btn').addEventListener('click', virtualController.copyLayoutsToClipboard);
+    document.getElementById('vc-paste-layout-btn').addEventListener('click', virtualController.importLayoutsFromClipboard);
+
+    document.addEventListener('keydown', e => {
+        if (isBindingKey) {
+            e.preventDefault();
+            let keyLabel = e.key;
+            if (keyLabel === ' ') keyLabel = 'Space';
+            bindKey({ type: 'key', value: e.key.toLowerCase(), label: keyLabel });
+        } 
+        else if (gameState === 'PLAYING') {
+            players.forEach(p => {
+                p.keys[e.key.toLowerCase()] = true;
+                Object.keys(p.keyBindings).forEach(action => {
+                    const binding = p.keyBindings[action];
+                    if (binding.type === 'key' && binding.value === e.key.toLowerCase()) {
+                        p.handlePress(action);
+                    }
+                });
+            });
+        }
+    });
+    document.addEventListener('keyup', e => {
+        if (gameState === 'PLAYING') {
+            players.forEach(p => p.keys[e.key.toLowerCase()] = false );
+        }
+    });
+
+    const manifest = {
+        "name": "Tetris Simulator", "short_name": "TetrisSim", "start_url": ".",
+        "display": "standalone", "background_color": "#1a1a2e", "theme_color": "#1a1a2e",
+        "description": "A Tetris simulator with a 2-player mode and a powerful board editor.",
+    "icons": [
+        { "src": "https://raw.githubusercontent.com/selmtoe/Tetris_Simulator/main/icons/icon-192x192.png", "type": "image/png", "sizes": "192x192" },
+        { "src": "https://raw.githubusercontent.com/selmtoe/Tetris_Simulator/main/icons/icon-512x512.png", "type": "image/png", "sizes": "512x512" }
+    ]
+    };
+    const manifestURL = 'data:application/json;base64,' + btoa(unescape(encodeURIComponent(JSON.stringify(manifest))));
+    document.getElementById('manifest-link').setAttribute('href', manifestURL);
+    if ('serviceWorker' in navigator) {
+        const swCode = `
+            const CACHE_NAME = 'tetris-sim-cache-v1';
+            self.addEventListener('install', event => {
+                event.waitUntil(
+                    caches.open(CACHE_NAME).then(cache => {
+                        return cache.add(location.pathname);
+                    })
+                );
+            });
+            self.addEventListener('fetch', event => {
+                event.respondWith(
+                    caches.match(event.request).then(response => {
+                        return response || fetch(event.request);
+                    })
+                );
+            });
+        `;
+        const blob = new Blob([swCode], { type: 'application/javascript' });
+        navigator.serviceWorker.register(URL.createObjectURL(blob))
+            .then(reg => console.log('Service Worker registered successfully.'))
+            .catch(err => console.error('Service Worker registration failed:', err));
+    }
+    
+
+   document.getElementById('retryBtn').addEventListener('click', () => {
+        if (gameState !== 'PLAYING') return;
+
+        players = [];
+        if (gameMode === '1P') {
+            players.push(new Player('1', 0, keyBindings.p1, 0));
+        } else {
+            const p1 = new Player('1', 0, keyBindings.p1, 0);
+            const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1);
+            p1.opponent = p2; 
+            p2.opponent = p1;
+            players.push(p1, p2);
+        }
+    });
+
+    setupEditors(); 
+
+    loadStateFromURL();
+
+    lastTime = performance.now(); 
+    requestAnimationFrame(gameLoop);
+    
+    window.addEventListener('resize', updateScale);
+    setTimeout(updateScale, 100);
+});
+</script>
+</body>
+</html>
