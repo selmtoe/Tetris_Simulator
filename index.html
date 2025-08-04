@@ -94,7 +94,7 @@
         border-radius: 10px; font-size: 18px; z-index: 100;
     }
     
-    #key-config-modal, #settings-modal {
+#settings-modal {
         position: fixed; top: 0; left: 0; width: 100%; height: 100%;
         background-color: rgba(0, 0, 0, 0.75);
         display: none; justify-content: center; align-items: center; z-index: 200;
@@ -106,7 +106,7 @@
     }
     .modal-content h2, .modal-content h3 { font-size: 24px; }
     .modal-content h3 { font-size: 20px; margin-top: 25px; border-top: 1px solid var(--primary-color); padding-top: 15px; }
-    #key-config-list, #settings-list { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
+#settings-list, .key-config-list-container { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
     .key-config-item, .setting-item { display: flex; justify-content: space-between; align-items: center; padding: 5px; border-radius: 4px; }
     .key-config-item:nth-child(odd), .setting-item:nth-child(odd) { background-color: rgba(255,255,255,0.05); }
     .key-config-item span, .setting-item span, .setting-item label { font-size: 16px; color: var(--font-color); }
@@ -173,6 +173,42 @@
         gap: 15px;
         align-items: center;
     }
+
+.modal-tabs {
+    display: flex;
+    border-bottom: 2px solid var(--primary-color);
+    margin-bottom: 10px;
+}
+.tab-button {
+    flex: 1;
+    padding: 10px 15px;
+    cursor: pointer;
+    background-color: transparent;
+    border: none;
+    color: var(--font-color);
+    font-family: var(--font-display);
+    font-size: 16px;
+    border-bottom: 3px solid transparent;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+.tab-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+.tab-button.active {
+    color: var(--primary-hover-color);
+    border-bottom: 3px solid var(--primary-hover-color);
+}
+.tab-content {
+    display: none;
+}
+.tab-content.active {
+    display: block;
+    animation: fadeIn 0.3s ease-in-out;
+}
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
 
 </style>
 </head>
@@ -264,37 +300,42 @@
     <canvas id="virtualControllerCanvas"></canvas>
 </div>
 
-
-<div id="key-config-modal">
-    <div class="modal-content">
-        <h2 id="key-config-title">操作設定</h2>
-        <p></p>
-        <div id="key-config-list"></div>
-        
-        <h3><br>タッチ操作設定 (P1)</h3>
-        <p></p>
-        <div class="modal-controls" style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
-            <button id="vc-edit-layout-btn" class="button">ボタン配置モードへ</button>
-            <button id="vc-copy-layout-btn" class="button">配置をコピー</button>
-            <button id="vc-paste-layout-btn" class="button">配置をインポート</button>
-        </div>
-        
-        <div class="modal-controls">
-            <button id="key-config-close" class="button">保存して閉じる</button>
-        </div>
-    </div>
-</div>
-
 <div id="settings-modal">
     <div class="modal-content">
-        <h2>ゲーム設定</h2>
-        <p></p>
-        <div id="settings-list">
-       
+        <div class="modal-tabs">
+            <button class="tab-button active" data-tab="general">諸設定</button>
+            <button class="tab-button" data-tab="p1-keys">1P操作設定</button>
+            <button class="tab-button" data-tab="p2-keys" id="p2-keys-tab-btn" style="display: none;">2P操作設定</button>
+        </div>
+
+        <div class="tab-content active" id="tab-content-general">
+             <h2 style="margin-top: 20px;">ゲーム設定</h2>
+             <p></p>
+             <div id="settings-list"></div>
+        </div>
+
+        <div class="tab-content" id="tab-content-p1-keys">
+            <h2 style="margin-top: 20px;">PLAYER 1 - 操作設定</h2>
+            <p></p>
+            <div id="p1-key-config-list" class="key-config-list-container"></div>
+            
+            <h3><br>タッチ操作設定 (P1)</h3>
+            <p></p>
+            <div class="modal-controls" style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+                <button id="vc-edit-layout-btn" class="button">ボタン配置モードへ</button>
+                <button id="vc-copy-layout-btn" class="button">配置をコピー</button>
+                <button id="vc-paste-layout-btn" class="button">配置をインポート</button>
+            </div>
         </div>
         
-        <div class="modal-controls">
-            <button id="settings-close" class="button">閉じる</button>
+        <div class="tab-content" id="tab-content-p2-keys">
+            <h2 style="margin-top: 20px;">PLAYER 2 - 操作設定</h2>
+            <p></p>
+            <div id="p2-key-config-list" class="key-config-list-container"></div>
+        </div>
+        
+        <div class="modal-controls" style="border-top: 1px solid var(--primary-color); padding-top: 15px; margin-top: 20px;">
+            <button id="settings-close" class="button">保存して閉じる</button>
         </div>
     </div>
 </div>
@@ -1361,45 +1402,14 @@ function drawEditorField(playerId) {
     }
 }
 
-function openKeyConfigModal(playerId) {
-    bindingPlayer = playerId;
-    const modal = document.getElementById('key-config-modal');
-    const title = document.getElementById('key-config-title');
-    const list = document.getElementById('key-config-list');
-
-    title.textContent = `PLAYER ${playerId.slice(-1)} - 操作設定`;
-    list.innerHTML = ''; 
-
-    Object.keys(keyBindings[bindingPlayer]).forEach(action => {
-        const item = document.createElement('div');
-        item.className = 'key-config-item';
-        const label = document.createElement('span');
-        label.textContent = keyActionLabels[action];
-        const btn = document.createElement('button');
-        btn.className = 'button';
-        btn.textContent = keyBindings[bindingPlayer][action].label;
-        
-        btn.onclick = () => {
-            isBindingKey = true;
-            bindingAction = action;
-            btn.textContent = '入力待機中...';
-            list.querySelectorAll('button').forEach(b => { if (b !== btn) b.disabled = true; });
-        };
-        
-        item.appendChild(label);
-        item.appendChild(btn);
-        list.appendChild(item);
-    });
-    modal.style.display = 'flex';
-}
-
 function bindKey(binding) {
     if (!isBindingKey || !bindingPlayer || !bindingAction) return;
     
     keyBindings[bindingPlayer][bindingAction] = binding;
     isBindingKey = false;
     bindingAction = null;
-    openKeyConfigModal(bindingPlayer);
+    const tabToReopen = bindingPlayer === 'p1' ? 'p1-keys' : 'p2-keys';
+    openUnifiedSettingsModal(tabToReopen);
 }
 
 function loadKeyBindings() {
@@ -1428,7 +1438,7 @@ function loadGameSettings() {
     } catch(e) { console.error('Failed to load settings from localStorage:', e); }
 }
 
-function openSettingsModal() {
+function populateGeneralSettingsTab() {
     const list = document.getElementById('settings-list');
     list.innerHTML = '';
     const settingDetails = {
@@ -1443,69 +1453,84 @@ function openSettingsModal() {
         garbageRandomness: { label: 'Garbage Hole Randomness (%)', min: 0, max: 100, step: 1 }
     };
     Object.keys(settingDetails).forEach(key => {
-        const item = document.createElement('div');
-        item.className = 'setting-item';
-        const label = document.createElement('span');
-        label.textContent = settingDetails[key].label;
-        const input = document.createElement('input');
-        input.type = 'number';
+        const item = document.createElement('div'); item.className = 'setting-item';
+        const label = document.createElement('span'); label.textContent = settingDetails[key].label;
+        const input = document.createElement('input'); input.type = 'number';
         Object.assign(input, settingDetails[key]);
         let currentValue = gameSettings[key];
-        if (key === 'garbageRandomness') {
-            currentValue *= 100;
-        }
+        if (key === 'garbageRandomness') currentValue *= 100;
         input.value = currentValue;
-
         input.onchange = e => {
             let val = parseFloat(e.target.value);
-            if (key === 'garbageRandomness') {
-                gameSettings[key] = Math.max(0, Math.min(100, val)) / 100;
-            } else {
-                gameSettings[key] = Math.max(settingDetails[key].min, Math.min(settingDetails[key].max, val));
-            }
-            saveGameSettings();
+            if (key === 'garbageRandomness') gameSettings[key] = Math.max(0, Math.min(100, val)) / 100;
+            else gameSettings[key] = Math.max(settingDetails[key].min, Math.min(settingDetails[key].max, val));
         };
-        item.append(label, input);
-        list.appendChild(item);
+        item.append(label, input); list.appendChild(item);
     });
     
-    const checkboxSettings = {
-        showEffects: 'エフェクトを表示する',
-        touchControlsEnabled: 'タッチ操作を有効にする (P1)'
-    };
-
+    const checkboxSettings = { showEffects: 'エフェクトを表示する', touchControlsEnabled: 'タッチ操作を有効にする (P1)' };
     Object.entries(checkboxSettings).forEach(([key, text], index) => {
-        const item = document.createElement('div');
-        item.className = 'setting-item';
-        if (index === 0) { 
-            item.style.marginTop = '20px';
-            item.style.borderTop = '1px solid var(--primary-color)';
-            item.style.paddingTop = '15px';
-        }
-
-        const label = document.createElement('label');
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.id = `setting-${key}`;
-        checkbox.checked = !!gameSettings[key];
-
-        checkbox.onchange = e => {
-            gameSettings[key] = e.target.checked;
-            saveGameSettings();
-        };
-        
-        const span = document.createElement('span');
-        span.textContent = text;
-        
-        label.append(checkbox, span);
-        item.appendChild(label);
-        list.appendChild(item);
+        const item = document.createElement('div'); item.className = 'setting-item';
+        if (index === 0) { item.style.cssText = 'margin-top:20px; border-top:1px solid var(--primary-color); padding-top:15px;'; }
+        const label = document.createElement('label'); const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox'; checkbox.id = `setting-${key}`; checkbox.checked = !!gameSettings[key];
+        checkbox.onchange = e => { gameSettings[key] = e.target.checked; };
+        const span = document.createElement('span'); span.textContent = text;
+        label.append(checkbox, span); item.appendChild(label); list.appendChild(item);
     });
+}
 
-    document.getElementById('settings-modal').style.display = 'flex';
+function populateKeyConfigTab(playerId) {
+    const list = document.getElementById(`${playerId}-key-config-list`);
+    list.innerHTML = ''; 
+    Object.keys(keyBindings[playerId]).forEach(action => {
+        const item = document.createElement('div'); item.className = 'key-config-item';
+        const label = document.createElement('span'); label.textContent = keyActionLabels[action];
+        const btn = document.createElement('button'); btn.className = 'button';
+        btn.textContent = keyBindings[playerId][action].label;
+        btn.onclick = () => {
+            isBindingKey = true; bindingPlayer = playerId; bindingAction = action;
+            btn.textContent = '入力待機中...';
+            list.querySelectorAll('button').forEach(b => { if (b !== btn) b.disabled = true; });
+        };
+        item.appendChild(label); item.appendChild(btn); list.appendChild(item);
+    });
 }
 
 
+
+function openUnifiedSettingsModal(initialTab = 'general') {
+    const modal = document.getElementById('settings-modal');
+    
+    const p2TabBtn = document.getElementById('p2-keys-tab-btn');
+    if (gameMode === '2P') {
+        p2TabBtn.style.display = 'block';
+    } else {
+        p2TabBtn.style.display = 'none';
+        if (initialTab === 'p2-keys') initialTab = 'general';
+    }
+
+    populateGeneralSettingsTab();
+    populateKeyConfigTab('p1');
+    if (gameMode === '2P') {
+        populateKeyConfigTab('p2');
+    }
+
+    const tabs = modal.querySelectorAll('.tab-button');
+    const contents = modal.querySelectorAll('.tab-content');
+    
+    function switchTab(tabName) {
+        tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.tab === tabName));
+        contents.forEach(content => content.classList.toggle('active', content.id === `tab-content-${tabName}`));
+    }
+    
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+    });
+
+    switchTab(initialTab);
+    modal.style.display = 'flex';
+}
 
 function startScanProcess(file, playerId) { const reader = new FileReader(); reader.onload = e => { scanState.image = new Image(); scanState.image.onload = () => { scanState.targetPlayerId = playerId; scanState.bottomLeft = null; scanState.topRight = null; gameState = 'SCAN_BL'; document.getElementById('editor-container').style.display = 'none'; document.getElementById('game-container').style.display = 'block'; document.getElementById('scan-controls').style.display = 'flex'; 
 const ar = scanState.image.naturalWidth / scanState.image.naturalHeight; const displayMaxWidth = window.innerWidth * 0.9; const displayMaxHeight = window.innerHeight * 0.8; let displayWidth = displayMaxWidth; let displayHeight = displayWidth / ar; if (displayHeight > displayMaxHeight) { displayHeight = displayMaxHeight; displayWidth = displayHeight * ar; } const canvasWidth = Math.min(2048, scanState.image.naturalWidth); mainCanvas.width = canvasWidth; mainCanvas.height = canvasWidth / ar; mainCanvas.style.width = `${displayWidth}px`; mainCanvas.style.height = `${displayHeight}px`; updateScanUI(); }; scanState.image.src = e.target.result; }; reader.readAsDataURL(file); }
@@ -1884,24 +1909,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const pos = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
     if (gameState==='SCAN_BL') scanState.bottomLeft=pos; else if (gameState==='SCAN_TR') scanState.topRight=pos; updateScanUI(); });
     
-    document.getElementById('p1-key-config-btn').addEventListener('click', () => openKeyConfigModal('p1'));
-    document.getElementById('p2-key-config-btn').addEventListener('click', () => openKeyConfigModal('p2'));
-    
-    document.getElementById('key-config-close').addEventListener('click', () => {
-        try { localStorage.setItem('tetrisKeyBindings', JSON.stringify(keyBindings)); } catch (e) { console.error("Failed to save key bindings to localStorage:", e); }
-        document.getElementById('key-config-modal').style.display = 'none';
+
+document.getElementById('settingsBtn').addEventListener('click', () => openUnifiedSettingsModal('general'));
+    document.getElementById('p1-key-config-btn').addEventListener('click', () => openUnifiedSettingsModal('p1-keys'));
+    document.getElementById('p2-key-config-btn').addEventListener('click', () => openUnifiedSettingsModal('p2-keys'));
+
+    document.getElementById('settings-close').addEventListener('click', () => {
+        saveGameSettings();
+        try { localStorage.setItem('tetrisKeyBindings', JSON.stringify(keyBindings)); } 
+        catch (e) { console.error("Failed to save key bindings to localStorage:", e); }
+
+        document.getElementById('settings-modal').style.display = 'none';
         isBindingKey = false; bindingPlayer = null; bindingAction = null;
     });
 
-    document.getElementById('settingsBtn').addEventListener('click', openSettingsModal);
-    document.getElementById('settings-close').addEventListener('click', () => {
-        document.getElementById('settings-modal').style.display = 'none';
-    });
-
     document.getElementById('vc-edit-layout-btn').addEventListener('click', () => {
-        document.getElementById('key-config-modal').style.display = 'none';
+        document.getElementById('settings-modal').style.display = 'none';
         virtualController.startEditMode();
     });
+
     document.getElementById('vc-save-and-close-btn').addEventListener('click', () => {
         virtualController.endEditMode();
     });
