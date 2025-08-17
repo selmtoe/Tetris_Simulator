@@ -239,15 +239,19 @@
                 <div class="edit-section field-editor">
                     <h2>PLAYER 1 - FIELD</h2>
                     <div class="color-palette" id="p1-palette"></div>
-                    <canvas id="field-editor-canvas-p1"></canvas>
+
+<canvas id="field-editor-canvas-p1"></canvas>
                     <div class="field-controls">
                         <button class="button" id="p1-field-shift-up">↑ Up</button>
                         <button class="button" id="p1-field-shift-down">↓ Down</button>
                         <button class="button" id="p1-field-clear">Clear</button>
                         <label for="imageLoader-p1" class="button">Load Img</label>
                         <input type="file" id="imageLoader-p1" data-player="p1" accept="image/*">
+                        <label for="pptLoader-p1" class="button">Load PPT</label>
+                        <input type="file" id="pptLoader-p1" data-player="p1" accept="image/*">
                     </div>
                     <div class="key-config-controls" style="margin-top: 15px; text-align: center;">
+
                         <button class="button" id="p1-key-config-btn">操作設定</button>
                     </div>
                 </div>
@@ -262,15 +266,19 @@
                 <div class="edit-section field-editor">
                     <h2>PLAYER 2 - FIELD</h2>
                     <div class="color-palette" id="p2-palette"></div>
-                    <canvas id="field-editor-canvas-p2"></canvas>
+
+<canvas id="field-editor-canvas-p2"></canvas>
                     <div class="field-controls">
                         <button class="button" id="p2-field-shift-up">↑ Up</button>
                         <button class="button" id="p2-field-shift-down">↓ Down</button>
                         <button class="button" id="p2-field-clear">Clear</button>
                         <label for="imageLoader-p2" class="button">Load Img</label>
                         <input type="file" id="imageLoader-p2" data-player="p2" accept="image/*">
+                        <label for="pptLoader-p2" class="button">Load PPT</label>
+                        <input type="file" id="pptLoader-p2" data-player="p2" accept="image/*">
                     </div>
                     <div class="key-config-controls" style="margin-top: 15px; text-align: center;">
+
                         <button class="button" id="p2-key-config-btn">操作設定</button>
                     </div>
                 </div>
@@ -1569,6 +1577,92 @@ function findClosestColor(r, g, b) {
     return (minDistance > 25000) ? null : closestKey;
 }
 
+function processPptImage(file) {
+    const reader = new FileReader();
+    reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+            let sx = 0, sy = 0, sWidth = img.naturalWidth, sHeight = img.naturalHeight;
+            const originalAspectRatio = sWidth / sHeight;
+            const targetAspectRatio = 16 / 9;
+
+            if (originalAspectRatio > targetAspectRatio) {
+                const newWidth = sHeight * targetAspectRatio;
+                sx = (sWidth - newWidth) / 2;
+                sWidth = newWidth;
+            } else if (originalAspectRatio < targetAspectRatio) {
+                const newHeight = sWidth / targetAspectRatio;
+                sy = (sHeight - newHeight) / 2;
+                sHeight = newHeight;
+            }
+            
+            canvas.width = sWidth;
+            canvas.height = sHeight;
+            ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, sWidth, sHeight);
+
+            loadBoardFromPptCanvas(canvas, 'p1');
+            if (gameMode === '2P') {
+                loadBoardFromPptCanvas(canvas, 'p2');
+            }
+            
+            drawEditorField('p1');
+            if (gameMode === '2P') {
+                drawEditorField('p2');
+            }
+            alert('ぷよテト画像から盤面を読み込みました。');
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function loadBoardFromPptCanvas(sourceCanvas, playerId) {
+    const ctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+    const width = sourceCanvas.width;
+
+    const baseCoords = {
+        p1: { x1: 205, y1: 135, x2: 445, y2: 615 },
+        p2: { x1: 835, y1: 135, x2: 1075, y2: 615 }
+    };
+
+    const coords = baseCoords[playerId];
+    const scale = width / 1280;
+
+    const boardTopLeft = { x: coords.x1 * scale, y: coords.y1 * scale };
+    const boardWidthPx = (coords.x2 - coords.x1) * scale;
+    const boardHeightPx = (coords.y2 - coords.y1) * scale;
+    const blockWidthPx = boardWidthPx / BOARD_WIDTH;
+    const blockHeightPx = boardHeightPx / BOARD_VISIBLE_HEIGHT;
+    
+    const targetBoard = editorData[playerId].board;
+    targetBoard.forEach(row => row.fill(null));
+
+    for (let r = 0; r < BOARD_VISIBLE_HEIGHT; r++) {
+        for (let c = 0; c < BOARD_WIDTH; c++) {
+            const sampleX = boardTopLeft.x + (c + 0.5) * blockWidthPx;
+            const sampleY = boardTopLeft.y + (r + 0.5) * blockHeightPx;
+            const sampleSize = Math.max(1, Math.floor(blockWidthPx * 0.25));
+            const imageData = ctx.getImageData(sampleX - sampleSize / 2, sampleY - sampleSize / 2, sampleSize, sampleSize).data;
+            
+            let avgR = 0, avgG = 0, avgB = 0;
+            for (let i = 0; i < imageData.length; i += 4) {
+                avgR += imageData[i];
+                avgG += imageData[i+1];
+                avgB += imageData[i+2];
+            }
+            const pixelCount = imageData.length / 4;
+            avgR /= pixelCount;
+            avgG /= pixelCount;
+            avgB /= pixelCount;
+            
+            targetBoard[BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT + r][c] = findClosestColor(avgR, avgG, avgB);
+        }
+    }
+}
+
 function boardToString(board) {
     return board.map(row => 
         row.map(cell => cell === null ? '_' : cell).join('')
@@ -1897,9 +1991,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById(`imageLoader-${pId}`).addEventListener('change', e => { 
             if (e.target.files && e.target.files[0]) {
                 startScanProcess(e.target.files[0], e.target.dataset.player);
-       
             }
         }); 
+        document.getElementById(`pptLoader-${pId}`).addEventListener('change', e => { 
+            if (e.target.files && e.target.files[0]) {
+                processPptImage(e.target.files[0]);
+            }
+        });
     });
     document.getElementById('scanCancelBtn').addEventListener('click', endScanProcess);
     document.getElementById('scanConfirmBtn').addEventListener('click', () => { if (gameState === 'SCAN_BL' && scanState.bottomLeft) gameState = 'SCAN_TR'; else if (gameState === 'SCAN_TR' && scanState.topRight) processAndLoadBoard(); updateScanUI(); });
