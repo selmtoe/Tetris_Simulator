@@ -1577,6 +1577,74 @@ function findClosestColor(r, g, b) {
     return (minDistance > 25000) ? null : closestKey;
 }
 
+function getAverageColorNonBlack(ctx, cx, cy, radius) {
+    const startX = Math.floor(cx - radius);
+    const startY = Math.floor(cy - radius);
+    const diameter = Math.ceil(radius * 2);
+    if (startX < 0 || startY < 0 || startX + diameter > ctx.canvas.width || startY + diameter > ctx.canvas.height) {
+        return { r: 0, g: 0, b: 0 };
+    }
+    const imageData = ctx.getImageData(startX, startY, diameter, diameter).data;
+    
+    let totalR = 0, totalG = 0, totalB = 0, count = 0;
+    const radiusSq = radius * radius;
+    const blackThreshold = 50; 
+
+    for (let y = 0; y < diameter; y++) {
+        for (let x = 0; x < diameter; x++) {
+            const dx = x - radius;
+            const dy = y - radius;
+            
+            if (dx * dx + dy * dy <= radiusSq) {
+                const i = (y * diameter + x) * 4;
+                const r = imageData[i];
+                const g = imageData[i + 1];
+                const b = imageData[i + 2];
+                
+                if (r > blackThreshold || g > blackThreshold || b > blackThreshold) {
+                    totalR += r;
+                    totalG += g;
+                    totalB += b;
+                    count++;
+                }
+            }
+        }
+    }
+    
+    if (count === 0) {
+        return { r: 0, g: 0, b: 0 };
+    }
+    
+    return {
+        r: totalR / count,
+        g: totalG / count,
+        b: totalB / count
+    };
+}
+
+function findClosestMinoOnly(r, g, b) {
+    const inputColor = { r, g, b };
+    const colorDistanceSq = (c1, c2) => {
+        return Math.pow(c1.r - c2.r, 2) + Math.pow(c1.g - c2.g, 2) + Math.pow(c1.b - c2.b, 2);
+    };
+
+    let minDistance = Infinity;
+    let closestKey = 'I'; 
+    
+    const minoKeys = Object.keys(PARSED_SCAN_COLORS).filter(k => k !== 'NULL' && k !== 'G');
+    
+    for (const key of minoKeys) {
+        for (const targetColor of PARSED_SCAN_COLORS[key]) {
+            const distance = colorDistanceSq(inputColor, targetColor);
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestKey = key;
+            }
+        }
+    }
+    return closestKey;
+}
+
 function processPptImage(file) {
     const reader = new FileReader();
     reader.onload = e => {
@@ -1612,7 +1680,11 @@ function processPptImage(file) {
             if (gameMode === '2P') {
                 drawEditorField('p2');
             }
-            alert('ぷよテト画像から盤面を読み込みました。');
+            updateNextQueueDisplay('p1');
+            if (gameMode === '2P') {
+                updateNextQueueDisplay('p2');
+            }
+            alert('ぷよテト画像から盤面とネクストを読み込みました。');
         };
         img.src = e.target.result;
     };
@@ -1622,18 +1694,17 @@ function processPptImage(file) {
 function loadBoardFromPptCanvas(sourceCanvas, playerId) {
     const ctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
     const width = sourceCanvas.width;
+    const scale = width / 1280;
 
-    const baseCoords = {
+    // --- Board Recognition ---
+    const baseBoardCoords = {
         p1: { x1: 205, y1: 106, x2: 445, y2: 596 },
         p2: { x1: 835, y1: 106, x2: 1075, y2: 596 }
     };
-
-    const coords = baseCoords[playerId];
-    const scale = width / 1280;
-
-    const boardTopLeft = { x: coords.x1 * scale, y: coords.y1 * scale };
-    const boardWidthPx = (coords.x2 - coords.x1) * scale;
-    const boardHeightPx = (coords.y2 - coords.y1) * scale;
+    const boardCoords = baseBoardCoords[playerId];
+    const boardTopLeft = { x: boardCoords.x1 * scale, y: boardCoords.y1 * scale };
+    const boardWidthPx = (boardCoords.x2 - boardCoords.x1) * scale;
+    const boardHeightPx = (boardCoords.y2 - boardCoords.y1) * scale;
     const blockWidthPx = boardWidthPx / BOARD_WIDTH;
     const blockHeightPx = boardHeightPx / BOARD_VISIBLE_HEIGHT;
     
@@ -1661,6 +1732,37 @@ function loadBoardFromPptCanvas(sourceCanvas, playerId) {
             targetBoard[BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT + r][c] = findClosestColor(avgR, avgG, avgB);
         }
     }
+
+    // --- Next Queue Recognition ---
+    const nextCoordsP1 = [ { x: 160, y: 155 }, { x: 500, y: 122 }, { x: 500, y: 175 }, { x: 500, y: 225 }, { x: 500, y: 275 }, { x: 500, y: 325 } ];
+    const nextCoordsP2 = [ { x: 790, y: 155 }, { x: 1130, y: 122 }, { x: 1130, y: 175 }, { x: 1130, y: 225 }, { x: 1130, y: 275 }, { x: 1130, y: 325 } ];
+    const nextCoords = (playerId === 'p1') ? nextCoordsP1 : nextCoordsP2;
+    const radius = 5 * scale;
+    const newNextQueue = [];
+
+    for (let i = 0; i < nextCoords.length; i++) {
+        const coord = nextCoords[i];
+        const sampleX = coord.x * scale;
+        const sampleY = coord.y * scale;
+        
+        const avgColor = getAverageColorNonBlack(ctx, sampleX, sampleY, radius);
+
+        let foundMino = null;
+        if (i === 0) {
+            foundMino = findClosestColor(avgColor.r, avgColor.g, avgColor.b);
+            if (foundMino === null) {
+                break; 
+            }
+        } else {
+            foundMino = findClosestMinoOnly(avgColor.r, avgColor.g, avgColor.b);
+        }
+        
+        if (foundMino) {
+            newNextQueue.push(foundMino);
+        }
+    }
+    
+    editorData[playerId].nextQueue = newNextQueue;
 }
 
 function boardToString(board) {
