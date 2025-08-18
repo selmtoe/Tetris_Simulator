@@ -841,9 +841,10 @@ let isBindingKey = false, bindingPlayer = null, bindingAction = null;
 let gamepads = {}, prevGamepads = {};
 
 const editorData = {
-    p1: { board: null, nextQueue: [], viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I' },
-    p2: { board: null, nextQueue: [], viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I' }
+    p1: { board: null, nextQueue: [], viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', nextInsertionIndex: -1 },
+    p2: { board: null, nextQueue: [], viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', nextInsertionIndex: -1 }
 };
+
 let scanState = { image: null, bottomLeft: null, topRight: null, currentMousePos: {x: 0, y: 0}, targetPlayerId: null, parsedColors: null };
 
 function* createMinoGenerator(customQueue) {
@@ -1299,12 +1300,34 @@ class Player {
 }
 
 function setupEditors() { ['p1', 'p2'].forEach(setupPlayerEditor); }
+
 function setupPlayerEditor(playerId) {
     editorData[playerId].board = Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
     const nextIcons = document.getElementById(`${playerId}-next-icons`);
-    Object.keys(TETROMINOS).forEach(key => { const icon = document.createElement('div'); icon.className = 'mino-icon'; icon.style.backgroundColor = activeSkin[key]; icon.addEventListener('click', () => { editorData[playerId].nextQueue.push(key); updateNextQueueDisplay(playerId); }); nextIcons.appendChild(icon); });
-    document.getElementById(`${playerId}-next-clear`).addEventListener('click', () => { editorData[playerId].nextQueue = []; updateNextQueueDisplay(playerId); });
+    Object.keys(TETROMINOS).forEach(key => {
+        const icon = document.createElement('div');
+        icon.className = 'mino-icon';
+        icon.style.backgroundColor = activeSkin[key];
+        icon.addEventListener('click', () => {
+            const data = editorData[playerId];
+            if (data.nextInsertionIndex === -1) { // 挿入位置が未選択なら末尾に追加
+                data.nextQueue.push(key);
+                data.nextInsertionIndex = data.nextQueue.length; // カーソルを新しいミノの後ろに設定
+            } else {
+                data.nextQueue.splice(data.nextInsertionIndex, 0, key); // 指定位置に挿入
+                data.nextInsertionIndex++; // カーソルを挿入したミノの後ろに移動
+            }
+            updateNextQueueDisplay(playerId);
+        });
+        nextIcons.appendChild(icon);
+    });
+    document.getElementById(`${playerId}-next-clear`).addEventListener('click', () => {
+        editorData[playerId].nextQueue = [];
+        editorData[playerId].nextInsertionIndex = 0; // 挿入位置を先頭にリセット
+        updateNextQueueDisplay(playerId);
+    });
     const palette = document.getElementById(`${playerId}-palette`);
+
     Object.keys(EDITOR_COLORS).forEach(key => { const swatch = document.createElement('div'); swatch.className = 'color-swatch'; swatch.style.backgroundColor = key === 'EMPTY' ? '#333' : EDITOR_COLORS[key]; if (key === 'EMPTY') { swatch.style.border = '1px dashed #fff'; swatch.title = 'Eraser'; } if (key === editorData[playerId].activeColor) swatch.classList.add('active'); swatch.addEventListener('click', () => { editorData[playerId].activeColor = key; palette.querySelector('.active')?.classList.remove('active'); swatch.classList.add('active'); }); palette.appendChild(swatch); });
 
    const canvas = document.getElementById(`field-editor-canvas-${playerId}`);
@@ -1389,7 +1412,54 @@ function shiftField(playerId, direction) {
     drawEditorField(playerId);
 }
 
-function updateNextQueueDisplay(playerId) { const qd = document.getElementById(`${playerId}-next-queue`); qd.innerHTML = ''; editorData[playerId].nextQueue.forEach(key => { const icon = document.createElement('div'); icon.className = 'mino-icon'; icon.style.backgroundColor = activeSkin[key]; qd.appendChild(icon); }); }
+function updateNextQueueDisplay(playerId) {
+    const qd = document.getElementById(`${playerId}-next-queue`);
+    qd.innerHTML = '';
+    const data = editorData[playerId];
+
+    const createGap = (index) => {
+        const gap = document.createElement('div');
+        gap.style.width = '8px';
+        gap.style.height = '38px';
+        gap.style.cursor = 'pointer';
+        gap.style.display = 'flex';
+        gap.style.alignItems = 'center';
+        gap.style.justifyContent = 'center';
+        gap.style.userSelect = 'none';
+        gap.addEventListener('click', (e) => {
+            e.stopPropagation();
+            data.nextInsertionIndex = index;
+            updateNextQueueDisplay(playerId);
+        });
+        
+        if (data.nextInsertionIndex === index) {
+            gap.style.backgroundColor = 'rgba(255, 255, 255, 0.3)';
+            gap.style.borderRadius = '2px';
+            gap.innerHTML = '<span style="color: white; font-weight: bold; line-height: 1;">|</span>';
+        }
+        return gap;
+    };
+    
+    qd.appendChild(createGap(0));
+
+    data.nextQueue.forEach((key, i) => {
+        const icon = document.createElement('div');
+        icon.className = 'mino-icon';
+        icon.style.backgroundColor = activeSkin[key];
+        icon.style.width = '38px';
+        icon.style.height = '38px';
+        qd.appendChild(icon);
+        qd.appendChild(createGap(i + 1));
+    });
+
+    qd.onclick = (e) => {
+        if (e.target === qd) {
+            data.nextInsertionIndex = -1; // 背景クリックで挿入モードを解除 (末尾追加モードへ)
+            updateNextQueueDisplay(playerId);
+        }
+    };
+}
+
 function drawEditorField(playerId) {
     const canvas = document.getElementById(`field-editor-canvas-${playerId}`),
         ctx = canvas.getContext('2d'),
@@ -1751,7 +1821,7 @@ function loadBoardFromPptCanvas(sourceCanvas, playerId) {
         }
     }
 
-    // --- Post-processing: Clean up floating blocks ---
+// --- Post-processing: Clean up floating blocks ---
     let firstEmptyRowFromBottom = -1;
     for (let y = BOARD_HEIGHT - 1; y >= 0; y--) {
         if (targetBoard[y].every(cell => cell === null)) {
@@ -1759,11 +1829,21 @@ function loadBoardFromPptCanvas(sourceCanvas, playerId) {
             break;
         }
     }
+    
+    const deletedMinoColors = []; // 削除されたミノの色を記録する配列を追加
+
     if (firstEmptyRowFromBottom !== -1) {
         const seventeenthRowFromBottomIndex = BOARD_HEIGHT - 18;
         for (let y = firstEmptyRowFromBottom - 1; y >= 0; y--) {
             if (y <= seventeenthRowFromBottomIndex) {
-                 targetBoard[y].fill(null);
+                 // 行を単にnullで埋めるのではなく、各セルをチェックする
+                 for (let x = 0; x < BOARD_WIDTH; x++) {
+                    const piece = targetBoard[y][x];
+                    if (piece && piece !== 'G') {
+                        deletedMinoColors.push(piece); // おじゃま以外なら色を記録
+                    }
+                    targetBoard[y][x] = null; // セルを空にする
+                 }
             }
         }
     }
@@ -1797,6 +1877,12 @@ function loadBoardFromPptCanvas(sourceCanvas, playerId) {
         }
     }
     
+    // 削除されたミノの色をチェックし、条件を満たせばNEXTキューに追加
+    if (deletedMinoColors.length > 0 && deletedMinoColors.every(color => color === deletedMinoColors[0])) {
+        const singleMinoType = deletedMinoColors[0];
+        newNextQueue.splice(1, 0, singleMinoType); // 2番目 (index 1) に挿入
+    }
+
     editorData[playerId].nextQueue = newNextQueue;
 }
 
