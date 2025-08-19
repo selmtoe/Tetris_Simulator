@@ -1946,6 +1946,7 @@ function loadBoardFromPptCanvas(sourceCanvas, playerId) {
     const nextCoords = (playerId === 'p1') ? nextCoordsP1 : nextCoordsP2;
     const radius = 5 * scale;
     const newNextQueue = [];
+    editorData[playerId].hold = null; // 最初にホールドをリセット
 
     for (let i = 0; i < nextCoords.length; i++) {
         const coord = nextCoords[i];
@@ -1954,25 +1955,30 @@ function loadBoardFromPptCanvas(sourceCanvas, playerId) {
         
         const avgColor = getAverageColorNonBlack(ctx, sampleX, sampleY, radius);
 
-        let foundMino = null;
+        // 0番目の座標はホールド
         if (i === 0) {
-            foundMino = findClosestColor(avgColor.r, avgColor.g, avgColor.b);
-            if (foundMino === null) {
-                break; 
-            }
+            const foundHoldMino = findClosestColor(avgColor.r, avgColor.g, avgColor.b);
+            editorData[playerId].hold = foundHoldMino;
+        // 1番目以降の座標はネクスト
         } else {
-            foundMino = findClosestMinoOnly(avgColor.r, avgColor.g, avgColor.b);
-        }
-        
-        if (foundMino) {
-            newNextQueue.push(foundMino);
+            // 最初のネクストミノの場所が黒ければ、キューは空と判断して中断
+            const isBlack = avgColor.r < 50 && avgColor.g < 50 && avgColor.b < 50;
+            if (i === 1 && isBlack) {
+                break;
+            }
+            
+            const foundMino = findClosestMinoOnly(avgColor.r, avgColor.g, avgColor.b);
+            if (foundMino) {
+                newNextQueue.push(foundMino);
+            }
         }
     }
     
     // 削除されたミノの色をチェックし、条件を満たせばNEXTキューに追加
     if (deletedMinoColors.length > 0 && deletedMinoColors.every(color => color === deletedMinoColors[0])) {
         const singleMinoType = deletedMinoColors[0];
-        newNextQueue.splice(1, 0, singleMinoType); // 2番目 (index 1) に挿入
+        // ホールドは分離されたので、このミノはネクストキューの先頭に追加する
+        newNextQueue.unshift(singleMinoType);
     }
 
     editorData[playerId].nextQueue = newNextQueue;
