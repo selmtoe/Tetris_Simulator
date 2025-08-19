@@ -228,13 +228,16 @@
             <button id="startGameBtn" class="button">START GAME</button>
         </div>
 
-        <div class="player-editors">
+<div class="player-editors">
             <div class="editor-column" id="p1-editor-col">
                 <div class="edit-section next-editor">
                     <h2>PLAYER 1 - NEXT</h2>
                     <div class="mino-icons" id="p1-next-icons"></div>
                     <div class="next-queue-display" id="p1-next-queue"></div>
-                    <div class="button-group"> <button class="button" id="p1-next-clear">Clear</button> </div>
+                    <div class="button-group">
+                        <button class="button" id="p1-next-delete-left">⇦ Del</button>
+                        <button class="button" id="p1-next-clear">Clear</button>
+                    </div>
                 </div>
                 <div class="edit-section field-editor">
                     <h2>PLAYER 1 - FIELD</h2>
@@ -256,12 +259,15 @@
                     </div>
                 </div>
             </div>
-            <div class="editor-column" id="p2-editor-col" style="display: none;">
+<div class="editor-column" id="p2-editor-col" style="display: none;">
                 <div class="edit-section next-editor">
                     <h2>PLAYER 2 - NEXT</h2>
                     <div class="mino-icons" id="p2-next-icons"></div>
                     <div class="next-queue-display" id="p2-next-queue"></div>
-                    <div class="button-group"> <button class="button" id="p2-next-clear">Clear</button> </div>
+                    <div class="button-group">
+                        <button class="button" id="p2-next-delete-left">⇦ Del</button>
+                        <button class="button" id="p2-next-clear">Clear</button>
+                    </div>
                 </div>
                 <div class="edit-section field-editor">
                     <h2>PLAYER 2 - FIELD</h2>
@@ -348,7 +354,7 @@
     </div>
 </div>
 
-<div id="share-modal">
+<<div id="share-modal">
     <div class="modal-content">
         <h2>共有</h2>
         
@@ -358,7 +364,25 @@
             <div class="share-item">
                 <span>共有リンク</span>
                 <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box;">
-                <button id="copy-link-btn" class="button">リンクをコピー</button>
+                <div style="display: flex; gap: 10px; margin-top: 5px;">
+                    <button id="copy-link-btn" class="button">リンクをコピー</button>
+                    <button id="advanced-link-btn" class="button">詳細なリンク生成</button>
+                </div>
+            </div>
+            <div id="advanced-link-options" style="display: none; margin-top: 15px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px;">
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="start-sim-checkbox" checked>
+                        <span>シミュレーションを即スタート</span>
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="no-hold-checkbox">
+                        <span>ホールドを禁止</span>
+                    </label>
+                </div>
+                 <button id="generate-advanced-link-btn" class="button" style="margin-top: 10px;">リンクを再生成</button>
             </div>
              <div class="share-item" style="margin-top: 15px;">
                 <span>生データ (JSON)</span>
@@ -841,8 +865,8 @@ let isBindingKey = false, bindingPlayer = null, bindingAction = null;
 let gamepads = {}, prevGamepads = {};
 
 const editorData = {
-    p1: { board: null, nextQueue: [], viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', nextInsertionIndex: -1 },
-    p2: { board: null, nextQueue: [], viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', nextInsertionIndex: -1 }
+    p1: { board: null, nextQueue: [], hold: null, viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', nextInsertionIndex: -1 },
+    p2: { board: null, nextQueue: [], hold: null, viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', nextInsertionIndex: -1 }
 };
 
 let scanState = { image: null, bottomLeft: null, topRight: null, currentMousePos: {x: 0, y: 0}, targetPlayerId: null, parsedColors: null };
@@ -870,9 +894,12 @@ class Player {
     constructor(id, offsetX, keyBindings, padIndex) {
         this.id = id; this.offsetX = offsetX; this.keyBindings = keyBindings; this.padIndex = padIndex;
         this.keys = {};
-        this.board = editorData[`p${id}`].board.map(row => [...row]);
-        this.minoGenerator = createMinoGenerator(editorData[`p${id}`].nextQueue);
+        const pData = editorData[`p${id}`];
+        this.initialHold = pData.hold;
+        this.board = pData.board.map(row => [...row]);
+        this.minoGenerator = createMinoGenerator(pData.nextQueue);
         this.opponent = null;
+        this.holdDisabled = false;
         this.reset();
     }
 
@@ -1074,8 +1101,8 @@ class Player {
         this.lockPiece();
     }
     
-    hold() {
-        if (this.gameOver || !this.canHold) return;
+hold() {
+        if (this.gameOver || !this.canHold || this.holdDisabled) return;
         this.canHold = false;
         this.lastMoveWasRotation = false;
         if (this.holdPiece) {
@@ -1246,10 +1273,12 @@ class Player {
 
     drawPiece(s,x,y,p,g) {s.forEach(b=>{const px=Math.floor(x+b[0])*BLOCK_SIZE, py=(Math.floor(y+b[1])-this.viewY)*BLOCK_SIZE; this.drawBlock(p,px,py,g);});}
     
-    drawUI() {
+drawUI() {
         ctx.textAlign = 'center'; ctx.fillStyle = '#FFF'; ctx.font = `bold ${BLOCK_SIZE * 0.8}px "Orbitron"`;
-        ctx.fillText('HOLD', HOLD_AREA_WIDTH / 2, 40);
-        if (this.holdPiece) { const s = this.getShape(this.holdPiece, 0); s.forEach(b => { const px = (HOLD_AREA_WIDTH / 2) - (TETROMINOS[this.holdPiece].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE), py = 70 - (TETROMINOS[this.holdPiece].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE); this.drawBlock(this.holdPiece, px, py); }); }
+        if (!this.holdDisabled) {
+            ctx.fillText('HOLD', HOLD_AREA_WIDTH / 2, 40);
+            if (this.holdPiece) { const s = this.getShape(this.holdPiece, 0); s.forEach(b => { const px = (HOLD_AREA_WIDTH / 2) - (TETROMINOS[this.holdPiece].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE), py = 70 - (TETROMINOS[this.holdPiece].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE); this.drawBlock(this.holdPiece, px, py); }); }
+        }
         
         if (this.opponent) {
             const meterX = PLAYFIELD_X_OFFSET - 12; const meterWidth = 8; const meterMaxHeight = BOARD_VISIBLE_HEIGHT * BLOCK_SIZE;
@@ -1310,20 +1339,41 @@ function setupPlayerEditor(playerId) {
         icon.style.backgroundColor = activeSkin[key];
         icon.addEventListener('click', () => {
             const data = editorData[playerId];
-            if (data.nextInsertionIndex === -1) { // 挿入位置が未選択なら末尾に追加
+            if (data.nextInsertionIndex === 'hold') {
+                data.hold = key;
+                data.nextInsertionIndex = 0;
+            } else if (data.nextInsertionIndex === -1) {
                 data.nextQueue.push(key);
-                data.nextInsertionIndex = data.nextQueue.length; // カーソルを新しいミノの後ろに設定
+                data.nextInsertionIndex = data.nextQueue.length;
             } else {
-                data.nextQueue.splice(data.nextInsertionIndex, 0, key); // 指定位置に挿入
-                data.nextInsertionIndex++; // カーソルを挿入したミノの後ろに移動
+                data.nextQueue.splice(data.nextInsertionIndex, 0, key);
+                data.nextInsertionIndex++;
             }
             updateNextQueueDisplay(playerId);
         });
         nextIcons.appendChild(icon);
     });
+     document.getElementById(`${playerId}-next-delete-left`).addEventListener('click', () => {
+        const data = editorData[playerId];
+        const index = data.nextInsertionIndex;
+        if (index === 'hold' || (index === -1 && data.nextQueue.length === 0)) {
+            return;
+        }
+        if (index === 0) {
+            data.hold = null;
+        } else if (index > 0) {
+            data.nextQueue.splice(index - 1, 1);
+            data.nextInsertionIndex--;
+        } else { // index is -1 (end of queue)
+            data.nextQueue.pop();
+            data.nextInsertionIndex = data.nextQueue.length;
+        }
+        updateNextQueueDisplay(playerId);
+    });
     document.getElementById(`${playerId}-next-clear`).addEventListener('click', () => {
         editorData[playerId].nextQueue = [];
-        editorData[playerId].nextInsertionIndex = 0; // 挿入位置を先頭にリセット
+        editorData[playerId].hold = null;
+        editorData[playerId].nextInsertionIndex = 0;
         updateNextQueueDisplay(playerId);
     });
     const palette = document.getElementById(`${playerId}-palette`);
@@ -1431,7 +1481,6 @@ function updateNextQueueDisplay(playerId) {
             data.nextInsertionIndex = index;
             updateNextQueueDisplay(playerId);
         });
-        
         if (data.nextInsertionIndex === index) {
             gap.style.backgroundColor = 'rgba(255, 255, 255, 0.3)';
             gap.style.borderRadius = '2px';
@@ -1439,22 +1488,64 @@ function updateNextQueueDisplay(playerId) {
         }
         return gap;
     };
-    
-    qd.appendChild(createGap(0));
 
+    const holdContainer = document.createElement('div');
+    holdContainer.style.display = 'flex';
+    holdContainer.style.alignItems = 'center';
+    holdContainer.style.gap = '5px';
+    holdContainer.style.padding = '0 8px';
+    holdContainer.style.borderRight = '2px solid var(--primary-color)';
+
+    const holdSlot = document.createElement('div');
+    holdSlot.className = 'mino-icon';
+    holdSlot.style.width = '38px';
+    holdSlot.style.height = '38px';
+    holdSlot.style.cursor = 'pointer';
+    holdSlot.style.boxSizing = 'border-box';
+    if (data.hold) {
+        holdSlot.style.backgroundColor = activeSkin[data.hold];
+    } else {
+        holdSlot.style.backgroundColor = 'transparent';
+        holdSlot.style.border = '2px dashed #555';
+    }
+    if (data.nextInsertionIndex === 'hold') {
+        holdSlot.style.borderColor = '#FFF';
+        holdSlot.style.boxShadow = '0 0 8px #FFF';
+    }
+    holdSlot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        data.nextInsertionIndex = 'hold';
+        updateNextQueueDisplay(playerId);
+    });
+    const holdLabel = document.createElement('span');
+    holdLabel.textContent = "H";
+    holdLabel.style.fontFamily = 'var(--font-display)';
+    holdContainer.appendChild(holdLabel);
+    holdContainer.appendChild(holdSlot);
+    qd.appendChild(holdContainer);
+    
+    const nextContainer = document.createElement('div');
+    nextContainer.style.display = 'flex';
+    nextContainer.style.alignItems = 'center';
+    nextContainer.style.gap = '5px';
+    nextContainer.style.paddingLeft = '8px';
+    nextContainer.style.flexWrap = 'wrap';
+
+    nextContainer.appendChild(createGap(0));
     data.nextQueue.forEach((key, i) => {
         const icon = document.createElement('div');
         icon.className = 'mino-icon';
         icon.style.backgroundColor = activeSkin[key];
         icon.style.width = '38px';
         icon.style.height = '38px';
-        qd.appendChild(icon);
-        qd.appendChild(createGap(i + 1));
+        nextContainer.appendChild(icon);
+        nextContainer.appendChild(createGap(i + 1));
     });
+    qd.appendChild(nextContainer);
 
     qd.onclick = (e) => {
-        if (e.target === qd) {
-            data.nextInsertionIndex = -1; // 背景クリックで挿入モードを解除 (末尾追加モードへ)
+        if (e.target === qd || e.target === nextContainer) {
+            data.nextInsertionIndex = data.nextQueue.length;
             updateNextQueueDisplay(playerId);
         }
     };
@@ -1906,29 +1997,34 @@ function stringToBoard(str) {
     return board;
 }
 
-function getGameStateForExport() {
+let autoStartParams = { ss: false, nh: false };
+
+function getGameStateForExport(options = {}) {
+    const p1Data = { ...editorData.p1, nextQueue: [...editorData.p1.nextQueue] };
+    const p2Data = gameMode === '2P' ? { ...editorData.p2, nextQueue: [...editorData.p2.nextQueue] } : null;
+
+    if (options.noHold) {
+        if (p1Data.hold) { p1Data.nextQueue.unshift(p1Data.hold); p1Data.hold = null; }
+        if (p2Data && p2Data.hold) { p2Data.nextQueue.unshift(p2Data.hold); p2Data.hold = null; }
+    }
+
     const data = {
-        v: 1, 
-        m: gameMode,
-        p1: {
-            b: boardToString(editorData.p1.board),
-            n: editorData.p1.nextQueue.join('')
-        }
+        v: 2, m: gameMode,
+        p1: { b: boardToString(p1Data.board), n: p1Data.nextQueue.join(''), h: p1Data.hold || '' }
     };
     if (gameMode === '2P') {
-        data.p2 = {
-            b: boardToString(editorData.p2.board),
-            n: editorData.p2.nextQueue.join('')
-        };
+        data.p2 = { b: boardToString(p2Data.board), n: p2Data.nextQueue.join(''), h: p2Data.hold || '' };
     }
+    if (options.startSim) data.ss = 1;
+    if (options.noHold) data.nh = 1;
+
     return data;
 }
 
 function applyGameState(data) {
     try {
-        if (!data || data.v !== 1) {
-            alert('無効または非対応のデータです。');
-            return false;
+        if (!data || (data.v !== 1 && data.v !== 2)) {
+            alert('無効または非対応のデータです。'); return false;
         }
         gameMode = data.m || '1P';
         document.getElementById('mode-1p').classList.toggle('active', gameMode === '1P');
@@ -1937,21 +2033,18 @@ function applyGameState(data) {
         if (data.p1) {
             editorData.p1.board = stringToBoard(data.p1.b);
             editorData.p1.nextQueue = data.p1.n ? data.p1.n.split('') : [];
-            drawEditorField('p1');
-            updateNextQueueDisplay('p1');
+            editorData.p1.hold = data.p1.h || null;
+            drawEditorField('p1'); updateNextQueueDisplay('p1');
         }
         if (gameMode === '2P' && data.p2) {
             editorData.p2.board = stringToBoard(data.p2.b);
             editorData.p2.nextQueue = data.p2.n ? data.p2.n.split('') : [];
-            drawEditorField('p2');
-            updateNextQueueDisplay('p2');
+            editorData.p2.hold = data.p2.h || null;
+            drawEditorField('p2'); updateNextQueueDisplay('p2');
         }
-        updateScale();
-        return true;
+        updateScale(); return true;
     } catch (e) {
-        console.error('Failed to apply game state:', e);
-        alert('データの読み込みに失敗しました。');
-        return false;
+        console.error('Failed to apply game state:', e); alert('データの読み込みに失敗しました。'); return false;
     }
 }
 
@@ -1963,21 +2056,28 @@ function loadStateFromURL() {
             const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
             const jsonString = new TextDecoder().decode(bytes);
             const data = JSON.parse(jsonString);
-            if(applyGameState(data)) {
+
+            autoStartParams.ss = !!data.ss;
+            autoStartParams.nh = !!data.nh;
+
+            if (applyGameState(data)) {
                 alert('URLから盤面を読み込みました。');
+                if (autoStartParams.ss) {
+                    setTimeout(() => document.getElementById('startGameBtn').click(), 100);
+                }
             }
             history.pushState("", document.title, window.location.pathname + window.location.search);
         } catch (e) {
             console.error('Failed to load state from URL hash:', e);
             alert('URLからのデータ読み込みに失敗しました。');
-             history.pushState("", document.title, window.location.pathname + window.location.search);
+            history.pushState("", document.title, window.location.pathname + window.location.search);
         }
     }
 }
 
 
-function openShareModal() {
-    const stateData = getGameStateForExport();
+function generateAndDisplayLink(options = {}) {
+    const stateData = getGameStateForExport(options);
     const jsonString = JSON.stringify(stateData);
     const uint8Array = new TextEncoder().encode(jsonString);
     const base64Data = btoa(String.fromCharCode.apply(null, uint8Array));
@@ -1985,6 +2085,11 @@ function openShareModal() {
     url.hash = base64Data;
     document.getElementById('share-link-input').value = url.href;
     document.getElementById('share-raw-data-textarea').value = jsonString;
+}
+
+function openShareModal() {
+    generateAndDisplayLink();
+    document.getElementById('advanced-link-options').style.display = 'none';
     document.getElementById('share-modal').style.display = 'flex';
 }
 function pollGamepads() {
@@ -2158,6 +2263,17 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(updateScale, 0);
     });
     
+document.getElementById('advanced-link-btn').addEventListener('click', () => {
+        document.getElementById('advanced-link-options').style.display = 'block';
+    });
+
+    document.getElementById('generate-advanced-link-btn').addEventListener('click', () => {
+        generateAndDisplayLink({
+            startSim: document.getElementById('start-sim-checkbox').checked,
+            noHold: document.getElementById('no-hold-checkbox').checked,
+        });
+    });
+
     document.getElementById('startGameBtn').addEventListener('click', () => {
         gameState = 'PLAYING'; 
         document.getElementById('editor-container').style.display = 'none'; 
@@ -2168,12 +2284,18 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
 
         players = [];
+        const createAndSetupPlayer = (id, offsetX, bindings, padIndex) => {
+            const player = new Player(id, offsetX, bindings, padIndex);
+            player.holdDisabled = autoStartParams.nh;
+            return player;
+        };
+
         if (gameMode === '1P') {
             mainCanvas.width = PLAYER_CANVAS_WIDTH * RESOLUTION_SCALE; 
             mainCanvas.height = CANVAS_HEIGHT * RESOLUTION_SCALE;
             mainCanvas.style.width = PLAYER_CANVAS_WIDTH + 'px';
             mainCanvas.style.height = CANVAS_HEIGHT + 'px';
-            players.push(new Player('1', 0, keyBindings.p1, 0));
+            players.push(createAndSetupPlayer('1', 0, keyBindings.p1, 0));
         }
         else {
             const totalWidth = PLAYER_CANVAS_WIDTH * 2;
@@ -2181,13 +2303,14 @@ document.addEventListener('DOMContentLoaded', () => {
             mainCanvas.height = CANVAS_HEIGHT * RESOLUTION_SCALE;
             mainCanvas.style.width = totalWidth + 'px';
             mainCanvas.style.height = CANVAS_HEIGHT + 'px';
-            const p1 = new Player('1', 0, keyBindings.p1, 0);
-            const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1);
+            const p1 = createAndSetupPlayer('1', 0, keyBindings.p1, 0);
+            const p2 = createAndSetupPlayer('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1);
             p1.opponent = p2; 
             p2.opponent = p1;
             players.push(p1, p2);
         }
         
+        autoStartParams = { ss: false, nh: false };
         ctx.scale(RESOLUTION_SCALE, RESOLUTION_SCALE);
 
         if (gameSettings.touchControlsEnabled) {
