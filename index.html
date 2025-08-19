@@ -903,15 +903,16 @@ class Player {
         this.reset();
     }
 
-    reset() {
+reset() {
         this.player = { x: 0, y: 0, pieceType: null, rotation: 0 };
         this.nextQueue = [];
         for (let i = 0; i < gameSettings.maxNext; i++) {
             this.nextQueue.push(this.minoGenerator.next().value);
         }
-        this.holdPiece = null; this.canHold = true; this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
+        this.holdPiece = this.initialHold; this.canHold = true; this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
         this.dasTimer = 0; this.arrTimer = 0; this.sdfTimer = 0; this.dasDirection = 0;
         this.isGrounded = false; this.gameOver = false; this.isClearingLine = false; this.lineClearDelayTimer = 0;
+
         this.viewY = BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT;
         this.pendingGarbage = 0; this.garbageQueue = []; this.ren = -1; this.isB2B = false;
         this.lastMoveWasRotation = false; this.lastSrsKickIndex = -1;
@@ -2439,22 +2440,30 @@ document.getElementById('settingsBtn').addEventListener('click', () => openUnifi
     }
     
 
-   document.getElementById('retryBtn').addEventListener('click', () => {
-        if (gameState !== 'PLAYING') return;
+document.getElementById('retryBtn').addEventListener('click', () => {
+        if (gameState !== 'PLAYING' || !players.length) return;
+        
+        const wasHoldDisabled = players[0].holdDisabled;
+
+        const createAndSetupPlayer = (id, offsetX, bindings, padIndex) => {
+            const player = new Player(id, offsetX, bindings, padIndex);
+            player.holdDisabled = wasHoldDisabled;
+            return player;
+        };
 
         players = [];
         if (gameMode === '1P') {
-            players.push(new Player('1', 0, keyBindings.p1, 0));
+            players.push(createAndSetupPlayer('1', 0, keyBindings.p1, 0));
         } else {
-            const p1 = new Player('1', 0, keyBindings.p1, 0);
-            const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1);
+            const p1 = createAndSetupPlayer('1', 0, keyBindings.p1, 0);
+            const p2 = createAndSetupPlayer('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1);
             p1.opponent = p2; 
             p2.opponent = p1;
             players.push(p1, p2);
         }
     });
 
-    setupEditors(); 
+    setupEditors();
 
     loadStateFromURL();
 
