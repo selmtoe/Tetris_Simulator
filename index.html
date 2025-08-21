@@ -2275,23 +2275,24 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('p2-editor-col').style.display = 'flex';
         setTimeout(updateScale, 0);
     });
-    document.getElementById('advanced-link-btn').addEventListener('click', () => {
+document.getElementById('advanced-link-btn').addEventListener('click', () => {
         document.getElementById('advanced-link-options').style.display = 'block';
     });
     
     const startSimCheckbox = document.getElementById('start-sim-checkbox');
     const hideBackCheckbox = document.getElementById('hide-back-btn-checkbox');
-    startSimCheckbox.addEventListener('change', () => {
+    
+    const syncHideBackButtonCheckbox = () => {
         if (startSimCheckbox.checked) {
             hideBackCheckbox.disabled = false;
         } else {
             hideBackCheckbox.disabled = true;
             hideBackCheckbox.checked = false;
         }
-    });
-
+    };
+    
     startSimCheckbox.addEventListener('change', syncHideBackButtonCheckbox);
-    syncHideBackButtonCheckbox();
+    syncHideBackButtonCheckbox(); // ページ読み込み時に一度実行して初期状態を同期
 
     document.getElementById('generate-advanced-link-btn').addEventListener('click', () => {
         generateAndDisplayLink({
