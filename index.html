@@ -376,10 +376,16 @@
                         <span>シミュレーションを即スタート</span>
                     </label>
                 </div>
-                <div class="setting-item">
+<div class="setting-item">
                     <label>
                         <input type="checkbox" id="no-hold-checkbox">
                         <span>ホールドを禁止</span>
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="hide-back-btn-checkbox" disabled>
+                        <span>戻るボタンを非表示</span>
                     </label>
                 </div>
                  <button id="generate-advanced-link-btn" class="button" style="margin-top: 10px;">リンクを再生成</button>
@@ -2004,12 +2010,11 @@ function stringToBoard(str) {
     return board;
 }
 
-let autoStartParams = { ss: false, nh: false };
+let autoStartParams = { ss: false, nh: false, hb: false };
 
 function getGameStateForExport(options = {}) {
     const p1Data = { ...editorData.p1, nextQueue: [...editorData.p1.nextQueue] };
     const p2Data = gameMode === '2P' ? { ...editorData.p2, nextQueue: [...editorData.p2.nextQueue] } : null;
-
     if (options.noHold) {
         if (p1Data.hold) { p1Data.nextQueue.unshift(p1Data.hold); p1Data.hold = null; }
         if (p2Data && p2Data.hold) { p2Data.nextQueue.unshift(p2Data.hold); p2Data.hold = null; }
@@ -2019,15 +2024,15 @@ function getGameStateForExport(options = {}) {
         v: 2, m: gameMode,
         p1: { b: boardToString(p1Data.board), n: p1Data.nextQueue.join(''), h: p1Data.hold || '' }
     };
-    if (gameMode === '2P') {
+if (gameMode === '2P') {
         data.p2 = { b: boardToString(p2Data.board), n: p2Data.nextQueue.join(''), h: p2Data.hold || '' };
     }
     if (options.startSim) data.ss = 1;
     if (options.noHold) data.nh = 1;
+    if (options.hideBack) data.hb = 1;
 
     return data;
 }
-
 function applyGameState(data) {
     try {
         if (!data || (data.v !== 1 && data.v !== 2)) {
@@ -2066,6 +2071,7 @@ function loadStateFromURL() {
 
             autoStartParams.ss = !!data.ss;
             autoStartParams.nh = !!data.nh;
+            autoStartParams.hb = !!data.hb;
 
             if (applyGameState(data)) {
                 alert('URLから盤面を読み込みました。');
@@ -2269,15 +2275,26 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('p2-editor-col').style.display = 'flex';
         setTimeout(updateScale, 0);
     });
-    
-document.getElementById('advanced-link-btn').addEventListener('click', () => {
+    document.getElementById('advanced-link-btn').addEventListener('click', () => {
         document.getElementById('advanced-link-options').style.display = 'block';
+    });
+    
+    const startSimCheckbox = document.getElementById('start-sim-checkbox');
+    const hideBackCheckbox = document.getElementById('hide-back-btn-checkbox');
+    startSimCheckbox.addEventListener('change', () => {
+        if (startSimCheckbox.checked) {
+            hideBackCheckbox.disabled = false;
+        } else {
+            hideBackCheckbox.disabled = true;
+            hideBackCheckbox.checked = false;
+        }
     });
 
     document.getElementById('generate-advanced-link-btn').addEventListener('click', () => {
         generateAndDisplayLink({
             startSim: document.getElementById('start-sim-checkbox').checked,
             noHold: document.getElementById('no-hold-checkbox').checked,
+            hideBack: document.getElementById('hide-back-btn-checkbox').checked
         });
     });
 
@@ -2288,6 +2305,12 @@ document.getElementById('advanced-link-btn').addEventListener('click', () => {
         document.getElementById('scan-controls').style.display = 'none';
         document.getElementById('game-controls').style.display = 'flex';
         
+        if (autoStartParams.hb) {
+            document.getElementById('backToEditorBtn').style.display = 'none';
+        } else {
+            document.getElementById('backToEditorBtn').style.display = '';
+        }
+
         ctx.setTransform(1, 0, 0, 1, 0, 0);
 
         players = [];
@@ -2317,7 +2340,7 @@ document.getElementById('advanced-link-btn').addEventListener('click', () => {
             players.push(p1, p2);
         }
         
-        autoStartParams = { ss: false, nh: false };
+        autoStartParams = { ss: false, nh: false, hb: false };
         ctx.scale(RESOLUTION_SCALE, RESOLUTION_SCALE);
 
         if (gameSettings.touchControlsEnabled) {
