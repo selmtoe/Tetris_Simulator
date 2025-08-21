@@ -2074,7 +2074,7 @@ function loadStateFromURL() {
             autoStartParams.hb = !!data.hb;
 
             if (applyGameState(data)) {
-                alert('URLから盤面を読み込みました。');
+                //alert('URLから盤面を読み込みました。');
                 if (autoStartParams.ss) {
                     setTimeout(() => document.getElementById('startGameBtn').click(), 100);
                 }
