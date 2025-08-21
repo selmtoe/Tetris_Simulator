@@ -2290,6 +2290,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    startSimCheckbox.addEventListener('change', syncHideBackButtonCheckbox);
+    syncHideBackButtonCheckbox();
+
     document.getElementById('generate-advanced-link-btn').addEventListener('click', () => {
         generateAndDisplayLink({
             startSim: document.getElementById('start-sim-checkbox').checked,
