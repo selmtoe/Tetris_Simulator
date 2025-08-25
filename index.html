@@ -390,11 +390,6 @@
                 </div>
                  <button id="generate-advanced-link-btn" class="button" style="margin-top: 10px;">リンクを再生成</button>
             </div>
-             <div class="share-item" style="margin-top: 15px;">
-                <span>生データ (JSON)</span>
-                <textarea id="share-raw-data-textarea" readonly style="width: 100%; height: 80px; margin-top: 5px; margin-bottom: 5px; background-color: var(--canvas-bg-color); color: var(--font-color); border: 1px solid var(--border-color); resize: vertical; box-sizing: border-box;"></textarea>
-                <button id="copy-raw-data-btn" class="button">生データをコピー</button>
-            </div>
         </div>
         
         <hr style="border-color: var(--primary-color); margin: 20px 0;">
@@ -800,7 +795,7 @@ let gameSettings = {
     touchControlsEnabled: 'ontouchstart' in window,
 };
 
-const COLORS = { 'I': '#00f0f0', 'O': '#f0f000', 'T': '#a000f0', 'L': '#f0a000', 'J': '#0000f0', 'S': '#00f000', 'Z': '#f00000', 'G': '#999999' };
+const COLORS = { 'I': '#00f0f0', 'O': '#f0f000', 'T': '#a000f0', 'L': '#f0a000', 'J': '#0000f0', 'S': '#00f000', 'Z': '#f00000', 'G': '#999999', 'E': '#808080' };
 
 const SCAN_COLOR_PALETTE = {
     'NULL': ['#000000', '#302838'],
@@ -979,7 +974,7 @@ reset() {
         }
     }
 
-    update(dt) {
+update(dt) {
         if (this.gameOver) return;
         if (this.specialMoveTextTimer > 0) {
             this.specialMoveTextTimer -= dt;
@@ -1023,9 +1018,37 @@ reset() {
         }
         this.dasDirection = horizDir;
 
-        if (this.isClearingLine) {
+if (this.isClearingLine) {
             this.lineClearDelayTimer -= dt;
-            if (this.lineClearDelayTimer <= 0) { this.isClearingLine = false; this.riseGarbage(); this.spawnNewPiece(); }
+            if (this.lineClearDelayTimer <= 0) { 
+                this.isClearingLine = false; 
+                this.riseGarbage(); 
+                if (this.nextQueue[0] === 'E') {
+                    if (this.holdPiece) {
+                        this.player.pieceType = this.holdPiece;
+                        this.holdPiece = null;
+                        this.canHold = false;
+                        
+                        this.player.rotation = 0;
+                        this.lockTimer = 0;
+                        this.lastMoveWasRotation = false;
+                        this.player.x = Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[this.player.pieceType].center[0]) -1;
+                        const shape = this.getShape(this.player.pieceType, this.player.rotation);
+                        this.player.y = 19;
+                        if (this.checkCollision(this.player.x, this.player.y, shape)) {
+                            this.player.y = 18;
+                            if (this.checkCollision(this.player.x, this.player.y, shape)) {
+                                 this.gameOver = true;
+                            }
+                        }
+                        return;
+                    } else {
+                        this.gameOver = true;
+                        return;
+                    }
+                }
+                this.spawnNewPiece(); 
+            }
             return;
         }
 
@@ -1110,6 +1133,11 @@ reset() {
     
 hold() {
         if (this.gameOver || !this.canHold || this.holdDisabled) return;
+
+        if (!this.holdPiece && this.nextQueue[0] === 'E') {
+            return;
+        }
+
         this.canHold = false;
         this.lastMoveWasRotation = false;
         if (this.holdPiece) {
@@ -1132,7 +1160,7 @@ hold() {
         }
     }
     
-    lockPiece() {
+lockPiece() {
         if (!this.player.pieceType) return;
         const tspinResult = this.checkForTSpin();
         const shape = this.getShape(this.player.pieceType, this.player.rotation);
@@ -1206,8 +1234,33 @@ hold() {
             }
         }
 
-        if (this.specialMoveText.length > 0) {
+if (this.specialMoveText.length > 0) {
             this.specialMoveTextTimer = 1500;
+        }
+
+        if (this.nextQueue[0] === 'E') {
+            if (this.holdPiece) {
+                this.player.pieceType = this.holdPiece;
+                this.holdPiece = null;
+                this.canHold = false;
+                
+                this.player.rotation = 0;
+                this.lockTimer = 0;
+                this.lastMoveWasRotation = false;
+                this.player.x = Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[this.player.pieceType].center[0]) -1;
+                const shape = this.getShape(this.player.pieceType, this.player.rotation);
+                this.player.y = 19;
+                if (this.checkCollision(this.player.x, this.player.y, shape)) {
+                    this.player.y = 18;
+                    if (this.checkCollision(this.player.x, this.player.y, shape)) {
+                         this.gameOver = true;
+                    }
+                }
+                return;
+            } else {
+                this.gameOver = true;
+                return;
+            }
         }
 
         this.lockTimer = 0;
@@ -1279,8 +1332,7 @@ hold() {
     }
 
     drawPiece(s,x,y,p,g) {s.forEach(b=>{const px=Math.floor(x+b[0])*BLOCK_SIZE, py=(Math.floor(y+b[1])-this.viewY)*BLOCK_SIZE; this.drawBlock(p,px,py,g);});}
-    
-drawUI() {
+    drawUI() {
         ctx.textAlign = 'center'; ctx.fillStyle = '#FFF'; ctx.font = `bold ${BLOCK_SIZE * 0.8}px "Orbitron"`;
         if (!this.holdDisabled) {
             ctx.fillText('HOLD', HOLD_AREA_WIDTH / 2, 40);
@@ -1293,13 +1345,15 @@ drawUI() {
             if (pendingHeight > 0) { ctx.fillStyle = 'red'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight + (0.5 * BLOCK_SIZE), meterWidth, pendingHeight); }
             const queuedLines = this.garbageQueue.reduce((sum, g) => sum + g.lines, 0);
             const queuedHeight = Math.min(queuedLines, BOARD_VISIBLE_HEIGHT - this.pendingGarbage) * BLOCK_SIZE;
-            if (queuedHeight > 0) { ctx.fillStyle = '#f0f000'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight - queuedHeight + (0.5*BLOCK_SIZE), meterWidth, queuedHeight); }
+            if (queuedHeight > 0) { ctx.fillStyle = '#f0f0f0'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight - queuedHeight + (0.5*BLOCK_SIZE), meterWidth, queuedHeight); }
         }
 
         ctx.fillStyle = '#FFF'; const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
         ctx.fillText('NEXT', rX, 40);
         for (let i = 0; i < gameSettings.maxNext; i++) {
-            const pT = this.nextQueue[i]; if (!pT) continue;
+            const pT = this.nextQueue[i]; 
+            if (!pT) continue;
+            if (pT === 'E') break;
             const s = this.getShape(pT, 0);
             s.forEach(b => {
                 const px = rX - (TETROMINOS[pT].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE);
@@ -1342,7 +1396,7 @@ function setupPlayerEditor(playerId) {
     const nextIcons = document.getElementById(`${playerId}-next-icons`);
     Object.keys(TETROMINOS).forEach(key => {
         const icon = document.createElement('div');
-        icon.className = 'mino-icon';
+icon.className = 'mino-icon';
         icon.style.backgroundColor = activeSkin[key];
         icon.addEventListener('click', () => {
             const data = editorData[playerId];
@@ -1360,6 +1414,35 @@ function setupPlayerEditor(playerId) {
         });
         nextIcons.appendChild(icon);
     });
+    
+    const endIcon = document.createElement('div');
+    endIcon.className = 'mino-icon';
+    endIcon.style.backgroundColor = activeSkin['E'];
+    endIcon.style.color = '#FFFFFF';
+    endIcon.style.display = 'flex';
+    endIcon.style.alignItems = 'center';
+    endIcon.style.justifyContent = 'center';
+    endIcon.style.fontFamily = 'var(--font-display)';
+    endIcon.style.fontSize = '14px';
+    endIcon.style.fontWeight = 'bold';
+endIcon.textContent = 'END';
+    endIcon.addEventListener('click', () => {
+        const data = editorData[playerId];
+        if (data.nextInsertionIndex === 'hold' || data.nextQueue.length === 0) {
+            return;
+        }
+        const key = 'E';
+        if (data.nextInsertionIndex === -1) {
+            data.nextQueue.push(key);
+            data.nextInsertionIndex = data.nextQueue.length;
+        } else {
+            data.nextQueue.splice(data.nextInsertionIndex, 0, key);
+            data.nextInsertionIndex++;
+        }
+        updateNextQueueDisplay(playerId);
+    });
+    nextIcons.appendChild(endIcon);
+    
      document.getElementById(`${playerId}-next-delete-left`).addEventListener('click', () => {
         const data = editorData[playerId];
         const index = data.nextInsertionIndex;
@@ -1538,13 +1621,23 @@ function updateNextQueueDisplay(playerId) {
     nextContainer.style.paddingLeft = '8px';
     nextContainer.style.flexWrap = 'wrap';
 
-    nextContainer.appendChild(createGap(0));
+   nextContainer.appendChild(createGap(0));
     data.nextQueue.forEach((key, i) => {
         const icon = document.createElement('div');
         icon.className = 'mino-icon';
         icon.style.backgroundColor = activeSkin[key];
         icon.style.width = '38px';
         icon.style.height = '38px';
+        if (key === 'E') {
+            icon.textContent = 'END';
+            icon.style.color = 'white';
+            icon.style.display = 'flex';
+            icon.style.alignItems = 'center';
+            icon.style.justifyContent = 'center';
+            icon.style.fontFamily = 'var(--font-display)';
+            icon.style.fontSize = '12px';
+            icon.style.fontWeight = 'bold';
+        }
         nextContainer.appendChild(icon);
         nextContainer.appendChild(createGap(i + 1));
     });
@@ -2097,7 +2190,6 @@ function generateAndDisplayLink(options = {}) {
     const url = new URL(window.location);
     url.hash = base64Data;
     document.getElementById('share-link-input').value = url.href;
-    document.getElementById('share-raw-data-textarea').value = jsonString;
 }
 
 function openShareModal() {
@@ -2221,13 +2313,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .catch(err => alert('コピーに失敗しました: ' + err));
     });
     
-    document.getElementById('copy-raw-data-btn').addEventListener('click', () => {
-        const textarea = document.getElementById('share-raw-data-textarea');
-        textarea.select();
-        navigator.clipboard.writeText(textarea.value)
-            .then(() => alert('生データをクリップボードにコピーしました！'))
-            .catch(err => alert('コピーに失敗しました: ' + err));
-    });
+
 
         document.getElementById('import-from-data-btn').addEventListener('click', async () => {
         try {
