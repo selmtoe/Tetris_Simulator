@@ -222,8 +222,9 @@
                 <div class="button active" id="mode-1p">1P</div>
                 <div class="button" id="mode-2p">2P</div>
                 <div class="button" id="mode-ai" style="opacity: 0.5; cursor: not-allowed;" title="実装予定">AI</div>
-                 <button id="settingsBtn" class="button" style="margin-left: 15px;">設定</button>
+                <button id="settingsBtn" class="button" style="margin-left: 15px;">設定</button>
                  <button id="shareBtn" class="button" style="margin-left: 5px;">共有</button>
+                 <button id="ruleBtn" class="button" style="margin-left: 5px;">ルール</button>
             </div>
             <button id="startGameBtn" class="button">START GAME</button>
         </div>
@@ -291,9 +292,12 @@
             </div>
         </div>
     </div>
-    <div id="game-container">
-        <canvas id="mainCanvas"></canvas>
-        <div id="scan-instructions" style="display: none;"></div>
+
+<div id="game-container">
+<div id="rule-description-display" style="display: none; position: absolute; z-index: 155; color: var(--font-color); background: rgba(26, 26, 46, 0.9); padding: 15px; border-radius: 10px; border: 2px solid #483D8B; font-family: var(--font-ui); font-size: 14px; max-width: 200px; max-height: 400px; overflow-y: auto; box-sizing: border-box; word-wrap: break-word; backdrop-filter: blur(4px);"></div>
+<canvas id="mainCanvas"></canvas>
+<div id="scan-instructions" style="display: none;"></div>
+
         <div id="scan-controls" style="display: none; margin-top: 15px; gap: 10px; justify-content:center;">
              <button id="scanConfirmBtn" class="button">次へ</button>
              <button id="scanCancelBtn" class="button">キャンセル</button>
@@ -404,6 +408,29 @@
 
         <div class="modal-controls">
             <button id="share-close" class="button">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<div id="rule-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center; z-index: 200;">
+    <div class="modal-content" style="width: 90%; max-width: 700px;">
+        <h2>カスタムルール</h2>
+        
+        <div class="rule-section" style="margin-bottom: 20px;">
+            <h3>説明</h3>
+            <p style="font-size: 14px; color: #ccc; margin-top: 5px; margin-bottom: 10px;">ここに記述した内容は、ゲーム画面の左側（ホールドの下）に表示されます。</p>
+            <textarea id="rule-description-input" style="width: 100%; height: 100px; background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; font-family: var(--font-ui); box-sizing: border-box; resize: vertical;"></textarea>
+        </div>
+
+        <div class="rule-section">
+            <h3>コード (JS)</h3>
+            <p style="font-size: 14px; color: #ccc; margin-top: 5px; margin-bottom: 10px;">ゲームのクリア・オーバー条件などをプログラムで定義します。</p>
+            <textarea id="rule-code-input" style="width: 100%; height: 250px; background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; font-family: monospace; box-sizing: border-box; resize: vertical;"></textarea>
+        </div>
+
+        <div class="modal-controls" style="border-top: 1px solid var(--primary-color); padding-top: 15px; margin-top: 20px;">
+            <button id="rule-save-close" class="button">保存して閉じる</button>
+            <button id="rule-close" class="button">キャンセル</button>
         </div>
     </div>
 </div>
@@ -867,7 +894,8 @@ let gamepads = {}, prevGamepads = {};
 
 const editorData = {
     p1: { board: null, nextQueue: [], hold: null, viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', nextInsertionIndex: -1 },
-    p2: { board: null, nextQueue: [], hold: null, viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', nextInsertionIndex: -1 }
+    p2: { board: null, nextQueue: [], hold: null, viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', nextInsertionIndex: -1 },
+    rule: { description: '', code: '' }
 };
 
 let scanState = { image: null, bottomLeft: null, topRight: null, currentMousePos: {x: 0, y: 0}, targetPlayerId: null, parsedColors: null };
@@ -901,6 +929,8 @@ class Player {
         this.minoGenerator = createMinoGenerator(pData.nextQueue);
         this.opponent = null;
         this.holdDisabled = false;
+        this.ruleHooks = {};
+        this.gameApi = null;
         this.reset();
     }
 
@@ -913,9 +943,16 @@ reset() {
         this.holdPiece = this.initialHold; this.canHold = true; this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
         this.dasTimer = 0; this.arrTimer = 0; this.sdfTimer = 0; this.dasDirection = 0;
         this.isGrounded = false; this.gameOver = false; this.isClearingLine = false; this.lineClearDelayTimer = 0;
+        this.gameClear = false;
+
+        this.stats = {
+            tSpinSingle: 0, tSpinDouble: 0, tSpinTriple: 0,
+            miniTSpinSingle: 0, miniTSpinDouble: 0,
+            perfectClear: 0, tetris: 0, ren: -1
+        };
 
         this.viewY = BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT;
-        this.pendingGarbage = 0; this.garbageQueue = []; this.ren = -1; this.isB2B = false;
+        this.pendingGarbage = 0;this.garbageQueue = []; this.ren = -1; this.isB2B = false;
         this.lastMoveWasRotation = false; this.lastSrsKickIndex = -1;
         this.specialMoveText = [];
         this.specialMoveTextTimer = 0;
@@ -975,7 +1012,19 @@ reset() {
     }
 
 update(dt) {
-        if (this.gameOver) return;
+        if (this.gameOver || this.gameClear) return;
+
+        if (this.ruleHooks.onUpdate && typeof this.ruleHooks.onUpdate === 'function') {
+            try {
+                this.ruleHooks.onUpdate(this.gameApi, this);
+            } catch (e) {
+                console.error("Rule error onUpdate:", e);
+                this.gameOver = true;
+                return;
+            }
+        }
+        if (this.gameOver || this.gameClear) return;
+
         if (this.specialMoveTextTimer > 0) {
             this.specialMoveTextTimer -= dt;
         }
@@ -1092,7 +1141,7 @@ if (this.isClearingLine) {
         }
     }
 
-    draw() {
+draw() {
         ctx.save(); ctx.translate(this.offsetX, 0);
         this.drawUI();
 
@@ -1109,9 +1158,10 @@ if (this.isClearingLine) {
         for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) { for (let x = 0; x < BOARD_WIDTH; x++) { const boardY = y + this.viewY; if (this.board[boardY]?.[x]) { this.drawBlock(this.board[boardY][x], x * BLOCK_SIZE, y * BLOCK_SIZE); } } }
 
 
-        if (!this.gameOver && !this.isClearingLine && this.player.pieceType) { const shape = this.getShape(this.player.pieceType, this.player.rotation); const ghostY = this.getGhostY(); if (ghostY > this.player.y) this.drawPiece(shape, this.player.x, ghostY, this.player.pieceType, true); this.drawPiece(shape, this.player.x, this.player.y, this.player.pieceType, false); }
+        if (!this.gameOver && !this.gameClear && !this.isClearingLine && this.player.pieceType) { const shape = this.getShape(this.player.pieceType, this.player.rotation); const ghostY = this.getGhostY(); if (ghostY > this.player.y) this.drawPiece(shape, this.player.x, ghostY, this.player.pieceType, true); this.drawPiece(shape, this.player.x, this.player.y, this.player.pieceType, false); }
         this.drawSpecialMoveText();
         if (this.gameOver) this.drawMessage("GAME OVER");
+        else if (this.gameClear) this.drawMessage("CLEAR!");
         ctx.restore(); ctx.restore();
     }
     
@@ -1159,7 +1209,7 @@ hold() {
             this.spawnNewPiece();
         }
     }
-    
+
 lockPiece() {
         if (!this.player.pieceType) return;
         const tspinResult = this.checkForTSpin();
@@ -1175,10 +1225,13 @@ lockPiece() {
         
         let attack = 0;
         let isAction = false;
+        let moveInfo = { name: '', isPerfectClear: false, clearedLines: lines, isB2B: false, ren: this.ren, tSpinType: tspinResult };
         
         if (isPC) {
             attack = 10;
             isAction = true;
+            this.stats.perfectClear++;
+            moveInfo.isPerfectClear = true;
             this.ren++;
             this.isB2B = true;
             this.specialMoveText.push("PERFECT CLEAR");
@@ -1188,12 +1241,21 @@ lockPiece() {
             if (tspinResult === 'TSPIN') {
                 attack = [0, 2, 4, 6][lines];
                 moveText = ['', 'T-Spin Single', 'T-Spin Double', 'T-Spin Triple'][lines];
+                moveInfo.name = moveText;
+                if (lines === 1) this.stats.tSpinSingle++;
+                if (lines === 2) this.stats.tSpinDouble++;
+                if (lines === 3) this.stats.tSpinTriple++;
             } else if (tspinResult === 'MINI_TSPIN') {
                 attack = [0, 0, 1, 2, 4][lines];
                 moveText = ['', 'T-Spin Mini Single', 'T-Spin Mini Double'][lines] || 'T-Spin Mini';
+                moveInfo.name = moveText;
+                if (lines === 1) this.stats.miniTSpinSingle++;
+                if (lines === 2) this.stats.miniTSpinDouble++;
             } else {
                 attack = [0, 0, 1, 2, 4][lines];
                 moveText = ['', 'Single', 'Double', 'Triple', 'Tetris'][lines];
+                moveInfo.name = moveText;
+                if (lines === 4) this.stats.tetris++;
             }
             
             const isB2BEligible = (lines === 4) || (tspinResult && lines > 0);
@@ -1201,6 +1263,7 @@ lockPiece() {
                 if (this.isB2B) {
                     attack++;
                     this.specialMoveText.push("Back-to-Back");
+                    moveInfo.isB2B = true;
                 }
                 this.isB2B = true;
             } else {
@@ -1213,6 +1276,7 @@ lockPiece() {
             if (this.ren >= 1) {
                  this.specialMoveText.push(`${this.ren} REN`);
             }
+            this.stats.ren = this.ren;
         } else if (tspinResult) {
             isAction = false; 
             this.ren = -1;
@@ -1220,7 +1284,10 @@ lockPiece() {
             moveText = (tspinResult === 'MINI_TSPIN') ? 'T-Spin Mini' : 'T-Spin';
         }
         
-        if (!isAction) this.ren = -1;
+        if (!isAction) {
+            this.ren = -1;
+            this.stats.ren = -1;
+        }
         if (moveText) this.specialMoveText.push(moveText);
 
         if (this.opponent && attack > 0) {
@@ -1233,12 +1300,23 @@ lockPiece() {
                 if (remainingAttack > 0) { this.opponent.addGarbage(remainingAttack); }
             }
         }
+        
+        if (this.ruleHooks.onPieceLock && typeof this.ruleHooks.onPieceLock === 'function') {
+             try {
+                this.ruleHooks.onPieceLock(this.gameApi, this, moveInfo);
+            } catch (e) {
+                console.error("Rule error onPieceLock:", e);
+                this.gameOver = true;
+            }
+        }
+        if (this.gameOver || this.gameClear) return;
+
 
 if (this.specialMoveText.length > 0) {
             this.specialMoveTextTimer = 1500;
         }
 
-        if (this.nextQueue[0] === 'E') {
+        if (this.nextQueue[0] === 'E') {    
             if (this.holdPiece) {
                 this.player.pieceType = this.holdPiece;
                 this.holdPiece = null;
@@ -1331,7 +1409,7 @@ if (this.specialMoveText.length > 0) {
         ctx.globalAlpha=1.0;
     }
 
-    drawPiece(s,x,y,p,g) {s.forEach(b=>{const px=Math.floor(x+b[0])*BLOCK_SIZE, py=(Math.floor(y+b[1])-this.viewY)*BLOCK_SIZE; this.drawBlock(p,px,py,g);});}
+drawPiece(s,x,y,p,g) {s.forEach(b=>{const px=Math.floor(x+b[0])*BLOCK_SIZE, py=(Math.floor(y+b[1])-this.viewY)*BLOCK_SIZE; this.drawBlock(p,px,py,g);});}
     drawUI() {
         ctx.textAlign = 'center'; ctx.fillStyle = '#FFF'; ctx.font = `bold ${BLOCK_SIZE * 0.8}px "Orbitron"`;
         if (!this.holdDisabled) {
@@ -1339,14 +1417,12 @@ if (this.specialMoveText.length > 0) {
             if (this.holdPiece) { const s = this.getShape(this.holdPiece, 0); s.forEach(b => { const px = (HOLD_AREA_WIDTH / 2) - (TETROMINOS[this.holdPiece].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE), py = 70 - (TETROMINOS[this.holdPiece].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE); this.drawBlock(this.holdPiece, px, py); }); }
         }
         
-        if (this.opponent) {
-            const meterX = PLAYFIELD_X_OFFSET - 12; const meterWidth = 8; const meterMaxHeight = BOARD_VISIBLE_HEIGHT * BLOCK_SIZE;
-            const pendingHeight = Math.min(this.pendingGarbage, BOARD_VISIBLE_HEIGHT) * BLOCK_SIZE;
-            if (pendingHeight > 0) { ctx.fillStyle = 'red'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight + (0.5 * BLOCK_SIZE), meterWidth, pendingHeight); }
-            const queuedLines = this.garbageQueue.reduce((sum, g) => sum + g.lines, 0);
-            const queuedHeight = Math.min(queuedLines, BOARD_VISIBLE_HEIGHT - this.pendingGarbage) * BLOCK_SIZE;
-            if (queuedHeight > 0) { ctx.fillStyle = '#f0f0f0'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight - queuedHeight + (0.5*BLOCK_SIZE), meterWidth, queuedHeight); }
-        }
+        const meterX = PLAYFIELD_X_OFFSET - 12; const meterWidth = 8; const meterMaxHeight = BOARD_VISIBLE_HEIGHT * BLOCK_SIZE;
+        const pendingHeight = Math.min(this.pendingGarbage, BOARD_VISIBLE_HEIGHT) * BLOCK_SIZE;
+        if (pendingHeight > 0) { ctx.fillStyle = 'red'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight + (0.5 * BLOCK_SIZE), meterWidth, pendingHeight); }
+        const queuedLines = this.garbageQueue.reduce((sum, g) => sum + g.lines, 0);
+        const queuedHeight = Math.min(queuedLines, BOARD_VISIBLE_HEIGHT - this.pendingGarbage) * BLOCK_SIZE;
+        if (queuedHeight > 0) { ctx.fillStyle = '#f0f0f0'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight - queuedHeight + (0.5*BLOCK_SIZE), meterWidth, queuedHeight); }
 
         ctx.fillStyle = '#FFF'; const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
         ctx.fillText('NEXT', rX, 40);
@@ -1468,9 +1544,10 @@ endIcon.textContent = 'END';
     });
     const palette = document.getElementById(`${playerId}-palette`);
 
-    Object.keys(EDITOR_COLORS).forEach(key => { const swatch = document.createElement('div'); swatch.className = 'color-swatch'; swatch.style.backgroundColor = key === 'EMPTY' ? '#333' : EDITOR_COLORS[key]; if (key === 'EMPTY') { swatch.style.border = '1px dashed #fff'; swatch.title = 'Eraser'; } if (key === editorData[playerId].activeColor) swatch.classList.add('active'); swatch.addEventListener('click', () => { editorData[playerId].activeColor = key; palette.querySelector('.active')?.classList.remove('active'); swatch.classList.add('active'); }); palette.appendChild(swatch); });
+    Object.keys(EDITOR_COLORS).filter(key => key !== 'E').forEach(key => { const swatch = document.createElement('div'); swatch.className = 'color-swatch'; swatch.style.backgroundColor = key === 'EMPTY' ? '#333' : EDITOR_COLORS[key]; if (key === 'EMPTY') { swatch.style.border = '1px dashed #fff'; swatch.title = 'Eraser'; } if (key === editorData[playerId].activeColor) swatch.classList.add('active'); swatch.addEventListener('click', () => { editorData[playerId].activeColor = key; palette.querySelector('.active')?.classList.remove('active'); swatch.classList.add('active'); }); palette.appendChild(swatch); });
 
-   const canvas = document.getElementById(`field-editor-canvas-${playerId}`);
+    const canvas = document.getElementById(`field-editor-canvas-${playerId}`);
+    
     canvas.width = BOARD_WIDTH * EDITOR_BLOCK_SIZE; canvas.height = BOARD_VISIBLE_HEIGHT * EDITOR_BLOCK_SIZE;
     let isDrawing = false;
     let isEraserMode = false;
@@ -2123,6 +2200,9 @@ if (gameMode === '2P') {
     if (options.startSim) data.ss = 1;
     if (options.noHold) data.nh = 1;
     if (options.hideBack) data.hb = 1;
+    
+    if (editorData.rule.description) data.rd = editorData.rule.description;
+    if (editorData.rule.code) data.rc = editorData.rule.code;
 
     return data;
 }
@@ -2135,6 +2215,10 @@ function applyGameState(data) {
         document.getElementById('mode-1p').classList.toggle('active', gameMode === '1P');
         document.getElementById('mode-2p').classList.toggle('active', gameMode === '2P');
         document.getElementById('p2-editor-col').style.display = (gameMode === '2P') ? 'flex' : 'none';
+        
+        editorData.rule.description = data.rd || '';
+        editorData.rule.code = data.rc || '';
+
         if (data.p1) {
             editorData.p1.board = stringToBoard(data.p1.b);
             editorData.p1.nextQueue = data.p1.n ? data.p1.n.split('') : [];
@@ -2146,6 +2230,13 @@ function applyGameState(data) {
             editorData.p2.nextQueue = data.p2.n ? data.p2.n.split('') : [];
             editorData.p2.hold = data.p2.h || null;
             drawEditorField('p2'); updateNextQueueDisplay('p2');
+        } else if (gameMode !== '2P') {
+            editorData.p2.board = Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
+            editorData.p2.nextQueue = [];
+            editorData.p2.hold = null;
+            if (document.getElementById('p2-editor-col').style.display !== 'none') {
+                 drawEditorField('p2'); updateNextQueueDisplay('p2');
+            }
         }
         updateScale(); return true;
     } catch (e) {
@@ -2304,6 +2395,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('share-close').addEventListener('click', () => {
         document.getElementById('share-modal').style.display = 'none';
     });
+
+    document.getElementById('ruleBtn').addEventListener('click', () => {
+        document.getElementById('rule-description-input').value = editorData.rule.description;
+        document.getElementById('rule-code-input').value = editorData.rule.code;
+        document.getElementById('rule-modal').style.display = 'flex';
+    });
+    document.getElementById('rule-save-close').addEventListener('click', () => {
+        editorData.rule.description = document.getElementById('rule-description-input').value;
+        editorData.rule.code = document.getElementById('rule-code-input').value;
+        document.getElementById('rule-modal').style.display = 'none';
+    });
+    document.getElementById('rule-close').addEventListener('click', () => {
+        document.getElementById('rule-modal').style.display = 'none';
+    });
     
     document.getElementById('copy-link-btn').addEventListener('click', () => {
         const input = document.getElementById('share-link-input');
@@ -2384,12 +2489,67 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    document.getElementById('startGameBtn').addEventListener('click', () => {
+document.getElementById('startGameBtn').addEventListener('click', () => {
+        let currentRunSettings = { ...gameSettings };
+        let userFunctions = {};
+        let startTime = performance.now();
+        
+        if (editorData.rule.code) {
+            try {
+                const initApi = {
+                    forceSetting: (key, value) => {
+                        if (key in currentRunSettings) {
+                            currentRunSettings[key] = value;
+                        } else {
+                            console.warn(`Rule tried to force unknown setting: ${key}`);
+                        }
+                    }
+                };
+                
+                const combinedCode = editorData.rule.code + 
+                    `\nreturn { 
+                        onInit: typeof onInit === 'function' ? onInit : undefined,
+                        onPieceLock: typeof onPieceLock === 'function' ? onPieceLock : undefined,
+                        onUpdate: typeof onUpdate === 'function' ? onUpdate : undefined
+                    };`;
+
+                const ruleScript = new Function('api', combinedCode);
+                const returnedFuncs = ruleScript(initApi);
+
+                if (returnedFuncs.onInit) {
+                    returnedFuncs.onInit(initApi);
+                }
+                userFunctions = returnedFuncs;
+
+            } catch (e) {
+                alert('カスタムルールコードの実行中にエラーが発生しました:\n' + e.message);
+                console.error("Custom rule script error:", e);
+                return;
+            }
+        }
+        
+        const originalSettingsBeforeRun = { ...gameSettings };
+        Object.assign(gameSettings, currentRunSettings);
+
         gameState = 'PLAYING'; 
         document.getElementById('editor-container').style.display = 'none'; 
         document.getElementById('game-container').style.display = 'block';
         document.getElementById('scan-controls').style.display = 'none';
         document.getElementById('game-controls').style.display = 'flex';
+        
+        const ruleDescDisplay = document.getElementById('rule-description-display');
+        if (editorData.rule.description) {
+            ruleDescDisplay.innerText = editorData.rule.description;
+            ruleDescDisplay.style.display = 'block';
+            const p1OffsetX = 0;
+            const leftPos = p1OffsetX + PADDING;
+            const topPos = 160; 
+            ruleDescDisplay.style.left = `${leftPos}px`;
+            ruleDescDisplay.style.top = `${topPos}px`;
+            ruleDescDisplay.style.maxWidth = `${HOLD_AREA_WIDTH - PADDING}px`;
+        } else {
+            ruleDescDisplay.style.display = 'none';
+        }
         
         if (autoStartParams.hb) {
             document.getElementById('backToEditorBtn').style.display = 'none';
@@ -2403,6 +2563,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const createAndSetupPlayer = (id, offsetX, bindings, padIndex) => {
             const player = new Player(id, offsetX, bindings, padIndex);
             player.holdDisabled = autoStartParams.nh;
+            player.ruleHooks = userFunctions;
             return player;
         };
 
@@ -2425,6 +2586,44 @@ document.addEventListener('DOMContentLoaded', () => {
             p2.opponent = p1;
             players.push(p1, p2);
         }
+
+　　　　　const createPlayerProxy = (player) => {
+            if (!player) return null;
+            return {
+                get stats() { return player.stats; },
+                board: {
+                    hasBlock: (x, y) => {
+                        if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT) return true;
+                        return player.board[y][x] !== null;
+                    },
+                    placeBlock: (x, y, type) => {
+                        if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT) {
+                           player.board[y][x] = Object.keys(COLORS).includes(type) ? type : null;
+                        }
+                    },
+                },
+            };
+        };
+
+        const p1Proxy = createPlayerProxy(players[0]);
+        const p2Proxy = createPlayerProxy(players[1]);
+
+        const gameApi = {
+            win: (player) => { if (player instanceof Player) player.gameClear = true; },
+            lose: (player) => { if (player instanceof Player) player.gameOver = true; },
+            getTime: () => performance.now() - startTime,
+            sendAttack: (player, lines) => {
+                const targetPlayer = (player === p1Proxy && players[0]) ? players[0] :
+                                     (player === p2Proxy && players[1]) ? players[1] : null;
+                if (targetPlayer) {
+                    targetPlayer.addGarbage(lines);
+                }
+            },
+            p1: p1Proxy,
+            p2: p2Proxy
+        };
+        
+        players.forEach(p => p.gameApi = gameApi);
         
         autoStartParams = { ss: false, nh: false, hb: false };
         ctx.scale(RESOLUTION_SCALE, RESOLUTION_SCALE);
@@ -2437,12 +2636,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 
-    document.getElementById('backToEditorBtn').addEventListener('click', () => {
+document.getElementById('backToEditorBtn').addEventListener('click', () => {
         gameState = 'EDITING';
         players = [];
+        loadGameSettings();
         document.getElementById('game-container').style.display = 'none';
         document.getElementById('game-controls').style.display = 'none';
         document.getElementById('editor-container').style.display = 'flex';
+        document.getElementById('rule-description-display').style.display = 'none';
         
         virtualController.hide();
         
@@ -2557,12 +2758,15 @@ document.getElementById('settingsBtn').addEventListener('click', () => openUnifi
 
 document.getElementById('retryBtn').addEventListener('click', () => {
         if (gameState !== 'PLAYING' || !players.length) return;
-        
+
         const wasHoldDisabled = players[0].holdDisabled;
+        const userFunctions = players[0].ruleHooks || {};
+        let startTime = performance.now();
 
         const createAndSetupPlayer = (id, offsetX, bindings, padIndex) => {
             const player = new Player(id, offsetX, bindings, padIndex);
             player.holdDisabled = wasHoldDisabled;
+            player.ruleHooks = userFunctions;
             return player;
         };
 
@@ -2572,10 +2776,48 @@ document.getElementById('retryBtn').addEventListener('click', () => {
         } else {
             const p1 = createAndSetupPlayer('1', 0, keyBindings.p1, 0);
             const p2 = createAndSetupPlayer('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1);
-            p1.opponent = p2; 
+            p1.opponent = p2;
             p2.opponent = p1;
             players.push(p1, p2);
         }
+
+        const createPlayerProxy = (player) => {
+            if (!player) return null;
+            return {
+                get stats() { return player.stats; },
+                board: {
+                    hasBlock: (x, y) => {
+                        if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT) return true;
+                        return player.board[y][x] !== null;
+                    },
+                    placeBlock: (x, y, type) => {
+                        if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT) {
+                           player.board[y][x] = Object.keys(COLORS).includes(type) ? type : null;
+                        }
+                    },
+                },
+            };
+        };
+
+        const p1Proxy = createPlayerProxy(players[0]);
+        const p2Proxy = createPlayerProxy(players[1]);
+
+        const gameApi = {
+            win: (player) => { if (player instanceof Player) player.gameClear = true; },
+            lose: (player) => { if (player instanceof Player) player.gameOver = true; },
+            getTime: () => performance.now() - startTime,
+            sendAttack: (player, lines) => {
+                const targetPlayer = (player === p1Proxy && players[0]) ? players[0] :
+                                     (player === p2Proxy && players[1]) ? players[1] : null;
+                if (targetPlayer) {
+                    targetPlayer.addGarbage(lines);
+                }
+            },
+            p1: p1Proxy,
+            p2: p2Proxy
+        };
+        
+        players.forEach(p => p.gameApi = gameApi);
     });
 
     setupEditors();
