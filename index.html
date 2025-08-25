@@ -2758,10 +2758,49 @@ document.getElementById('settingsBtn').addEventListener('click', () => openUnifi
 
 document.getElementById('retryBtn').addEventListener('click', () => {
         if (gameState !== 'PLAYING' || !players.length) return;
-
-        const wasHoldDisabled = players[0].holdDisabled;
-        const userFunctions = players[0].ruleHooks || {};
+        
+        loadGameSettings();
+        
+        let currentRunSettings = { ...gameSettings };
+        let userFunctions = {};
         let startTime = performance.now();
+        const wasHoldDisabled = players[0].holdDisabled;
+
+        if (editorData.rule.code) {
+            try {
+                const initApi = {
+                    forceSetting: (key, value) => {
+                        if (key in currentRunSettings) {
+                            currentRunSettings[key] = value;
+                        } else {
+                            console.warn(`Rule tried to force unknown setting: ${key}`);
+                        }
+                    }
+                };
+                
+                const combinedCode = editorData.rule.code + 
+                    `\nreturn { 
+                        onInit: typeof onInit === 'function' ? onInit : undefined,
+                        onPieceLock: typeof onPieceLock === 'function' ? onPieceLock : undefined,
+                        onUpdate: typeof onUpdate === 'function' ? onUpdate : undefined
+                    };`;
+
+                const ruleScript = new Function('api', combinedCode);
+                const returnedFuncs = ruleScript(initApi);
+
+                if (returnedFuncs.onInit) {
+                    returnedFuncs.onInit(initApi);
+                }
+                userFunctions = returnedFuncs;
+
+            } catch (e) {
+                alert('リトライ時にカスタムルールコードの実行でエラーが発生しました:\n' + e.message);
+                console.error("Custom rule script error on retry:", e);
+                return;
+            }
+        }
+        
+        Object.assign(gameSettings, currentRunSettings);
 
         const createAndSetupPlayer = (id, offsetX, bindings, padIndex) => {
             const player = new Player(id, offsetX, bindings, padIndex);
