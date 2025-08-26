@@ -1422,7 +1422,7 @@ drawPiece(s,x,y,p,g) {s.forEach(b=>{const px=Math.floor(x+b[0])*BLOCK_SIZE, py=(
         if (pendingHeight > 0) { ctx.fillStyle = 'red'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight + (0.5 * BLOCK_SIZE), meterWidth, pendingHeight); }
         const queuedLines = this.garbageQueue.reduce((sum, g) => sum + g.lines, 0);
         const queuedHeight = Math.min(queuedLines, BOARD_VISIBLE_HEIGHT - this.pendingGarbage) * BLOCK_SIZE;
-        if (queuedHeight > 0) { ctx.fillStyle = '#f0f0f0'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight - queuedHeight + (0.5*BLOCK_SIZE), meterWidth, queuedHeight); }
+        if (queuedHeight > 0) { ctx.fillStyle = 'yellow'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight - queuedHeight + (0.5*BLOCK_SIZE), meterWidth, queuedHeight); }
 
         ctx.fillStyle = '#FFF'; const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
         ctx.fillText('NEXT', rX, 40);
