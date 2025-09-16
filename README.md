@@ -5,3 +5,5 @@ This project uses AI parameters from the
 which are provided under the terms of the Mozilla Public License 2.0.  
 
 The AI parameter portion follows the conditions of [MPL 2.0](https://www.mozilla.org/MPL/2.0/).
+
+The current implementation is a simplified version intended as a temporary port, and is not as strong as the original Cold Clear.
