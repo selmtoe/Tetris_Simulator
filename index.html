@@ -2195,87 +2195,35 @@ update(dt) {
         if (this.specialMoveTextTimer > 0) {
             this.specialMoveTextTimer -= dt;
         }
-
-        this.processGarbageQueue();
-
-        if (this.isClearingLine) {
-            this.lineClearDelayTimer -= dt;
-            if (this.lineClearDelayTimer <= 0) { 
-                this.isClearingLine = false; 
-                this.riseGarbage(); 
-                if (this.nextQueue[0] === 'E') {
-                    if (this.holdPiece) {
-                        this.player.pieceType = this.holdPiece;
-                        this.holdPiece = null;
-                        this.canHold = false;
-                        
-                        this.player.rotation = 0;
-                        this.lockTimer = 0;
-                        this.lastMoveWasRotation = false;
-                        this.player.x = Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[this.player.pieceType].center[0]) -1;
-                        const shape = this.getShape(this.player.pieceType, this.player.rotation);
-                        this.player.y = 19;
-                        if (this.checkCollision(this.player.x, this.player.y, shape)) {
-                            this.player.y = 18;
-                            if (this.checkCollision(this.player.x, this.player.y, shape)) {
-                                 this.gameOver = true;
-                            }
-                        }
-                        return;
-                    } else {
-                        this.gameOver = true;
-                        return;
-                    }
-                }
-                this.spawnNewPiece(); 
-            }
-            return;
-        }
-
-        if (this.isAi) {
-            if (!this.isAiThinking) {
-                this.requestAiMove();
-            }
-            return;
-        }
-
-        if (this.ruleHooks.onUpdate && typeof this.ruleHooks.onUpdate === 'function') {
-            try {
-                this.ruleHooks.onUpdate(this.gameApi, this);
-            } catch (e) {
-                console.error("Rule error onUpdate:", e);
-                this.gameOver = true;
-                return;
-            }
-        }
-        if (this.gameOver || this.gameClear) return;
+this.processGarbageQueue();
 
         const left = this.isActionPressed('left');
         const right = this.isActionPressed('right');
         const horizDir = left ? -1 : (right ? 1 : 0);
-
         if (horizDir !== 0) {
             if (this.dasDirection !== horizDir) { 
                 this.dasTimer = 0;
                 this.arrTimer = 0;
-                this.move(horizDir, 0);
+                if (!this.isClearingLine) this.move(horizDir, 0);
             } else { 
                 this.dasTimer += dt;
                 if (this.dasTimer >= gameSettings.das) {
                     if (gameSettings.arr === 0) {
-                        let successfulMoves = 0;
-                        while (!this.checkCollision(this.player.x + horizDir, this.player.y, this.getShape(this.player.pieceType, this.player.rotation))) {
-                            this.player.x += horizDir;
-                            successfulMoves++;
-                        }
-                        if (successfulMoves > 0) {
-                           this.lockTimer = 0;
-                           this.lastMoveWasRotation = false;
+                        if (!this.isClearingLine) {
+                            let successfulMoves = 0;
+                            while (!this.checkCollision(this.player.x + horizDir, this.player.y, this.getShape(this.player.pieceType, this.player.rotation))) {
+                                this.player.x += horizDir;
+                                successfulMoves++;
+                            }
+                            if (successfulMoves > 0) {
+                               this.lockTimer = 0;
+                               this.lastMoveWasRotation = false;
+                            }
                         }
                     } else {
                         this.arrTimer += dt;
                         if (this.arrTimer >= gameSettings.arr) {
-                            this.move(horizDir, 0);
+                            if (!this.isClearingLine) this.move(horizDir, 0);
                             this.arrTimer -= gameSettings.arr;
                         }
                     }
@@ -2284,6 +2232,57 @@ update(dt) {
         }
         this.dasDirection = horizDir;
 
+        if (this.isClearingLine) {
+            this.lineClearDelayTimer -= dt;
+if (this.lineClearDelayTimer <= 0) { 
+                this.isClearingLine = false;
+this.riseGarbage(); 
+                if (this.nextQueue[0] === 'E') {
+                    if (this.holdPiece) {
+                        this.player.pieceType = this.holdPiece;
+this.holdPiece = null;
+                        this.canHold = false;
+                        
+                        this.player.rotation = 0;
+                        this.lockTimer = 0;
+                        this.lastMoveWasRotation = false;
+this.player.x = Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[this.player.pieceType].center[0]) -1;
+                        const shape = this.getShape(this.player.pieceType, this.player.rotation);
+                        this.player.y = 19;
+if (this.checkCollision(this.player.x, this.player.y, shape)) {
+                            this.player.y = 18;
+if (this.checkCollision(this.player.x, this.player.y, shape)) {
+                                 this.gameOver = true;
+}
+                        }
+                        return;
+} else {
+                        this.gameOver = true;
+return;
+                    }
+                }
+                this.spawnNewPiece();
+}
+            return;
+}
+
+        if (this.isAi) {
+            if (!this.isAiThinking) {
+                this.requestAiMove();
+}
+            return;
+}
+
+        if (this.ruleHooks.onUpdate && typeof this.ruleHooks.onUpdate === 'function') {
+            try {
+                this.ruleHooks.onUpdate(this.gameApi, this);
+} catch (e) {
+                console.error("Rule error onUpdate:", e);
+this.gameOver = true;
+                return;
+            }
+        }
+        if (this.gameOver || this.gameClear) return;
         if (this.isActionPressed('softDrop')) {
              if (gameSettings.sdf > 0) {
                 this.sdfTimer += dt;
