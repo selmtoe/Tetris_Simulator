@@ -3443,7 +3443,7 @@ function loadBoardFromPptCanvas(sourceCanvas, playerId) {
 
         // 0番目の座標はホールド
         if (i === 0) {
-            const foundHoldMino = findClosestColor(avgColor.r, avgColor.g, avgColor.b);
+            const foundHoldMino = findClosestMinoOnly(avgColor.r, avgColor.g, avgColor.b);
             editorData[playerId].hold = foundHoldMino;
         // 1番目以降の座標はネクスト
         } else {
@@ -3459,6 +3459,7 @@ function loadBoardFromPptCanvas(sourceCanvas, playerId) {
             }
         }
     }
+
     
     // 削除されたミノの色をチェックし、条件を満たせばNEXTキューに追加
     if (deletedMinoColors.length > 0 && deletedMinoColors.every(color => color === deletedMinoColors[0])) {
