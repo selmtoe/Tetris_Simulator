@@ -4125,61 +4125,22 @@ document.getElementById('settingsBtn').addEventListener('click', () => openUnifi
         let startTime = performance.now();
         const wasHoldDisabled = players[0].holdDisabled;
 
-        if (editorData.rule.code) {
-            try {
-                const initApi = {
-                    forceSetting: (key, value) => {
-                        if (key in currentRunSettings) {
-                            currentRunSettings[key] = value;
-                        } else {
-                            console.warn(`Rule tried to force unknown setting: ${key}`);
-                        }
-                    }
-                };
-                
-                const combinedCode = editorData.rule.code + 
-                    `\nreturn { 
-                        onInit: typeof onInit === 'function' ? onInit : undefined,
-                        onPieceLock: typeof onPieceLock === 'function' ? onPieceLock : undefined,
-                        onUpdate: typeof onUpdate === 'function' ? onUpdate : undefined
-                    };`;
-
-                const ruleScript = new Function('api', combinedCode);
-                const returnedFuncs = ruleScript(initApi);
-
-                if (returnedFuncs.onInit) {
-                    returnedFuncs.onInit(initApi);
-                }
-                userFunctions = returnedFuncs;
-
-            } catch (e) {
-                alert('リトライ時にカスタムルールコードの実行でエラーが発生しました:\n' + e.message);
-                console.error("Custom rule script error on retry:", e);
-                return;
-            }
-        }
-        
-        Object.assign(gameSettings, currentRunSettings);
-
-        const createAndSetupPlayer = (id, offsetX, bindings, padIndex, isAi) => {
-            const player = new Player(id, offsetX, bindings, padIndex, isAi);
-            player.holdDisabled = wasHoldDisabled;
-            player.ruleHooks = userFunctions;
-            return player;
-        };
-
-        players = [];
         const p1_isAi_retry = document.getElementById('p1-ai-toggle').checked;
         const p2_isAi_retry = document.getElementById('p2-ai-toggle').checked;
 
+        const tempPlayers = [];
         if (gameMode === '1P') {
-            players.push(createAndSetupPlayer('1', 0, keyBindings.p1, 0, p1_isAi_retry));
+            const p = new Player('1', 0, keyBindings.p1, 0, p1_isAi_retry);
+            p.holdDisabled = wasHoldDisabled;
+            tempPlayers.push(p);
         } else {
-            const p1 = createAndSetupPlayer('1', 0, keyBindings.p1, 0, p1_isAi_retry);
-            const p2 = createAndSetupPlayer('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1, p2_isAi_retry);
+            const p1 = new Player('1', 0, keyBindings.p1, 0, p1_isAi_retry);
+            p1.holdDisabled = wasHoldDisabled;
+            const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1, p2_isAi_retry);
+            p2.holdDisabled = wasHoldDisabled;
             p1.opponent = p2;
             p2.opponent = p1;
-            players.push(p1, p2);
+            tempPlayers.push(p1, p2);
         }
 
         const createPlayerProxy = (player) => {
@@ -4200,38 +4161,67 @@ document.getElementById('settingsBtn').addEventListener('click', () => openUnifi
             };
         };
 
-        const p1Proxy = createPlayerProxy(players[0]);
-        const p2Proxy = createPlayerProxy(players[1]);
+        const p1Proxy = createPlayerProxy(tempPlayers[0]);
+        const p2Proxy = createPlayerProxy(tempPlayers[1]);
         
         const gameApi = {
-            win: (player) => { if (player instanceof Player) player.gameClear = true;
-},
-            lose: (player) => { if (player instanceof Player) player.gameOver = true;
-},
+            win: (player) => { if (player instanceof Player) player.gameClear = true; },
+            lose: (player) => { if (player instanceof Player) player.gameOver = true; },
             setCustomUIText: (player, text) => {
-                const targetPlayer = (player === p1Proxy && players[0]) ?
-                    players[0] :
-                    (player === p2Proxy && players[1]) ?
-                    players[1] : null;
+                const targetPlayer = (player === p1Proxy && tempPlayers[0]) ? tempPlayers[0] :
+                                     (player === p2Proxy && tempPlayers[1]) ? tempPlayers[1] : null;
                 if (targetPlayer) {
                     targetPlayer.customUIText = String(text);
                 }
             },
             getTime: () => performance.now() - startTime,
             sendAttack: (player, lines) => {
-                const targetPlayer = (player === p1Proxy && players[0]) ?
-players[0] :
-                                     (player === p2Proxy && players[1]) ?
-players[1] : null;
-                if (targetPlayer) {
-                    targetPlayer.addGarbage(lines);
-}
+                const targetPlayer = (player === p1Proxy && tempPlayers[0]) ? tempPlayers[0] :
+                                     (player === p2Proxy && tempPlayers[1]) ? tempPlayers[1] : null;
+                if (targetPlayer && targetPlayer.opponent) {
+                    targetPlayer.opponent.addGarbage(lines);
+                }
+            },
+             forceSetting: (key, value) => {
+                if (key in currentRunSettings) {
+                    currentRunSettings[key] = value;
+                } else {
+                    console.warn(`Rule tried to force unknown setting: ${key}`);
+                }
             },
             p1: p1Proxy,
             p2: p2Proxy
         };
-players.forEach(p => p.gameApi = gameApi);
-
+     
+   if (editorData.rule.code) {
+            try {
+                const combinedCode = editorData.rule.code + 
+                    `\nreturn { 
+                      onInit: typeof onInit === 'function' ? onInit : undefined,
+                        onPieceLock: typeof onPieceLock === 'function' ?
+onPieceLock : undefined,
+                        onUpdate: typeof onUpdate === 'function' ?
+onUpdate : undefined
+                    };`;
+const ruleScript = new Function('api', combinedCode);
+                const returnedFuncs = ruleScript(gameApi);
+if (returnedFuncs.onInit) {
+                    returnedFuncs.onInit(gameApi);
+}
+                userFunctions = returnedFuncs;
+} catch (e) {
+                alert('リトライ時にカスタムルールコードの実行でエラーが発生しました:\n' + e.message);
+console.error("Custom rule script error on retry:", e);
+                return;
+            }
+        }
+        
+        Object.assign(gameSettings, currentRunSettings);
+        players = tempPlayers;
+        players.forEach(p => {
+            p.ruleHooks = userFunctions;
+            p.gameApi = gameApi;
+        });
     });
 
     setupEditors();
