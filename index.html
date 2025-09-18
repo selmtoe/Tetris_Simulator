@@ -4115,7 +4115,7 @@ document.getElementById('settingsBtn').addEventListener('click', () => openUnifi
     }
     
 
-    document.getElementById('retryBtn').addEventListener('click', () => {
+document.getElementById('retryBtn').addEventListener('click', () => {
         if (gameState !== 'PLAYING' || !players.length) return;
         
         loadGameSettings();
@@ -4223,7 +4223,6 @@ console.error("Custom rule script error on retry:", e);
             p.gameApi = gameApi;
         });
     });
-
     setupEditors();
 
     loadStateFromURL();
