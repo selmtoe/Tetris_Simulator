@@ -1094,6 +1094,19 @@ function checkRotationKicks(
         return board.isFilled(y_pivot + dy, x_pivot + dx);
     };
 
+    if (pieceType === 'L' && currentRotation === 3) {
+        if ((is_filled(0, -2) || is_filled(-1, -2) || is_filled(-2, -2))&& !is_filled(-2, -1) && !is_filled(-1, -1) && is_filled(-1, 0)) {
+            createAndAddChildNode(parentNodeID, board, {x: x_pivot - 1, y: y_pivot - 1, rotation: 0, pieceType: 'L'}, true, childrenGenerated);
+            kickNodeCreated = true;
+        }
+    }
+
+    if (pieceType === 'J' && currentRotation === 1) {
+        if ((is_filled(0, -2) || is_filled(1, -2) || is_filled(2, -2))&& !is_filled(2, -1) && !is_filled(1, -1) && is_filled(1, 0)) {
+            createAndAddChildNode(parentNodeID, board, {x: x_pivot + 1, y: y_pivot - 1, rotation: 0, pieceType: 'J'}, true, childrenGenerated);
+            kickNodeCreated = true;
+        }
+    }
     if (pieceType === 'S' && currentRotation === 0) {
         if (is_filled(1, 0) && is_filled(0, -1) && is_filled(0, -4) &&
             !is_filled(-1, -1) && !is_filled(-1, -2) && !is_filled(0, -2) && !is_filled(0, -3)) {
