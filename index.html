@@ -301,13 +301,16 @@
 <div id="game-container">
 <div id="rule-description-display" style="display: none; position: absolute; z-index: 155; color: var(--font-color); background: rgba(26, 26, 46, 0.9); padding: 15px; border-radius: 10px; border: 2px solid #4b4b7c; font-family: var(--font-ui); font-size: 14px; max-width: 200px; max-height: 400px; overflow-y: auto; box-sizing: border-box; word-wrap: break-word; backdrop-filter: blur(4px);"></div>
 <div id="ai-debug-display" style="display: none; position: absolute; z-index: 156; color: white; background: rgba(0,0,0,0.7); padding: 5px; font-family: monospace; font-size: 10px; left: 10px; top: 300px; max-height: 400px; overflow: auto;"></div>
-<div id="ai-debug-controls" style="display: none; position: absolute; z-index: 156; color: white; background: rgba(0,0,0,0.7); padding: 5px; font-family: monospace; font-size: 12px; left: 10px; top: 150px;">
+
+<div id="ai-debug-controls" style="display: none; position: absolute; z-index: 156; color: white; background: rgba(0,0,0,0.7); padding: 5px; font-family: monospace; font-size: 12px;
+left: 10px; top: 150px;">
     <input id="ai-debug-piece" placeholder="Piece (T)" size="3">
     <input id="ai-debug-x" placeholder="X" size="2">
     <input id="ai-debug-y" placeholder="Y" size="2">
     <input id="ai-debug-rot" placeholder="Rot" size="2">
     <button id="ai-debug-execute">Execute</button>
 </div>
+<div id="ai-tree-debug-display" style="display: none; position: fixed; z-index: 157; color: white; background: rgba(0,0,0,0.7); padding: 5px; font-family: monospace; font-size: 12px; left: 10px; top: 10px;"></div>
 <canvas id="mainCanvas"></canvas>
 <div id="scan-instructions" style="display: none;"></div>
 
@@ -1481,63 +1484,79 @@ function pruneAndReroot(chosenNodeID) {
         }
     }
     
+
     nodeMap = new_nodeMap;
 }
 
-function findBestMove(boardString, nextString, isB2B, ren) {
-    nodeMap.clear();
+function boardsAreEqual(board1, board2) {
+    if (!board1 || !board2) return false;
+    for (let i = 0; i < TetrisBoard.HEIGHT; i++) {
+        if (board1.rows[i] !== board2.rows[i]) {
+            return false;
+        }
+    }
+    return true;
+}
 
-    const createBoardFromLayout = (layout) => {
+function findBestMove(boardString, nextString, isB2B, ren) {
+const createBoardFromLayout = (layout) => {
         const board = new TetrisBoard();
-        const layoutHeight = layout.length;
+const layoutHeight = layout.length;
         const boardHeight = TetrisBoard.HEIGHT;
         const width = TetrisBoard.WIDTH;
-
-        for (let layoutY = 0; layoutY < layoutHeight; layoutY++) {
+for (let layoutY = 0; layoutY < layoutHeight; layoutY++) {
             const boardY = (boardHeight - 1) - layoutY;
-            if (boardY < 0) continue;
+if (boardY < 0) continue;
 
             let rowValue = 0;
             const layoutRow = layout[layoutY];
-            if (!layoutRow || !Array.isArray(layoutRow)) {
+if (!layoutRow || !Array.isArray(layoutRow)) {
                  continue;
-            }
+}
 
             for (let x = 0; x < width; x++) {
                 if (layoutRow[x] !== null) {
                     rowValue |= (1 << x);
-                }
+}
             }
             board.rows[boardY] = rowValue;
-        }
+}
         return board;
     };
     
     let initialLayout;
-    try {
+try {
         initialLayout = JSON.parse(boardString);
-    } catch (e) {
+} catch (e) {
         console.error("Failed to parse boardString:", e);
-        initialLayout = Array(TetrisBoard.HEIGHT).fill(null).map(() => Array(TetrisBoard.WIDTH).fill(null));
+initialLayout = Array(TetrisBoard.HEIGHT).fill(null).map(() => Array(TetrisBoard.WIDTH).fill(null));
     }
     
     const board = createBoardFromLayout(initialLayout);
-    const minoSequence = nextString.split('');
+    const rootNode = nodeMap.get("");
+    if (rootNode && rootNode.board && boardsAreEqual(rootNode.board, board)) {
+        self.postMessage({type: 'debug', message: '探索木を引き継ぎました'});
+    } else {
+        nodeMap.clear();
+        self.postMessage({type: 'debug', message: '探索木をリセットしました'});
+    }
+const minoSequence = nextString.split('');
 
 const bestMove = runAI(board, minoSequence, isB2B, ren);
-
+const chosenNodeID = bestNodeIDAtDepth1;
+pruneAndReroot(chosenNodeID);
 if (bestMove && bestMove.pieceType !== ' ') {
     let finalX;
     let finalY;
 // bestMoveのミノが 'I' かつ 回転が 1 の場合の座標計算
 if (bestMove.pieceType === 'I' && bestMove.rotation === 1) {
     finalX = bestMove.x - 2;
-    finalY = 37 - bestMove.y;
+finalY = 37 - bestMove.y;
 } 
 // bestMoveのミノが 'Z' かつ 回転が 1 の場合の座標計算
 else if (bestMove.pieceType === 'Z' && bestMove.rotation === 1) {
     finalX = bestMove.x - 1;
-    finalY = 39 - bestMove.y;
+finalY = 39 - bestMove.y;
 } 
 // それ以外の場合の座標計算
 else {
@@ -1557,7 +1576,6 @@ else {
 
 return null;
 }
-
 self.onmessage = (e) => {
     const { boardString, nextString, isB2B, ren, thinkingTime } = e.data;
     if (thinkingTime) {
@@ -2094,12 +2112,17 @@ class Player {
 
         if (this.isAi) {
             this.aiWorker = new Worker(URL.createObjectURL(aiWorkerBlob));
-            this.aiWorker.onmessage = (e) => {
-                if (gameState === 'PLAYING' && this.isAiThinking) {
+this.aiWorker.onmessage = (e) => {
+                if (e.data && e.data.type === 'debug') {
+                    const debugDisplay = document.getElementById('ai-tree-debug-display');
+                    if (debugDisplay) {
+                        debugDisplay.textContent = e.data.message;
+                    }
+                } else if (gameState === 'PLAYING' && this.isAiThinking) {
                     this.executeAiMove(e.data);
-                }
+}
             };
-        }
+}
 
         this.keys = {};
         const pData = editorData[`p${id}`];
