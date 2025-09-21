@@ -3899,19 +3899,25 @@ type : null;
         const p2Proxy = createPlayerProxy(players[1]);
 
         const gameApi = {
-            win: (player) => { if (player instanceof Player) player.gameClear = true;
-},
-            lose: (player) => { if (player instanceof Player) player.gameOver = true;
-},
+            win: (player) => {
+                if (player instanceof Player) {
+                    player.gameClear = true;
+                    const message = 'clear';
+                    const targetOrigin = '*';
+                    window.parent.postMessage(message, targetOrigin);
+                }
+            },
+            lose: (player) => { if (player instanceof Player) player.gameOver = true; },
             setCustomUIText: (player, text) => {
                 const targetPlayer = (player === p1Proxy && players[0]) ?
-players[0] :
+                    players[0] :
                     (player === p2Proxy && players[1]) ?
-players[1] : null;
+                    players[1] : null;
                 if (targetPlayer) {
                     targetPlayer.customUIText = String(text);
-}
+                }
             },
+
             getTime: () => performance.now() - startTime,
             sendAttack: (player, lines) => {
                 const targetPlayer = (player === p1Proxy && players[0]) ?
@@ -4201,15 +4207,25 @@ document.getElementById('retryBtn').addEventListener('click', () => {
         const p2Proxy = createPlayerProxy(tempPlayers[1]);
         
         const gameApi = {
-            win: (player) => { if (player instanceof Player) player.gameClear = true; },
+            win: (player) => {
+                if (player instanceof Player) {
+                    player.gameClear = true;
+                    const message = 'clear';
+                    const targetOrigin = '*';
+                    window.parent.postMessage(message, targetOrigin);
+                }
+            },
             lose: (player) => { if (player instanceof Player) player.gameOver = true; },
             setCustomUIText: (player, text) => {
-                const targetPlayer = (player === p1Proxy && tempPlayers[0]) ? tempPlayers[0] :
-                                     (player === p2Proxy && tempPlayers[1]) ? tempPlayers[1] : null;
+                const targetPlayer = (player === p1Proxy && tempPlayers[0]) ?
+                    tempPlayers[0] :
+                                     (player === p2Proxy && tempPlayers[1]) ?
+                    tempPlayers[1] : null;
                 if (targetPlayer) {
                     targetPlayer.customUIText = String(text);
                 }
             },
+
             getTime: () => performance.now() - startTime,
             sendAttack: (player, lines) => {
                 const targetPlayer = (player === p1Proxy && tempPlayers[0]) ? tempPlayers[0] :
