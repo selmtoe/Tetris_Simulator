@@ -4266,13 +4266,7 @@ console.error("Custom rule script error on retry:", e);
     lastTime = performance.now(); 
     requestAnimationFrame(gameLoop);
     
-let resizeTimer;
-window.addEventListener('resize', () => {
-    // 既にタイマーがセットされていればクリア
-    clearTimeout(resizeTimer);
-    // 100ミリ秒後にupdateScaleを実行するタイマーをセット
-    resizeTimer = setTimeout(updateScale, 100); 
-});
+    window.addEventListener('resize', updateScale);
 
     setTimeout(updateScale, 100);
 
