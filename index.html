@@ -321,10 +321,13 @@ left: 10px; top: 150px;">
     </div>
 </div>
 
-<div id="game-controls" style="display: none; position: fixed; top: 10px; right: 10px; z-index: 160; gap: 10px;">
+<div id="game-controls" style="display: none;
+position: fixed; top: 10px; right: 10px; z-index: 160; gap: 10px;">
      <button id="retryBtn" class="button">リトライ</button>
+     <button id="gameSettingsBtn" class="button">設定</button>
      <button id="backToEditorBtn" class="button">戻る</button>
 </div>
+
 
 <div id="virtual-controller-container">
 
@@ -4274,6 +4277,9 @@ console.error("Custom rule script error on retry:", e);
             p.ruleHooks = userFunctions;
             p.gameApi = gameApi;
         });
+});
+    document.getElementById('gameSettingsBtn').addEventListener('click', () => {
+        openUnifiedSettingsModal('general');
     });
     setupEditors();
 
@@ -4281,6 +4287,7 @@ console.error("Custom rule script error on retry:", e);
 
     lastTime = performance.now(); 
     requestAnimationFrame(gameLoop);
+
     
     window.addEventListener('resize', updateScale);
 
