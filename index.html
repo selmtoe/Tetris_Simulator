@@ -3927,7 +3927,7 @@ type : null;
                     players[1] : null;
                 if (targetPlayer) {
                     targetPlayer.customUIText = String(text);
-                }
+}
             },
 
             getTime: () => performance.now() - startTime,
@@ -3936,14 +3936,18 @@ type : null;
 players[0] :
                                      (player === p2Proxy && players[1]) ?
 players[1] : null;
-                if (targetPlayer) {
-                    targetPlayer.addGarbage(lines);
+                if (targetPlayer && targetPlayer.opponent) {
+                    targetPlayer.opponent.garbageQueue.push({
+                        lines: lines,
+                        receivedTime: performance.now()
+                    });
 }
             },
             forceSetting: (key, value) => {
                 if (key in currentRunSettings) {
                     currentRunSettings[key] = value;
-                } else {
+} else {
+
                         console.warn(`Rule tried to force unknown setting: ${key}`);
                 }
             },
@@ -4235,21 +4239,27 @@ document.getElementById('retryBtn').addEventListener('click', () => {
                     tempPlayers[1] : null;
                 if (targetPlayer) {
                     targetPlayer.customUIText = String(text);
-                }
+}
             },
 
             getTime: () => performance.now() - startTime,
             sendAttack: (player, lines) => {
-                const targetPlayer = (player === p1Proxy && tempPlayers[0]) ? tempPlayers[0] :
-                                     (player === p2Proxy && tempPlayers[1]) ? tempPlayers[1] : null;
+                const targetPlayer = (player === p1Proxy && tempPlayers[0]) ?
+tempPlayers[0] :
+                                     (player === p2Proxy && tempPlayers[1]) ?
+tempPlayers[1] : null;
                 if (targetPlayer && targetPlayer.opponent) {
-                    targetPlayer.opponent.addGarbage(lines);
-                }
+                    targetPlayer.opponent.garbageQueue.push({
+                        lines: lines,
+                        receivedTime: performance.now()
+                    });
+}
             },
              forceSetting: (key, value) => {
                 if (key in currentRunSettings) {
                     currentRunSettings[key] = value;
-                } else {
+} else {
+
                     console.warn(`Rule tried to force unknown setting: ${key}`);
                 }
             },
