@@ -2477,13 +2477,13 @@ lockPiece() {
         
         let attack = 0;
         let isAction = false;
-        let moveInfo = { name: '', isPerfectClear: false, clearedLines: lines, isB2B: false, ren: this.ren, tSpinType: tspinResult };
+        let moveInfo = { name: '', isPC: false, clearedLines: lines, isB2B: false, ren: this.ren, TSpinType: tspinResult };
         
         if (isPC) {
             attack = 10;
             isAction = true;
             this.stats.perfectClear++;
-            moveInfo.isPerfectClear = true;
+            moveInfo.isPC = true;
             this.ren++;
             this.isB2B = true;
             this.specialMoveText.push("PERFECT CLEAR");
