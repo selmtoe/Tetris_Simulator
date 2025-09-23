@@ -3912,14 +3912,36 @@ type : null;
 
         const gameApi = {
             win: (player) => {
+                let targetPlayer = null;
                 if (player instanceof Player) {
-                    player.gameClear = true;
+                    targetPlayer = player;
+                } else if (player === p1Proxy) {
+                    targetPlayer = players[0];
+                } else if (player === p2Proxy) {
+                    targetPlayer = players[1];
+                }
+
+                if (targetPlayer) {
+                    targetPlayer.gameClear = true;
                     const message = 'clear';
                     const targetOrigin = '*';
                     window.parent.postMessage(message, targetOrigin);
                 }
             },
-            lose: (player) => { if (player instanceof Player) player.gameOver = true; },
+            lose: (player) => {
+                let targetPlayer = null;
+                if (player instanceof Player) {
+                    targetPlayer = player;
+                } else if (player === p1Proxy) {
+                    targetPlayer = players[0];
+                } else if (player === p2Proxy) {
+                    targetPlayer = players[1];
+                }
+
+                if (targetPlayer) {
+                    targetPlayer.gameOver = true;
+                }
+            },
             setCustomUIText: (player, text) => {
                 const targetPlayer = (player === p1Proxy && players[0]) ?
                     players[0] :
@@ -3927,34 +3949,32 @@ type : null;
                     players[1] : null;
                 if (targetPlayer) {
                     targetPlayer.customUIText = String(text);
-}
+                }
             },
-
             getTime: () => performance.now() - startTime,
             sendAttack: (receivingPlayer, lines) => {
                 const targetPlayer = (receivingPlayer === p1Proxy && players[0]) ?
-players[0] :
-                                     (receivingPlayer === p2Proxy && players[1]) ?
-players[1] : null;
+                    players[0] :
+                    (receivingPlayer === p2Proxy && players[1]) ?
+                    players[1] : null;
                 if (targetPlayer) {
                     targetPlayer.garbageQueue.push({
                         lines: lines,
                         receivedTime: performance.now()
                     });
-}
+                }
             },
             forceSetting: (key, value) => {
                 if (key in currentRunSettings) {
-
                     currentRunSettings[key] = value;
-} else {
-
-                        console.warn(`Rule tried to force unknown setting: ${key}`);
+                } else {
+                    console.warn(`Rule tried to force unknown setting: ${key}`);
                 }
             },
             p1: p1Proxy,
             p2: p2Proxy
         };
+
         
         if (editorData.rule.code) {
             try {
@@ -4225,49 +4245,69 @@ document.getElementById('retryBtn').addEventListener('click', () => {
         
         const gameApi = {
             win: (player) => {
+                let targetPlayer = null;
                 if (player instanceof Player) {
-                    player.gameClear = true;
+                    targetPlayer = player;
+                } else if (player === p1Proxy) {
+                    targetPlayer = tempPlayers[0];
+                } else if (player === p2Proxy) {
+                    targetPlayer = tempPlayers[1];
+                }
+
+                if (targetPlayer) {
+                    targetPlayer.gameClear = true;
                     const message = 'clear';
                     const targetOrigin = '*';
                     window.parent.postMessage(message, targetOrigin);
                 }
             },
-            lose: (player) => { if (player instanceof Player) player.gameOver = true; },
+            lose: (player) => {
+                let targetPlayer = null;
+                if (player instanceof Player) {
+                    targetPlayer = player;
+                } else if (player === p1Proxy) {
+                    targetPlayer = tempPlayers[0];
+                } else if (player === p2Proxy) {
+                    targetPlayer = tempPlayers[1];
+                }
+
+                if (targetPlayer) {
+                    targetPlayer.gameOver = true;
+                }
+            },
             setCustomUIText: (player, text) => {
                 const targetPlayer = (player === p1Proxy && tempPlayers[0]) ?
                     tempPlayers[0] :
-                                     (player === p2Proxy && tempPlayers[1]) ?
+                    (player === p2Proxy && tempPlayers[1]) ?
                     tempPlayers[1] : null;
                 if (targetPlayer) {
                     targetPlayer.customUIText = String(text);
-}
+                }
             },
-
             getTime: () => performance.now() - startTime,
             sendAttack: (receivingPlayer, lines) => {
                 const targetPlayer = (receivingPlayer === p1Proxy && tempPlayers[0]) ?
-tempPlayers[0] :
-                                     (receivingPlayer === p2Proxy && tempPlayers[1]) ?
-tempPlayers[1] : null;
+                    tempPlayers[0] :
+                    (receivingPlayer === p2Proxy && tempPlayers[1]) ?
+                    tempPlayers[1] : null;
                 if (targetPlayer) {
                     targetPlayer.garbageQueue.push({
                         lines: lines,
                         receivedTime: performance.now()
                     });
-}
+                }
             },
-             forceSetting: (key, value) => {
+            forceSetting: (key, value) => {
                 if (key in currentRunSettings) {
-
                     currentRunSettings[key] = value;
-} else {
-
+                } else {
                     console.warn(`Rule tried to force unknown setting: ${key}`);
                 }
             },
             p1: p1Proxy,
             p2: p2Proxy
         };
+
      
    if (editorData.rule.code) {
             try {
