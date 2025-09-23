@@ -3937,7 +3937,7 @@ players[0] :
                                      (player === p2Proxy && players[1]) ?
 players[1] : null;
                 if (targetPlayer && targetPlayer.opponent) {
-                    targetPlayer.opponent.garbageQueue.push({
+                    targetPlayer.garbageQueue.push({
                         lines: lines,
                         receivedTime: performance.now()
                     });
@@ -4249,7 +4249,7 @@ tempPlayers[0] :
                                      (player === p2Proxy && tempPlayers[1]) ?
 tempPlayers[1] : null;
                 if (targetPlayer && targetPlayer.opponent) {
-                    targetPlayer.opponent.garbageQueue.push({
+                    targetPlayer.garbageQueue.push({
                         lines: lines,
                         receivedTime: performance.now()
                     });
