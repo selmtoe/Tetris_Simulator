@@ -3931,12 +3931,12 @@ type : null;
             },
 
             getTime: () => performance.now() - startTime,
-            sendAttack: (player, lines) => {
-                const targetPlayer = (player === p1Proxy && players[0]) ?
+            sendAttack: (receivingPlayer, lines) => {
+                const targetPlayer = (receivingPlayer === p1Proxy && players[0]) ?
 players[0] :
-                                     (player === p2Proxy && players[1]) ?
+                                     (receivingPlayer === p2Proxy && players[1]) ?
 players[1] : null;
-                if (targetPlayer && targetPlayer.opponent) {
+                if (targetPlayer) {
                     targetPlayer.garbageQueue.push({
                         lines: lines,
                         receivedTime: performance.now()
@@ -3945,6 +3945,7 @@ players[1] : null;
             },
             forceSetting: (key, value) => {
                 if (key in currentRunSettings) {
+
                     currentRunSettings[key] = value;
 } else {
 
@@ -4243,12 +4244,12 @@ document.getElementById('retryBtn').addEventListener('click', () => {
             },
 
             getTime: () => performance.now() - startTime,
-            sendAttack: (player, lines) => {
-                const targetPlayer = (player === p1Proxy && tempPlayers[0]) ?
+            sendAttack: (receivingPlayer, lines) => {
+                const targetPlayer = (receivingPlayer === p1Proxy && tempPlayers[0]) ?
 tempPlayers[0] :
-                                     (player === p2Proxy && tempPlayers[1]) ?
+                                     (receivingPlayer === p2Proxy && tempPlayers[1]) ?
 tempPlayers[1] : null;
-                if (targetPlayer && targetPlayer.opponent) {
+                if (targetPlayer) {
                     targetPlayer.garbageQueue.push({
                         lines: lines,
                         receivedTime: performance.now()
@@ -4257,6 +4258,7 @@ tempPlayers[1] : null;
             },
              forceSetting: (key, value) => {
                 if (key in currentRunSettings) {
+
                     currentRunSettings[key] = value;
 } else {
 
