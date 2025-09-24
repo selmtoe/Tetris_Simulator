@@ -515,7 +515,6 @@ const StandardWeights = {
 
 const weights = StandardWeights;
 const MOVE_DIGITS = 5;
-let MAX_THINKING_MS = 500;
 const MAX_SEARCH_DEPTH = 15;
 const PLAYFIELD_HEIGHT = 20;
 
@@ -1273,12 +1272,8 @@ function isDepthLevel(id, depth) {
     return id.length === depth * MOVE_DIGITS;
 }
 
-function isTimeExceeded() {
-    return (performance.now() - searchStartTime) > MAX_THINKING_MS;
-}
-
 function select(parentNodeID) {
-    if (isTimeExceeded() || !nodeMap.has(parentNodeID)) {
+    if (!nodeMap.has(parentNodeID)) {
         return "";
     }
 
@@ -1397,65 +1392,6 @@ function runAI(initialBoard, minoSequence, isB2B, ren) {
             }
         }
     }
-
-    while (!isTimeExceeded()) {
-        let selectedNodeID = rootID;
-        let depthOfSelectedNode = 0;
-        let placementsToSelectedNode = [];
-        let usedMinosOnPath = [];
-
-        while (nodeMap.has(selectedNodeID) && nodeMap.get(selectedNodeID).expanded) {
-            if (depthOfSelectedNode >= MAX_SEARCH_DEPTH ) {
-                break;
-            }
-            const childNodeID = select(selectedNodeID);
-            if (childNodeID === "" || !nodeMap.has(childNodeID)) {
-                break;
-            }
-            placementsToSelectedNode.push(nodeMap.get(childNodeID).place);
-            usedMinosOnPath.push(nodeMap.get(childNodeID).place.pieceType);
-            selectedNodeID = childNodeID;
-            depthOfSelectedNode++;
-        }
-        
-        const selectedNode = nodeMap.get(selectedNodeID);
-        if (selectedNode && !selectedNode.expanded) {
-            if (depthOfSelectedNode < MAX_SEARCH_DEPTH) {
-                const boardStateForExpansion = selectedNode.board;
-                const availableMinosForExpand = judgeAvailableMinos(minoSequence, usedMinosOnPath);
-                if (availableMinosForExpand.length > 0) {
-                    for (const pieceForExpansion of availableMinosForExpand) {
-                        expand(selectedNodeID, boardStateForExpansion, pieceForExpansion, placementsToSelectedNode);
-                    }
-                }
-            }
-        }
-    }
-
-    if (bestNodeIDAtDepth1 !== "" && nodeMap.has(bestNodeIDAtDepth1)) {
-        return nodeMap.get(bestNodeIDAtDepth1).place;
-    }
-    
-    const rootNode = nodeMap.get(rootID);
-    if (rootNode && rootNode.childrenIDs.length > 0) {
-        let bestFallbackID = "";
-        let maxEvalFallback = -Number.MAX_VALUE;
-        for(const childID of rootNode.childrenIDs){
-            if(nodeMap.has(childID)){
-                const child_node = nodeMap.get(childID);
-                const current_total_eval = child_node.acc_eval + child_node.transient_eval;
-                if(current_total_eval > maxEvalFallback){
-                    maxEvalFallback = current_total_eval;
-                    bestFallbackID = childID;
-                }
-            }
-        }
-        if(bestFallbackID !== ""){
-             return nodeMap.get(bestFallbackID).place;
-        }
-    }
-
-    return {x: 0, y: 0, rotation: 0, pieceType: ' '};
 }
 
 function pruneAndReroot(chosenNodeID) {
@@ -1523,93 +1459,155 @@ function boardsAreEqual(board1, board2) {
     return true;
 }
 
-function findBestMove(boardString, nextString, isB2B, ren) {
-const createBoardFromLayout = (layout) => {
-        const board = new TetrisBoard();
-const layoutHeight = layout.length;
-        const boardHeight = TetrisBoard.HEIGHT;
-        const width = TetrisBoard.WIDTH;
-for (let layoutY = 0; layoutY < layoutHeight; layoutY++) {
-            const boardY = (boardHeight - 1) - layoutY;
-if (boardY < 0) continue;
+let isThinking = false;
+let currentMinoSequence = [];
 
-            let rowValue = 0;
-            const layoutRow = layout[layoutY];
-if (!layoutRow || !Array.isArray(layoutRow)) {
-                 continue;
-}
+function thinkingLoop() {
+    if (!isThinking) return;
 
-            for (let x = 0; x < width; x++) {
-                if (layoutRow[x] !== null) {
-                    rowValue |= (1 << x);
-}
+    for (let i = 0; i < 500; i++) {
+        const rootID = "";
+        let selectedNodeID = rootID;
+        let depthOfSelectedNode = 0;
+        let placementsToSelectedNode = [];
+        let usedMinosOnPath = [];
+        while (nodeMap.has(selectedNodeID) && nodeMap.get(selectedNodeID).expanded) {
+            if (depthOfSelectedNode >= MAX_SEARCH_DEPTH) {
+                break;
             }
-            board.rows[boardY] = rowValue;
-}
-        return board;
-    };
-    
-    let initialLayout;
-try {
-        initialLayout = JSON.parse(boardString);
-} catch (e) {
-        console.error("Failed to parse boardString:", e);
-initialLayout = Array(TetrisBoard.HEIGHT).fill(null).map(() => Array(TetrisBoard.WIDTH).fill(null));
+            const childNodeID = select(selectedNodeID);
+            if (childNodeID === "" || !nodeMap.has(childNodeID)) {
+                break;
+            }
+            placementsToSelectedNode.push(nodeMap.get(childNodeID).place);
+            usedMinosOnPath.push(nodeMap.get(childNodeID).place.pieceType);
+            selectedNodeID = childNodeID;
+            depthOfSelectedNode++;
+        }
+        
+        const selectedNode = nodeMap.get(selectedNodeID);
+        if (selectedNode && !selectedNode.expanded) {
+            if (depthOfSelectedNode < MAX_SEARCH_DEPTH) {
+                const boardStateForExpansion = selectedNode.board;
+                const availableMinosForExpand = judgeAvailableMinos(currentMinoSequence, usedMinosOnPath);
+                if (availableMinosForExpand.length > 0) {
+                    for (const pieceForExpansion of availableMinosForExpand) {
+                        expand(selectedNodeID, boardStateForExpansion, pieceForExpansion, placementsToSelectedNode);
+                    }
+                }
+            }
+        }
     }
-    
-    const board = createBoardFromLayout(initialLayout);
-    const rootNode = nodeMap.get("");
-    if (rootNode && rootNode.board && boardsAreEqual(rootNode.board, board)) {
-        self.postMessage({type: 'debug', message: '探索木を引き継ぎました'});
-    } else {
-        nodeMap.clear();
-        self.postMessage({type: 'debug', message: '探索木をリセットしました'});
-    }
-const minoSequence = nextString.split('');
 
-const bestMove = runAI(board, minoSequence, isB2B, ren);
-const chosenNodeID = bestNodeIDAtDepth1;
-pruneAndReroot(chosenNodeID);
-if (bestMove && bestMove.pieceType !== ' ') {
-    let finalX;
-    let finalY;
-// bestMoveのミノが 'I' かつ 回転が 1 の場合の座標計算
-if (bestMove.pieceType === 'I' && bestMove.rotation === 1) {
-    finalX = bestMove.x - 2;
-finalY = 37 - bestMove.y;
-} 
-// bestMoveのミノが 'Z' かつ 回転が 1 の場合の座標計算
-else if (bestMove.pieceType === 'Z' && bestMove.rotation === 1) {
-    finalX = bestMove.x - 1;
-finalY = 39 - bestMove.y;
-} 
-// それ以外の場合の座標計算
-else {
-    finalX = bestMove.x;
-    finalY = 39 - bestMove.y;
+    setTimeout(thinkingLoop, 0);
 }
 
-
-
-    return {
-        piece: bestMove.pieceType,
-        x: finalX,
-        y: finalY,
-        rotation: bestMove.rotation,
-    };
-}
-
-return null;
-}
 self.onmessage = (e) => {
-    const { boardString, nextString, isB2B, ren, thinkingTime } = e.data;
-    if (thinkingTime) {
-        MAX_THINKING_MS = thinkingTime;
+    const { type, boardString, nextString, isB2B, ren } = e.data;
+
+    if (type === 'start') {
+        const createBoardFromLayout = (layout) => {
+            const board = new TetrisBoard();
+            const layoutHeight = layout.length;
+            const boardHeight = TetrisBoard.HEIGHT;
+            const width = TetrisBoard.WIDTH;
+            for (let layoutY = 0; layoutY < layoutHeight; layoutY++) {
+                const boardY = (boardHeight - 1) - layoutY;
+                if (boardY < 0) continue;
+
+                let rowValue = 0;
+                const layoutRow = layout[layoutY];
+                if (!layoutRow || !Array.isArray(layoutRow)) {
+                    continue;
+                }
+
+                for (let x = 0; x < width; x++) {
+                    if (layoutRow[x] !== null) {
+                        rowValue |= (1 << x);
+                    }
+                }
+                board.rows[boardY] = rowValue;
+            }
+            return board;
+        };
+        
+        let initialLayout;
+        try {
+            initialLayout = JSON.parse(boardString);
+        } catch (e) {
+            console.error("Failed to parse boardString:", e);
+            initialLayout = Array(TetrisBoard.HEIGHT).fill(null).map(() => Array(TetrisBoard.WIDTH).fill(null));
+        }
+        
+        const board = createBoardFromLayout(initialLayout);
+        const rootNode = nodeMap.get("");
+        if (rootNode && rootNode.board && boardsAreEqual(rootNode.board, board)) {
+            self.postMessage({type: 'debug', message: '探索木を引き継ぎました'});
+        } else {
+            nodeMap.clear();
+            self.postMessage({type: 'debug', message: '探索木をリセットしました'});
+        }
+        currentMinoSequence = nextString.split('');
+        runAI(board, currentMinoSequence, isB2B, ren);
+        
+        isThinking = true;
+        thinkingLoop();
+
+    } else if (type === 'stop') {
+        isThinking = false;
+        
+        let bestMove = null;
+        if (bestNodeIDAtDepth1 !== "" && nodeMap.has(bestNodeIDAtDepth1)) {
+            bestMove = nodeMap.get(bestNodeIDAtDepth1).place;
+        } else {
+            const rootNode = nodeMap.get("");
+            if (rootNode && rootNode.childrenIDs.length > 0) {
+                let bestFallbackID = "";
+                let maxEvalFallback = -Number.MAX_VALUE;
+                for(const childID of rootNode.childrenIDs){
+                    if(nodeMap.has(childID)){
+                        const child_node = nodeMap.get(childID);
+                        const current_total_eval = child_node.acc_eval + child_node.transient_eval;
+                        if(current_total_eval > maxEvalFallback){
+                            maxEvalFallback = current_total_eval;
+                            bestFallbackID = childID;
+                        }
+                    }
+                }
+                if(bestFallbackID !== ""){
+                    bestMove = nodeMap.get(bestFallbackID).place;
+                }
+            }
+        }
+        
+        const chosenNodeID = bestNodeIDAtDepth1;
+        pruneAndReroot(chosenNodeID);
+        
+        if (bestMove && bestMove.pieceType !== ' ') {
+            let finalX;
+            let finalY;
+            if (bestMove.pieceType === 'I' && bestMove.rotation === 1) {
+                finalX = bestMove.x - 2;
+                finalY = 37 - bestMove.y;
+            } 
+            else if (bestMove.pieceType === 'Z' && bestMove.rotation === 1) {
+                finalX = bestMove.x - 1;
+                finalY = 39 - bestMove.y;
+            } 
+            else {
+                finalX = bestMove.x;
+                finalY = 39 - bestMove.y;
+            }
+            self.postMessage({
+                piece: bestMove.pieceType,
+                x: finalX,
+                y: finalY,
+                rotation: bestMove.rotation,
+            });
+        } else {
+            self.postMessage(null);
+        }
     }
-    
-    const bestMove = findBestMove(boardString, nextString, isB2B, ren);
-    
-    self.postMessage(bestMove);
 };
 `;
 
@@ -2731,7 +2729,6 @@ drawMessage(t) { const cX = PLAYFIELD_WIDTH / 2; const cY = CANVAS_HEIGHT / 2; c
 
 requestAiMove() {
         this.isAiThinking = true;
-
         const debugPayload = {
             playerId: this.id,
             board: this.board,
@@ -2753,7 +2750,6 @@ requestAiMove() {
             }
         }
         boardString += '\n]';
-
         let nextPiecesForWorker;
         if (this.holdPiece) {
             nextPiecesForWorker = [this.holdPiece, this.player.pieceType, ...this.nextQueue];
@@ -2761,17 +2757,23 @@ requestAiMove() {
             nextPiecesForWorker = [this.player.pieceType, ...this.nextQueue];
         }
         const nextString = nextPiecesForWorker.join('');
-
-        const aiWorkerPayload = {
+        
+        const aiWorkerStartPayload = {
+            type: 'start',
             boardString: boardString,
             nextString: nextString,
             isB2B: this.isB2B,
             ren: this.ren + 1,
-            thinkingTime: gameSettings.aiThinkingTime
         };
-
+        
         if (this.aiWorker) {
-            this.aiWorker.postMessage(aiWorkerPayload);
+            this.aiWorker.postMessage(aiWorkerStartPayload);
+
+            setTimeout(() => {
+                if (this.isAiThinking) {
+                    this.aiWorker.postMessage({ type: 'stop' });
+                }
+            }, gameSettings.aiThinkingTime);
         }
     }
 
