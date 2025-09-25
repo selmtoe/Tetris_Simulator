@@ -3003,6 +3003,10 @@ requestAiMove() {
         const startState = { x: this.player.x, y: this.player.y, r: this.player.rotation };
         const targetState = { x: move.x, y: move.y, r: move.rotation };
         const minoType = this.player.pieceType;
+        if (minoType === 'I') {
+            targetState.x += 1;
+            startState.x += 1;
+        }
         const pathfinderBoard = this.board.map(row => row.map(cell => (cell === null ? 0 : 1)));
 
         const path = this.findShortestPath_forAI(startState, targetState, minoType, pathfinderBoard);
