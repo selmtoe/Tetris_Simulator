@@ -515,7 +515,6 @@ const StandardWeights = {
 
 const weights = StandardWeights;
 const MOVE_DIGITS = 5;
-let MAX_THINKING_MS = 500;
 const MAX_SEARCH_DEPTH = 15;
 const PLAYFIELD_HEIGHT = 20;
 
@@ -1273,12 +1272,8 @@ function isDepthLevel(id, depth) {
     return id.length === depth * MOVE_DIGITS;
 }
 
-function isTimeExceeded() {
-    return (performance.now() - searchStartTime) > MAX_THINKING_MS;
-}
-
 function select(parentNodeID) {
-    if (isTimeExceeded() || !nodeMap.has(parentNodeID)) {
+    if (!nodeMap.has(parentNodeID)) {
         return "";
     }
 
@@ -1397,65 +1392,6 @@ function runAI(initialBoard, minoSequence, isB2B, ren) {
             }
         }
     }
-
-    while (!isTimeExceeded()) {
-        let selectedNodeID = rootID;
-        let depthOfSelectedNode = 0;
-        let placementsToSelectedNode = [];
-        let usedMinosOnPath = [];
-
-        while (nodeMap.has(selectedNodeID) && nodeMap.get(selectedNodeID).expanded) {
-            if (depthOfSelectedNode >= MAX_SEARCH_DEPTH ) {
-                break;
-            }
-            const childNodeID = select(selectedNodeID);
-            if (childNodeID === "" || !nodeMap.has(childNodeID)) {
-                break;
-            }
-            placementsToSelectedNode.push(nodeMap.get(childNodeID).place);
-            usedMinosOnPath.push(nodeMap.get(childNodeID).place.pieceType);
-            selectedNodeID = childNodeID;
-            depthOfSelectedNode++;
-        }
-        
-        const selectedNode = nodeMap.get(selectedNodeID);
-        if (selectedNode && !selectedNode.expanded) {
-            if (depthOfSelectedNode < MAX_SEARCH_DEPTH) {
-                const boardStateForExpansion = selectedNode.board;
-                const availableMinosForExpand = judgeAvailableMinos(minoSequence, usedMinosOnPath);
-                if (availableMinosForExpand.length > 0) {
-                    for (const pieceForExpansion of availableMinosForExpand) {
-                        expand(selectedNodeID, boardStateForExpansion, pieceForExpansion, placementsToSelectedNode);
-                    }
-                }
-            }
-        }
-    }
-
-    if (bestNodeIDAtDepth1 !== "" && nodeMap.has(bestNodeIDAtDepth1)) {
-        return nodeMap.get(bestNodeIDAtDepth1).place;
-    }
-    
-    const rootNode = nodeMap.get(rootID);
-    if (rootNode && rootNode.childrenIDs.length > 0) {
-        let bestFallbackID = "";
-        let maxEvalFallback = -Number.MAX_VALUE;
-        for(const childID of rootNode.childrenIDs){
-            if(nodeMap.has(childID)){
-                const child_node = nodeMap.get(childID);
-                const current_total_eval = child_node.acc_eval + child_node.transient_eval;
-                if(current_total_eval > maxEvalFallback){
-                    maxEvalFallback = current_total_eval;
-                    bestFallbackID = childID;
-                }
-            }
-        }
-        if(bestFallbackID !== ""){
-             return nodeMap.get(bestFallbackID).place;
-        }
-    }
-
-    return {x: 0, y: 0, rotation: 0, pieceType: ' '};
 }
 
 function pruneAndReroot(chosenNodeID) {
@@ -1523,93 +1459,172 @@ function boardsAreEqual(board1, board2) {
     return true;
 }
 
-function findBestMove(boardString, nextString, isB2B, ren) {
-const createBoardFromLayout = (layout) => {
-        const board = new TetrisBoard();
-const layoutHeight = layout.length;
-        const boardHeight = TetrisBoard.HEIGHT;
-        const width = TetrisBoard.WIDTH;
-for (let layoutY = 0; layoutY < layoutHeight; layoutY++) {
-            const boardY = (boardHeight - 1) - layoutY;
-if (boardY < 0) continue;
+let isThinking = false;
+let currentMinoSequence = [];
 
-            let rowValue = 0;
-            const layoutRow = layout[layoutY];
-if (!layoutRow || !Array.isArray(layoutRow)) {
-                 continue;
-}
+function thinkingLoop() {
+    if (!isThinking) return;
 
-            for (let x = 0; x < width; x++) {
-                if (layoutRow[x] !== null) {
-                    rowValue |= (1 << x);
-}
+    for (let i = 0; i < 100; i++) {
+        const rootID = "";
+        let selectedNodeID = rootID;
+        let depthOfSelectedNode = 0;
+        let placementsToSelectedNode = [];
+        let usedMinosOnPath = [];
+        while (nodeMap.has(selectedNodeID) && nodeMap.get(selectedNodeID).expanded) {
+            if (depthOfSelectedNode >= MAX_SEARCH_DEPTH) {
+                break;
             }
-            board.rows[boardY] = rowValue;
+            const childNodeID = select(selectedNodeID);
+            if (childNodeID === "" || !nodeMap.has(childNodeID)) {
+                break;
+            }
+            placementsToSelectedNode.push(nodeMap.get(childNodeID).place);
+            usedMinosOnPath.push(nodeMap.get(childNodeID).place.pieceType);
+            selectedNodeID = childNodeID;
+            depthOfSelectedNode++;
+        }
+        
+        const selectedNode = nodeMap.get(selectedNodeID);
+        if (selectedNode && !selectedNode.expanded) {
+            if (depthOfSelectedNode < MAX_SEARCH_DEPTH) {
+                const boardStateForExpansion = selectedNode.board;
+                const availableMinosForExpand = judgeAvailableMinos(currentMinoSequence, usedMinosOnPath);
+                if (availableMinosForExpand.length > 0) {
+                    for (const pieceForExpansion of availableMinosForExpand) {
+                        expand(selectedNodeID, boardStateForExpansion, pieceForExpansion, placementsToSelectedNode);
 }
-        return board;
-    };
-    
-    let initialLayout;
-try {
-        initialLayout = JSON.parse(boardString);
-} catch (e) {
-        console.error("Failed to parse boardString:", e);
-initialLayout = Array(TetrisBoard.HEIGHT).fill(null).map(() => Array(TetrisBoard.WIDTH).fill(null));
+                }
+            }
+        }
     }
-    
-    const board = createBoardFromLayout(initialLayout);
-    const rootNode = nodeMap.get("");
-    if (rootNode && rootNode.board && boardsAreEqual(rootNode.board, board)) {
-        self.postMessage({type: 'debug', message: '探索木を引き継ぎました'});
-    } else {
-        nodeMap.clear();
-        self.postMessage({type: 'debug', message: '探索木をリセットしました'});
-    }
-const minoSequence = nextString.split('');
 
-const bestMove = runAI(board, minoSequence, isB2B, ren);
-const chosenNodeID = bestNodeIDAtDepth1;
-pruneAndReroot(chosenNodeID);
-if (bestMove && bestMove.pieceType !== ' ') {
-    let finalX;
-    let finalY;
-// bestMoveのミノが 'I' かつ 回転が 1 の場合の座標計算
-if (bestMove.pieceType === 'I' && bestMove.rotation === 1) {
-    finalX = bestMove.x - 2;
-finalY = 37 - bestMove.y;
-} 
-// bestMoveのミノが 'Z' かつ 回転が 1 の場合の座標計算
-else if (bestMove.pieceType === 'Z' && bestMove.rotation === 1) {
-    finalX = bestMove.x - 1;
-finalY = 39 - bestMove.y;
-} 
-// それ以外の場合の座標計算
-else {
-    finalX = bestMove.x;
-    finalY = 39 - bestMove.y;
+    self.postMessage({ type: 'nodeCount', count: nodeMap.size });
+    setTimeout(thinkingLoop, 0);
 }
 
-
-
-    return {
-        piece: bestMove.pieceType,
-        x: finalX,
-        y: finalY,
-        rotation: bestMove.rotation,
-    };
-}
-
-return null;
-}
 self.onmessage = (e) => {
-    const { boardString, nextString, isB2B, ren, thinkingTime } = e.data;
-    if (thinkingTime) {
-        MAX_THINKING_MS = thinkingTime;
+    const { type, boardString, nextString, isB2B, ren } = e.data;
+if (type === 'start') {
+        const createBoardFromLayout = (layout) => {
+            const board = new TetrisBoard();
+            const layoutHeight = layout.length;
+            const boardHeight = TetrisBoard.HEIGHT;
+            const width = TetrisBoard.WIDTH;
+            for (let layoutY = 0; layoutY < layoutHeight; layoutY++) {
+                const boardY = (boardHeight - 1) - layoutY;
+                if (boardY < 0) continue;
+
+                let rowValue = 0;
+                const layoutRow = layout[layoutY];
+                if (!layoutRow || !Array.isArray(layoutRow)) {
+                    continue;
+                }
+
+                for (let x = 0; x < width; x++) {
+                    if (layoutRow[x] !== null) {
+                        rowValue |= (1 << x);
+                    }
+                }
+                board.rows[boardY] = rowValue;
+            }
+            return board;
+        };
+        
+        let initialLayout;
+        try {
+            initialLayout = JSON.parse(boardString);
+        } catch (e) {
+            console.error("Failed to parse boardString:", e);
+            initialLayout = Array(TetrisBoard.HEIGHT).fill(null).map(() => Array(TetrisBoard.WIDTH).fill(null));
+        }
+        
+                const board = createBoardFromLayout(initialLayout);
+        
+        const chosenNodeID = bestNodeIDAtDepth1;
+        pruneAndReroot(chosenNodeID);
+
+        const rootNode = nodeMap.get("");
+        if (rootNode && rootNode.board && boardsAreEqual(rootNode.board, board)) {
+            self.postMessage({type: 'debug', message: '探索木を引き継ぎました'});
+        } else {
+            nodeMap.clear();
+            self.postMessage({type: 'debug', message: '探索木をリセットしました'});
+        }
+        currentMinoSequence = nextString.split('');
+        runAI(board, currentMinoSequence, isB2B, ren);
+        
+        if (!isThinking) {
+            isThinking = true;
+            thinkingLoop();
+        }
+
+
+} else if (type === 'stop') {
+        let bestMove = null;
+        if (bestNodeIDAtDepth1 !== "" && nodeMap.has(bestNodeIDAtDepth1)) {
+            bestMove = nodeMap.get(bestNodeIDAtDepth1).place;
+            
+            const rootNode = nodeMap.get("");
+            if (rootNode) {
+                for (const childId of rootNode.childrenIDs) {
+                    if (nodeMap.has(childId)) {
+                        const childNode = nodeMap.get(childId);
+                        if (childId === bestNodeIDAtDepth1) {
+                            childNode.acc_eval += 999999;
+                        } else {
+                            childNode.acc_eval -= 999999;
+                        }
+                    }
+                }
+            }
+        } else {
+            const rootNode = nodeMap.get("");
+            if (rootNode && rootNode.childrenIDs.length > 0) {
+                let bestFallbackID = "";
+                let maxEvalFallback = -Number.MAX_VALUE;
+                for(const childID of rootNode.childrenIDs){
+                    if(nodeMap.has(childID)){
+                        const child_node = nodeMap.get(childID);
+                        const current_total_eval = child_node.acc_eval + child_node.transient_eval;
+                        if(current_total_eval > maxEvalFallback){
+                            maxEvalFallback = current_total_eval;
+                            bestFallbackID = childID;
+                        }
+                    }
+                }
+                if(bestFallbackID !== ""){
+                    bestMove = nodeMap.get(bestFallbackID).place;
+                }
+            }
+        }
+        
+        if (bestMove && bestMove.pieceType !== ' ') {
+            let finalX;
+            let finalY;
+            if (bestMove.pieceType === 'I' && bestMove.rotation === 1) {
+                finalX = bestMove.x - 2;
+                finalY = 37 - bestMove.y;
+            } 
+            else if (bestMove.pieceType === 'Z' && bestMove.rotation === 1) {
+                finalX = bestMove.x - 1;
+                finalY = 39 - bestMove.y;
+            } 
+            else {
+                finalX = bestMove.x;
+                finalY = 39 - bestMove.y;
+            }
+            self.postMessage({
+                piece: bestMove.pieceType,
+                x: finalX,
+                y: finalY,
+                rotation: bestMove.rotation,
+            });
+        } else {
+            self.postMessage(null);
+        }
     }
-    
-    const bestMove = findBestMove(boardString, nextString, isB2B, ren);
-    
-    self.postMessage(bestMove);
+
 };
 `;
 
@@ -1996,7 +2011,8 @@ let gameSettings = {
     maxNext: 8,
     showEffects: true,
     touchControlsEnabled: 'ontouchstart' in window,
-    aiThinkingTime: 500,
+    aiMoveDelay: 30,
+    aiSdfDelay: 30,
 };
 
 const COLORS = { 'I': '#00f0f0', 'O': '#f0f000', 'T': '#a000f0', 'L': '#f0a000', 'J': '#0000f0', 'S': '#00f000', 'Z': '#f00000', 'G': '#999999', 'E': '#808080' };
@@ -2135,22 +2151,29 @@ class Player {
         this.isAiThinking = false;
         this.aiWorker = null;
 
-        if (this.isAi) {
+if (this.isAi) {
             this.aiWorker = new Worker(URL.createObjectURL(aiWorkerBlob));
 this.aiWorker.onmessage = (e) => {
                 if (e.data && e.data.type === 'debug') {
                     const debugDisplay = document.getElementById('ai-tree-debug-display');
-                    if (debugDisplay) {
+if (debugDisplay) {
                         debugDisplay.textContent = e.data.message;
+}
+                } else if (e.data && e.data.type === 'nodeCount') {
+                    const debugDisplay = document.getElementById('ai-tree-debug-display');
+if (debugDisplay) {
+                        
                     }
-                } else if (gameState === 'PLAYING' && this.isAiThinking) {
+} else if (gameState === 'PLAYING' && this.isAiThinking) {
+                    
                     this.executeAiMove(e.data);
-}
+                }
             };
-}
+        }
 
         this.keys = {};
         const pData = editorData[`p${id}`];
+
         this.initialHold = pData.hold;
         this.board = pData.board.map(row => [...row]);
         this.minoGenerator = createMinoGenerator(pData.nextQueue);
@@ -2443,30 +2466,10 @@ hold() {
 
 lockPiece() {
         if (!this.player.pieceType) return;
+        
         let tspinResult = this.checkForTSpin();
 
-        // AI操作の場合の独立したTスピン判定 (一時的なもので、後で削除する予定)
-        if (this.isAi && this.player.pieceType === 'T' ) {
-            const shape = this.getShape(this.player.pieceType, this.player.rotation);
-            let isCoveredFromAbove = false;
-            for (const block of shape) {
-                const blockX = Math.floor(this.player.x + block[0]);
-                const blockY = Math.floor(this.player.y + block[1]);
-
-                // 設置ミノの上が埋まっている→Tspin
-                if (blockY - 1 < 0 || (this.board[blockY - 1] && this.board[blockY - 1][blockX] !== null)) {
-                    isCoveredFromAbove = true;
-                    break;
-                }
-            }
-            // 1つでも上が埋まっていれば、他の条件に関わらずT-Spinとする
-            if (isCoveredFromAbove) {
-                tspinResult = 'TSPIN';
-            }
-        }
-
         const shape = this.getShape(this.player.pieceType, this.player.rotation);
-
         this.specialMoveText = [];
         let moveText = '';
 
@@ -2730,8 +2733,7 @@ const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
 drawMessage(t) { const cX = PLAYFIELD_WIDTH / 2; const cY = CANVAS_HEIGHT / 2; ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, -0.5*BLOCK_SIZE, PLAYFIELD_WIDTH, CANVAS_HEIGHT); ctx.fillStyle = '#FFF'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `bold ${BLOCK_SIZE * 1.5}px "Orbitron"`; ctx.fillText(t, cX, cY); ctx.textBaseline = 'alphabetic'; }
 
 requestAiMove() {
-        this.isAiThinking = true;
-
+        this.isAiThinking = true; 
         const debugPayload = {
             playerId: this.id,
             board: this.board,
@@ -2753,7 +2755,6 @@ requestAiMove() {
             }
         }
         boardString += '\n]';
-
         let nextPiecesForWorker;
         if (this.holdPiece) {
             nextPiecesForWorker = [this.holdPiece, this.player.pieceType, ...this.nextQueue];
@@ -2761,21 +2762,230 @@ requestAiMove() {
             nextPiecesForWorker = [this.player.pieceType, ...this.nextQueue];
         }
         const nextString = nextPiecesForWorker.join('');
-
-        const aiWorkerPayload = {
+        
+        const aiWorkerStartPayload = {
+            type: 'start',
             boardString: boardString,
             nextString: nextString,
             isB2B: this.isB2B,
             ren: this.ren + 1,
-            thinkingTime: gameSettings.aiThinkingTime
         };
-
+        
         if (this.aiWorker) {
-            this.aiWorker.postMessage(aiWorkerPayload);
+            this.aiWorker.postMessage(aiWorkerStartPayload);
+            this.aiWorker.postMessage({ type: 'stop' });
         }
     }
 
-executeAiMove(move) {
+
+    getMinoShape_forAI(type, rotation) {
+        rotation = rotation % 4;
+        switch (type) {
+            case 'I':
+                if (rotation == 0) return [[0,0], [-1,0], [1,0], [2,0]];
+                if (rotation == 1) return [[1,0], [1,-1], [1,1], [1,2]];
+                if (rotation == 2) return [[0,1], [-1,1], [1,1], [2,1]];
+                if (rotation == 3) return [[0,0], [0,-1], [0,1], [0,2]];
+                break;
+            case 'O':
+                return [[0,0], [1,0], [0,-1], [1,-1]];
+            case 'T':
+                if (rotation == 0) return [[0,0], [-1,0], [1,0], [0,-1]];
+                if (rotation == 1) return [[0,0], [0,-1], [1,0], [0,1]];
+                if (rotation == 2) return [[0,0], [1,0], [-1,0], [0,1]];
+                if (rotation == 3) return [[0,0], [0,1], [-1,0], [0,-1]];
+                break;
+            case 'S':
+                if (rotation == 0) return [[0,0], [-1,0], [0,-1], [1,-1]];
+                if (rotation == 1) return [[0,0], [0,-1], [1,0], [1,1]];
+                if (rotation == 2) return [[0,0], [1,0], [0,1], [-1,1]];
+                if (rotation == 3) return [[0,0], [0,1], [-1,0], [-1,-1]];
+                break;
+            case 'Z':
+                if (rotation == 0) return [[0,0], [1,0], [0,-1], [-1,-1]];
+                if (rotation == 1) return [[0,0], [0,1], [1,0], [1,-1]];
+                if (rotation == 2) return [[0,0], [-1,0], [0,1], [1,1]];
+                if (rotation == 3) return [[0,0], [0,-1], [-1,0], [-1,1]];
+                break;
+            case 'J':
+                if (rotation == 0) return [[0,0], [-1,0], [1,0], [-1,-1]];
+                if (rotation == 1) return [[0,0], [0,-1], [0,1], [1,-1]];
+                if (rotation == 2) return [[0,0], [1,0], [-1,0], [1,1]];
+                if (rotation == 3) return [[0,0], [0,1], [0,-1], [-1,1]];
+                break;
+            case 'L':
+                if (rotation == 0) return [[0,0], [1,0], [-1,0], [1,-1]];
+                if (rotation == 1) return [[0,0], [0,1], [0,-1], [1,1]];
+                if (rotation == 2) return [[0,0], [-1,0], [1,0], [-1,1]];
+                if (rotation == 3) return [[0,0], [0,-1], [0,1], [-1,-1]];
+                break;
+        }
+        return [[0,0]];
+    }
+
+    srsOffsets_forAI = {
+        common: {
+            '0->1': [[0,0], [-1,0], [-1,1], [0,-2], [-1,-2]],
+            '1->0': [[0,0], [1,0], [1,-1], [0,2], [1,2]],
+            '1->2': [[0,0], [1,0], [1,-1], [0,2], [1,2]],
+            '2->1': [[0,0], [-1,0], [-1,1], [0,-2], [-1,-2]],
+            '2->3': [[0,0], [1,0], [1,1], [0,-2], [1,-2]],
+            '3->2': [[0,0], [-1,0], [-1,-1], [0,2], [-1,2]],
+            '3->0': [[0,0], [-1,0], [-1,-1], [0,2], [-1,2]],
+            '0->3': [[0,0], [1,0], [1,1], [0,-2], [1,-2]],
+        },
+        I: {
+            '0->1': [[0,0], [-2,0], [1,0], [-2,-1], [1,2]],
+            '1->0': [[0,0], [2,0], [-1,0], [2,1], [-1,-2]],
+            '1->2': [[0,0], [-1,0], [2,0], [-1,2], [2,-1]],
+            '2->1': [[0,0], [1,0], [-2,0], [1,-2], [-2,1]],
+            '2->3': [[0,0], [2,0], [-1,0], [2,1], [-1,-2]],
+            '3->2': [[0,0], [-2,0], [1,0], [-2,-1], [1,2]],
+            '3->0': [[0,0], [-1,0], [2,0], [-1,2], [2,-1]],
+            '0->3': [[0,0], [1,0], [-2,0], [1,-2], [-2,1]],
+        }
+    };
+
+    checkCollision_forAI(type, x, y, r, currentBoard) {
+        const shape = this.getMinoShape_forAI(type, r);
+        for (const [dx, dy] of shape) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT || (ny >= 0 && currentBoard[ny][nx])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    tryRotate_forAI(type, x, y, r, direction, currentBoard) {
+        const newR = (r + direction + 4) % 4;
+        const offsetTable = (type === 'I' ? this.srsOffsets_forAI.I : this.srsOffsets_forAI.common);
+        const offsetData = offsetTable[`${r}->${newR}`];
+
+        for (const [ox, oy] of offsetData) {
+            const newX = x + ox;
+            const newY = y - oy;
+            if (!this.checkCollision_forAI(type, newX, newY, newR, currentBoard)) {
+                return { x: newX, y: newY, r: newR };
+            }
+        }
+        return null;
+    }
+
+    findShortestPath_forAI(start, target, minoType, currentBoard) {
+        const queue = [[start.x, start.y, start.r, []]];
+        const visited = new Set();
+        visited.add(`${start.x},${start.y},${start.r}`);
+
+        while (queue.length > 0) {
+            const [x, y, r, path] = queue.shift();
+
+            if (x === target.x && r === target.r) {
+                let finalY = y;
+                while (!this.checkCollision_forAI(minoType, x, finalY + 1, r, currentBoard)) {
+                    finalY++;
+                }
+                if (finalY === target.y) {
+                    return [...path, '↑'];
+                }
+            }
+
+            const actions = ['R', 'L', '←', '→', '↓'];
+
+            for (const action of actions) {
+                let nextState = null;
+                let newPath = [...path, action];
+
+                switch (action) {
+                    case '←':
+                        nextState = { x: x - 1, y: y, r: r };
+                        break;
+                    case '→':
+                        nextState = { x: x + 1, y: y, r: r };
+                        break;
+                    case '↓':
+                        nextState = { x: x, y: y + 1, r: r };
+                        break;
+                    case 'R':
+                        nextState = this.tryRotate_forAI(minoType, x, y, r, 1, currentBoard);
+                        break;
+                    case 'L':
+                        nextState = this.tryRotate_forAI(minoType, x, y, r, -1, currentBoard);
+                        break;
+                }
+
+                if (nextState) {
+                    const stateKey = `${nextState.x},${nextState.y},${nextState.r}`;
+                    if (!visited.has(stateKey) && !this.checkCollision_forAI(minoType, nextState.x, nextState.y, nextState.r, currentBoard)) {
+                        visited.add(stateKey);
+                        queue.push([nextState.x, nextState.y, nextState.r, newPath]);
+                    }
+                }
+            }
+        }
+        
+        let alternativeTarget = null;
+        if (minoType === 'I' || minoType === 'S' || minoType === 'Z') {
+            const { x: tx, y: ty, r: tr } = target;
+            if (minoType === 'I') {
+                if (tr === 0) alternativeTarget = { x: tx, y: ty - 1, r: 2 };
+                else if (tr === 2) alternativeTarget = { x: tx, y: ty + 1, r: 0 };
+                else if (tr === 1) alternativeTarget = { x: tx + 1, y: ty, r: 3 };
+                else if (tr === 3) alternativeTarget = { x: tx - 1, y: ty, r: 1 };
+            } else if (minoType === 'S') {
+                if (tr === 0) alternativeTarget = { x: tx, y: ty - 1, r: 2 };
+                else if (tr === 2) alternativeTarget = { x: tx, y: ty + 1, r: 0 };
+                else if (tr === 1) alternativeTarget = { x: tx + 1, y: ty, r: 3 };
+                else if (tr === 3) alternativeTarget = { x: tx - 1, y: ty, r: 1 };
+            } else if (minoType === 'Z') {
+                if (tr === 0) alternativeTarget = { x: tx, y: ty - 1, r: 2 };
+                else if (tr === 2) alternativeTarget = { x: tx, y: ty + 1, r: 0 };
+                else if (tr === 1) alternativeTarget = { x: tx + 1, y: ty, r: 3 };
+                else if (tr === 3) alternativeTarget = { x: tx - 1, y: ty, r: 1 };
+            }
+        }
+
+        if (alternativeTarget) {
+            const queue2 = [[start.x, start.y, start.r, []]];
+            const visited2 = new Set([`${start.x},${start.y},${start.r}`]);
+            while (queue2.length > 0) {
+                 const [x, y, r, path] = queue2.shift();
+                 if (x === alternativeTarget.x && r === alternativeTarget.r) {
+                     let finalY = y;
+                     while (!this.checkCollision_forAI(minoType, x, finalY + 1, r, currentBoard)) {
+                         finalY++;
+                     }
+                     if (finalY === alternativeTarget.y) {
+                         return [...path, '↑'];
+                     }
+                 }
+                 const actions = ['R', 'L', '←', '→', '↓'];
+                 for (const action of actions) {
+                     let nextState = null;
+                     let newPath = [...path, action];
+                     switch (action) {
+                         case '←': nextState = { x: x - 1, y: y, r: r }; break;
+                         case '→': nextState = { x: x + 1, y: y, r: r }; break;
+                         case '↓': nextState = { x: x, y: y + 1, r: r }; break;
+                         case 'R': nextState = this.tryRotate_forAI(minoType, x, y, r, 1, currentBoard); break;
+                         case 'L': nextState = this.tryRotate_forAI(minoType, x, y, r, -1, currentBoard); break;
+                     }
+                     if (nextState) {
+                         const stateKey = `${nextState.x},${nextState.y},${nextState.r}`;
+                         if (!visited2.has(stateKey) && !this.checkCollision_forAI(minoType, nextState.x, nextState.y, nextState.r, currentBoard)) {
+                             visited2.add(stateKey);
+                             queue2.push([nextState.x, nextState.y, nextState.r, newPath]);
+                         }
+                     }
+                 }
+            }
+        }
+
+        return null;
+    }
+async executeAiMove(move) {
+        
         if (this.gameOver || !move) {
             this.isAiThinking = false;
             return;
@@ -2784,23 +2994,79 @@ executeAiMove(move) {
         if (this.player.pieceType !== move.piece) {
             if (this.canHold) {
                 this.hold();
+                await new Promise(resolve => setTimeout(resolve, gameSettings.aiMoveDelay));
             } else {
                 this.isAiThinking = false;
                 return;
             }
         }
 
+        const startState = { x: this.player.x, y: this.player.y, r: this.player.rotation };
+        const targetState = { x: move.x, y: move.y, r: move.rotation };
+        const minoType = this.player.pieceType;
+        if (minoType === 'I') {
+            targetState.x += 1;
+            startState.x += 1;
+        }
+        const pathfinderBoard = this.board.map(row => row.map(cell => (cell === null ? 0 : 1)));
+        const path = this.findShortestPath_forAI(startState, targetState, minoType, pathfinderBoard);
+
+        if (path) {
+            for (const action of path) {
+                switch (action) {
+                    case '←': this.player.x--;
+                        break;
+                    case '→': this.player.x++; break;
+                    case '↓': this.player.y++; break;
+                    case 'R': {
+                        const newState = this.tryRotate_forAI(minoType, this.player.x, this.player.y, this.player.rotation, 1, pathfinderBoard);
+                        if (newState) {
+                            this.player.x = newState.x;
+                            this.player.y = newState.y;
+                            this.player.rotation = newState.r;
+                        }
+                        break;
+                    }
+                    case 'L': {
+                        const newState = this.tryRotate_forAI(minoType, this.player.x, this.player.y, this.player.rotation, -1, pathfinderBoard);
+                        if (newState) {
+                            this.player.x = newState.x;
+                            this.player.y = newState.y;
+                            this.player.rotation = newState.r;
+                        }
+                        break;
+                    }
+                    case '↑':
+                        this.player.y = this.getGhostY();
+                        break;
+                }
+                let delay = gameSettings.aiMoveDelay;
+                if (action === '↓') {
+                    delay = gameSettings.aiSdfDelay;
+                }
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+
+        if (path && path.length > 0) {
+            const lastMeaningfulAction = path.at(-1) === '↑' && path.length > 1 ? path.at(-2) : path.at(-1);
+            this.lastMoveWasRotation = lastMeaningfulAction === 'R' || lastMeaningfulAction === 'L';
+        } else {
+            this.lastMoveWasRotation = false;
+}
+
         this.player.rotation = move.rotation;
         this.player.x = move.x;
         this.player.y = move.y;
         
         this.lockPiece();
-
+        
         this.isAiThinking = false;
     }
 }
+function setupEditors() { ['p1', 'p2'].forEach(setupPlayerEditor);
+}
 
-function setupEditors() { ['p1', 'p2'].forEach(setupPlayerEditor); }
 
 function setupPlayerEditor(playerId) {
     editorData[playerId].board = Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
@@ -3199,21 +3465,26 @@ function populateAiSettingsTab() {
     itemType.append(labelType, selectType);
     list.appendChild(itemType);
 
-    const itemTime = document.createElement('div');
-    itemTime.className = 'setting-item';
-    const labelTime = document.createElement('span');
-    labelTime.textContent = 'AIの思考時間 (ms)';
-    const inputTime = document.createElement('input');
-    inputTime.type = 'number';
-    inputTime.min = 50;
-    inputTime.max = 5000;
-    inputTime.step = 50;
-    inputTime.value = gameSettings.aiThinkingTime;
-    inputTime.onchange = e => {
-        gameSettings.aiThinkingTime = Math.max(50, Math.min(5000, parseInt(e.target.value, 10)));
+    const settingDetails = {
+        aiMoveDelay: { label: 'AIの操作入力間隔 (ms)', min: 20, max: 500, step: 1 },
+        aiSdfDelay: { label: 'AI SDF (ms)', min: 0, max: 500, step: 1 }
     };
-    itemTime.append(labelTime, inputTime);
-    list.appendChild(itemTime);
+    
+    Object.keys(settingDetails).forEach(key => {
+        const item = document.createElement('div');
+        item.className = 'setting-item';
+        const label = document.createElement('span');
+        label.textContent = settingDetails[key].label;
+        const input = document.createElement('input');
+        input.type = 'number';
+        Object.assign(input, settingDetails[key]);
+        input.value = gameSettings[key];
+        input.onchange = e => {
+            gameSettings[key] = Math.max(settingDetails[key].min, Math.min(settingDetails[key].max, parseInt(e.target.value, 10)));
+        };
+        item.append(label, input);
+        list.appendChild(item);
+    });
 }
 
 function openUnifiedSettingsModal(initialTab = 'general') {
@@ -4071,6 +4342,15 @@ if (gameSettings.touchControlsEnabled) {
 
 document.getElementById('backToEditorBtn').addEventListener('click', () => {
         gameState = 'EDITING';
+        
+        if (players.length > 0) {
+            players.forEach(p => {
+                if (p.aiWorker) {
+                    p.aiWorker.terminate();
+                }
+            });
+        }
+        
         players = [];
         loadGameSettings();
         document.getElementById('game-container').style.display = 'none';
@@ -4080,7 +4360,8 @@ document.getElementById('backToEditorBtn').addEventListener('click', () => {
         
         virtualController.hide();
         
-        const aiDebugDisplay = document.getElementById('ai-debug-display');
+     
+   const aiDebugDisplay = document.getElementById('ai-debug-display');
         const aiDebugControls = document.getElementById('ai-debug-controls');
         if(aiDebugDisplay) aiDebugDisplay.style.display = 'none';
         if(aiDebugControls) aiDebugControls.style.display = 'none';
@@ -4193,10 +4474,15 @@ document.getElementById('settingsBtn').addEventListener('click', () => openUnifi
             .catch(err => console.error('Service Worker registration failed:', err));
     }
     
-
 document.getElementById('retryBtn').addEventListener('click', () => {
         if (gameState !== 'PLAYING' || !players.length) return;
         
+        players.forEach(p => {
+            if (p.aiWorker) {
+                p.aiWorker.terminate();
+            }
+        });
+
         loadGameSettings();
         
         let currentRunSettings = { ...gameSettings };
