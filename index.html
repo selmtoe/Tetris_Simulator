@@ -368,7 +368,11 @@ position: fixed; top: 10px; right: 10px; z-index: 160; gap: 10px;">
             
             <h3><br>タッチ操作設定 (P1)</h3>
             <p></p>
-            <div class="modal-controls" style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+            <div id="p1-touch-mode-selection" style="display: flex; justify-content: center; gap: 10px; margin-bottom: 15px;">
+                <button class="button active" data-touch-mode="button">Button</button>
+                <button class="button" data-touch-mode="draw">Draw</button>
+            </div>
+            <div class="modal-controls" id="p1-touch-button-controls" style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
                 <button id="vc-edit-layout-btn" class="button">ボタン配置モードへ</button>
                 <button id="vc-copy-layout-btn" class="button">配置をコピー</button>
                 <button id="vc-paste-layout-btn" class="button">配置をインポート</button>
@@ -2011,8 +2015,31 @@ let gameSettings = {
     maxNext: 8,
     showEffects: true,
     touchControlsEnabled: 'ontouchstart' in window,
+    touchControlType: 'button',
     aiMoveDelay: 30,
     aiSdfDelay: 30,
+};
+
+const DRAW_SHAPE_MAP = {
+    "1,0;2,0;3,0": { type: "I", rot: 0, offset: [0, 0] }, 
+    "0,1;0,2;0,3": { type: "I", rot: 1, offset: [0, 0] }, 
+    "1,0;0,1;1,1": { type: "O", rot: 0, offset: [0, 0] },
+    "-1,0;1,0;0,1": { type: "T", rot: 0, offset: [0, 0] },
+    "0,-1;0,1;1,0": { type: "T", rot: 1, offset: [0, 0] },
+    "-1,0;1,0;0,-1": { type: "T", rot: 2, offset: [0, 0] },
+    "0,-1;0,1;-1,0": { type: "T", rot: 3, offset: [0, 0] },
+    "-1,0;1,0;1,1": { type: "L", rot: 0, offset: [0, 0] },
+    "0,1;0,-1;1,-1": { type: "L", rot: 1, offset: [0, 0] },
+    "-1,0;1,0;-1,-1": { type: "L", rot: 2, offset: [0, 0] },
+    "0,1;0,-1;-1,1": { type: "L", rot: 3, offset: [0, 0] },
+    "-1,0;1,0;-1,1": { type: "J", rot: 0, offset: [0, 0] },
+    "0,-1;0,1;1,1": { type: "J", rot: 1, offset: [0, 0] },
+    "-1,0;1,0;1,-1": { type: "J", rot: 2, offset: [0, 0] },
+    "0,-1;0,1;-1,-1": { type: "J", rot: 3, offset: [0, 0] },
+    "-1,0;0,1;1,1": { type: "S", rot: 0, offset: [0, 0] },
+    "0,-1;1,0;1,1": { type: "S", rot: 1, offset: [0, 0] },
+    "1,0;0,-1;-1,-1": { type: "Z", rot: 0, offset: [0, 0] },
+    "0,1;1,0;1,-1": { type: "Z", rot: 1, offset: [0, 0] },
 };
 
 const COLORS = { 'I': '#00f0f0', 'O': '#f0f000', 'T': '#a000f0', 'L': '#f0a000', 'J': '#0000f0', 'S': '#00f000', 'Z': '#f00000', 'G': '#999999', 'E': '#808080' };
@@ -2150,18 +2177,17 @@ class Player {
         this.isAi = isAi;
         this.isAiThinking = false;
         this.aiWorker = null;
-
-if (this.isAi) {
+        if (this.isAi) {
             this.aiWorker = new Worker(URL.createObjectURL(aiWorkerBlob));
-this.aiWorker.onmessage = (e) => {
+            this.aiWorker.onmessage = (e) => {
                 if (e.data && e.data.type === 'debug') {
                     const debugDisplay = document.getElementById('ai-tree-debug-display');
-if (debugDisplay) {
+                    if (debugDisplay) {
                         debugDisplay.textContent = e.data.message;
-}
+                    }
                 } else if (e.data && e.data.type === 'nodeCount') {
                     const debugDisplay = document.getElementById('ai-tree-debug-display');
-if (debugDisplay) {
+                    if (debugDisplay) {
                         
                     }
 } else if (gameState === 'PLAYING' && this.isAiThinking) {
@@ -2170,6 +2196,9 @@ if (debugDisplay) {
                 }
             };
         }
+        
+        this.isDrawingOnBoard = false;
+        this.drawnBlocks = new Map();
 
         this.keys = {};
         const pData = editorData[`p${id}`];
@@ -2190,6 +2219,8 @@ reset() {
         for (let i = 0; i < gameSettings.maxNext; i++) {
             this.nextQueue.push(this.minoGenerator.next().value);
         }
+        this.drawnBlocks.clear();
+        this.isDrawingOnBoard = false;
         this.holdPiece = this.initialHold; this.canHold = true; this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
         this.dasTimer = 0; this.arrTimer = 0; this.sdfTimer = 0; this.dasDirection = 0;
         this.isGrounded = false; this.gameOver = false; this.isClearingLine = false; this.lineClearDelayTimer = 0;
@@ -2246,7 +2277,7 @@ reset() {
         }
         
 
-        if (this.id === '1' && gameSettings.touchControlsEnabled) {
+        if (this.id === '1' && gameSettings.touchControlsEnabled && gameSettings.touchControlType === 'button') {
             if (virtualController.isButtonPressed(action)) return true;
         }
 
@@ -2412,7 +2443,21 @@ draw() {
         for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) { for (let x = 0; x < BOARD_WIDTH; x++) { const boardY = y + this.viewY; if (this.board[boardY]?.[x]) { this.drawBlock(this.board[boardY][x], x * BLOCK_SIZE, y * BLOCK_SIZE); } } }
 
 
-        if (!this.gameOver && !this.gameClear && !this.isClearingLine && this.player.pieceType) { const shape = this.getShape(this.player.pieceType, this.player.rotation); const ghostY = this.getGhostY(); if (ghostY > this.player.y) this.drawPiece(shape, this.player.x, ghostY, this.player.pieceType, true); this.drawPiece(shape, this.player.x, this.player.y, this.player.pieceType, false); }
+        if (!this.gameOver && !this.gameClear && !this.isClearingLine && this.player.pieceType) { const shape = this.getShape(this.player.pieceType, this.player.rotation);
+const ghostY = this.getGhostY(); if (ghostY > this.player.y) this.drawPiece(shape, this.player.x, ghostY, this.player.pieceType, true); this.drawPiece(shape, this.player.x, this.player.y, this.player.pieceType, false);
+        }
+        if (this.drawnBlocks.size > 0) {
+            ctx.fillStyle = '#FFFFFF';
+            ctx.globalAlpha = 0.8;
+            for (const key of this.drawnBlocks.keys()) {
+                const [x, y] = key.split(',').map(Number);
+                const screenY = y - this.viewY;
+                if (screenY >= 0 && screenY < BOARD_VISIBLE_HEIGHT) {
+                    ctx.fillRect(x * BLOCK_SIZE, screenY * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+                }
+            }
+            ctx.globalAlpha = 1.0;
+        }
         this.drawSpecialMoveText();
         if (this.gameOver) this.drawMessage("GAME OVER");
         else if (this.gameClear) this.drawMessage("CLEAR!");
@@ -3060,8 +3105,68 @@ async executeAiMove(move) {
         this.player.y = move.y;
         
         this.lockPiece();
-        
         this.isAiThinking = false;
+    }
+    
+    processDrawing() {
+        if (this.drawnBlocks.size !== 4) {
+            this.drawnBlocks.clear();
+            return;
+        }
+
+        const blocks = Array.from(this.drawnBlocks.keys()).map(k => {
+            const [x, y] = k.split(',').map(Number);
+            return { x, y };
+        });
+
+        blocks.sort((a, b) => a.y - b.y || a.x - b.x);
+
+        const anchor = blocks[0];
+        const relativeCoords = blocks.slice(1).map(b => `${b.x - anchor.x},${b.y - anchor.y}`);
+        const key = relativeCoords.sort().join(';');
+
+        const shapeInfo = DRAW_SHAPE_MAP[key];
+        this.drawnBlocks.clear();
+        if (!shapeInfo) return;
+
+        const targetPieceType = shapeInfo.type;
+        const availablePieces = [this.player.pieceType, this.holdPiece, ...this.nextQueue.slice(0, 5)];
+        const pieceIndex = availablePieces.indexOf(targetPieceType);
+
+        if (pieceIndex === -1) return;
+
+        if (pieceIndex === 0) {
+        } else if (pieceIndex === 1) {
+            this.hold();
+        } else {
+            const nextIndex = pieceIndex - 2;
+            if (this.holdPiece) {
+                this.hold(); 
+                for (let i = 0; i < nextIndex; i++) {
+                    this.hold();
+                }
+            } else {
+                 this.hold();
+                 for (let i = 0; i < nextIndex; i++) {
+                     this.hold();
+                 }
+            }
+        }
+        
+        if (this.player.pieceType !== targetPieceType) {
+            return;
+        }
+
+        this.player.x = anchor.x - shapeInfo.offset[0];
+        this.player.y = anchor.y - shapeInfo.offset[1];
+        this.player.rotation = shapeInfo.rot;
+        
+        const shape = this.getShape(this.player.pieceType, this.player.rotation);
+        if (this.checkCollision(this.player.x, this.player.y, shape)) {
+           return;
+        }
+        
+        this.hardDrop();
     }
 }
 function setupEditors() { ['p1', 'p2'].forEach(setupPlayerEditor);
@@ -4411,7 +4516,7 @@ mainCanvas.width = totalWidth * RESOLUTION_SCALE;
         autoStartParams = { ss: false, nh: false, hb: false };
         ctx.scale(RESOLUTION_SCALE, RESOLUTION_SCALE);
 
-if (gameSettings.touchControlsEnabled) {
+if (gameSettings.touchControlsEnabled && gameSettings.touchControlType === 'button') {
             virtualController.show();
         }
 
@@ -4449,8 +4554,7 @@ document.getElementById('backToEditorBtn').addEventListener('click', () => {
         
         virtualController.hide();
         
-     
-   const aiDebugDisplay = document.getElementById('ai-debug-display');
+        const aiDebugDisplay = document.getElementById('ai-debug-display');
         const aiDebugControls = document.getElementById('ai-debug-controls');
         if(aiDebugDisplay) aiDebugDisplay.style.display = 'none';
         if(aiDebugControls) aiDebugControls.style.display = 'none';
@@ -4477,9 +4581,55 @@ document.getElementById('backToEditorBtn').addEventListener('click', () => {
     const scaleY = mainCanvas.height / rect.height;
     const pos = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
     if (gameState==='SCAN_BL') scanState.bottomLeft=pos; else if (gameState==='SCAN_TR') scanState.topRight=pos; updateScanUI(); });
-    
 
-document.getElementById('settingsBtn').addEventListener('click', () => openUnifiedSettingsModal('general'));
+    const getDrawCoordsFromEvent = (e) => {
+        if (!players[0]) return null;
+        const rect = mainCanvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const x = Math.floor(((clientX - rect.left) / rect.width) * (mainCanvas.width / RESOLUTION_SCALE) / BLOCK_SIZE - (PLAYFIELD_X_OFFSET / BLOCK_SIZE));
+        const y = Math.floor(((clientY - rect.top) / rect.height) * (mainCanvas.height / RESOLUTION_SCALE) / BLOCK_SIZE - 0.5) + players[0].viewY;
+        return { x, y };
+    };
+
+    const handleDrawStartOnBoard = e => {
+        if (gameState !== 'PLAYING' || !gameSettings.touchControlsEnabled || gameSettings.touchControlType !== 'draw' || !players[0]) return;
+        e.preventDefault();
+        players[0].isDrawingOnBoard = true;
+        const coords = getDrawCoordsFromEvent(e);
+        if (coords && coords.x >= 0 && coords.x < BOARD_WIDTH && coords.y >= 0 && coords.y < BOARD_HEIGHT) {
+            players[0].drawnBlocks.set(`${coords.x},${coords.y}`, true);
+        }
+    };
+
+    const handleDrawMoveOnBoard = e => {
+        if (gameState !== 'PLAYING' || !gameSettings.touchControlsEnabled || gameSettings.touchControlType !== 'draw' || !players[0] || !players[0].isDrawingOnBoard) return;
+        e.preventDefault();
+        const coords = getDrawCoordsFromEvent(e);
+        if (coords && coords.x >= 0 && coords.x < BOARD_WIDTH && coords.y >= 0 && coords.y < BOARD_HEIGHT) {
+            if (players[0].drawnBlocks.size < 4) {
+                 players[0].drawnBlocks.set(`${coords.x},${coords.y}`, true);
+            }
+        }
+    };
+
+    const handleDrawEndOnBoard = e => {
+        if (gameState !== 'PLAYING' || !gameSettings.touchControlsEnabled || gameSettings.touchControlType !== 'draw' || !players[0] || !players[0].isDrawingOnBoard) return;
+        e.preventDefault();
+        players[0].isDrawingOnBoard = false;
+        players[0].processDrawing();
+    };
+
+    mainCanvas.addEventListener('mousedown', handleDrawStartOnBoard);
+    mainCanvas.addEventListener('mousemove', handleDrawMoveOnBoard);
+    mainCanvas.addEventListener('mouseup', handleDrawEndOnBoard);
+    mainCanvas.addEventListener('mouseleave', handleDrawEndOnBoard);
+    mainCanvas.addEventListener('touchstart', handleDrawStartOnBoard, { passive: false });
+    mainCanvas.addEventListener('touchmove', handleDrawMoveOnBoard, { passive: false });
+    mainCanvas.addEventListener('touchend', handleDrawEndOnBoard, { passive: false });
+    mainCanvas.addEventListener('touchcancel', handleDrawEndOnBoard, { passive: false });
+
+    document.getElementById('settingsBtn').addEventListener('click', () => openUnifiedSettingsModal('general'));
     document.getElementById('p1-key-config-btn').addEventListener('click', () => openUnifiedSettingsModal('p1-keys'));
     document.getElementById('p2-key-config-btn').addEventListener('click', () => openUnifiedSettingsModal('p2-keys'));
 
@@ -4495,6 +4645,17 @@ document.getElementById('settingsBtn').addEventListener('click', () => openUnifi
     document.getElementById('vc-edit-layout-btn').addEventListener('click', () => {
         document.getElementById('settings-modal').style.display = 'none';
         virtualController.startEditMode();
+    });
+
+    const touchModeButtons = document.querySelectorAll('#p1-touch-mode-selection .button');
+    touchModeButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const newMode = button.dataset.touchMode;
+            gameSettings.touchControlType = newMode;
+            touchModeButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            document.getElementById('p1-touch-button-controls').style.display = newMode === 'button' ? 'flex' : 'none';
+        });
     });
 
     document.getElementById('vc-save-and-close-btn').addEventListener('click', () => {
