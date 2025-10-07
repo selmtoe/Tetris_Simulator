@@ -3145,62 +3145,149 @@ endIcon.textContent = 'END';
     });
     const palette = document.getElementById(`${playerId}-palette`);
 
-    Object.keys(EDITOR_COLORS).filter(key => key !== 'E').forEach(key => { const swatch = document.createElement('div'); swatch.className = 'color-swatch'; swatch.style.backgroundColor = key === 'EMPTY' ? '#333' : EDITOR_COLORS[key]; if (key === 'EMPTY') { swatch.style.border = '1px dashed #fff'; swatch.title = 'Eraser'; } if (key === editorData[playerId].activeColor) swatch.classList.add('active'); swatch.addEventListener('click', () => { editorData[playerId].activeColor = key; palette.querySelector('.active')?.classList.remove('active'); swatch.classList.add('active'); }); palette.appendChild(swatch); });
+    const autoSwatch = document.createElement('div');
+    autoSwatch.className = 'color-swatch';
+    autoSwatch.style.backgroundColor = '#FFFFFF';
+    autoSwatch.style.color = '#000000';
+    autoSwatch.style.display = 'flex';
+    autoSwatch.style.alignItems = 'center';
+    autoSwatch.style.justifyContent = 'center';
+    autoSwatch.style.fontFamily = 'var(--font-display)';
+    autoSwatch.style.fontSize = '12px';
+    autoSwatch.style.fontWeight = 'bold';
+    autoSwatch.textContent = 'Auto';
+    autoSwatch.addEventListener('click', () => {
+        editorData[playerId].activeColor = 'AUTO';
+        palette.querySelector('.active')?.classList.remove('active');
+        autoSwatch.classList.add('active');
+    });
+    palette.appendChild(autoSwatch);
 
-    const canvas = document.getElementById(`field-editor-canvas-${playerId}`);
+    Object.keys(EDITOR_COLORS).filter(key => key !== 'E').forEach(key => { const swatch = document.createElement('div'); swatch.className = 'color-swatch'; swatch.style.backgroundColor = key === 'EMPTY' ? '#333' : EDITOR_COLORS[key]; if (key === 'EMPTY') { swatch.style.border = '1px dashed #fff'; swatch.title = 'Eraser'; } if (key === editorData[playerId].activeColor) swatch.classList.add('active'); swatch.addEventListener('click', () => { editorData[playerId].activeColor = key; palette.querySelector('.active')?.classList.remove('active'); swatch.classList.add('active'); }); palette.appendChild(swatch); });
+const canvas = document.getElementById(`field-editor-canvas-${playerId}`);
     
     canvas.width = BOARD_WIDTH * EDITOR_BLOCK_SIZE; canvas.height = BOARD_VISIBLE_HEIGHT * EDITOR_BLOCK_SIZE;
     let isDrawing = false;
-    let isEraserMode = false;
+let isEraserMode = false;
+
+    function checkForAndReplaceTetromino(playerId) {
+        const board = editorData[playerId].board;
+        const whiteBlocks = [];
+        for (let r = 0; r < BOARD_HEIGHT; r++) {
+            for (let c = 0; c < BOARD_WIDTH; c++) {
+                if (board[r][c] === 'W') {
+                    whiteBlocks.push({ y: r, x: c });
+                }
+            }
+        }
+
+        if (whiteBlocks.length !== 4) return;
+
+        whiteBlocks.sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x);
+        const anchor = whiteBlocks[0];
+
+        const relativeCoords = whiteBlocks.slice(1).map(block => `${block.x - anchor.x},${block.y - anchor.y}`);
+        const key = relativeCoords.sort().join(';');
+        
+        const createKey = (coords) => coords.map(c => `${c[0]},${c[1]}`).sort().join(';');
+
+        const shapeMap = {
+            [createKey([[1,0],[2,0],[3,0]])]: 'I', [createKey([[0,1],[0,2],[0,3]])]: 'I',
+            [createKey([[0,1],[1,0],[1,1]])]: 'O',
+            [createKey([[0,1],[1,1],[0,2]])]: 'T', [createKey([[0,1],[0,2],[-1,1]])]: 'T',
+            [createKey([[-1,1],[0,1],[1,1]])]: 'T', [createKey([[1,0],[2,0],[1,1]])]: 'T',
+            [createKey([[0,1],[1,2],[0,2]])]: 'L', [createKey([[1,0],[1,1],[1,2]])]: 'L',
+            [createKey([[-1,1],[0,1],[-2,1]])]: 'L', [createKey([[1,0],[2,0],[0,1]])]: 'L',
+            [createKey([[0,1],[-1,2],[0,2]])]: 'J', [createKey([[0,1],[0,2],[1,0]])]: 'J',
+            [createKey([[2,1],[0,1],[1,1]])]: 'J', [createKey([[1,0],[2,0],[2,1]])]: 'J',
+            [createKey([[0,1],[1,1],[1,2]])]: 'S', [createKey([[1,0],[0,1],[-1,1]])]: 'S',
+            [createKey([[-1,1],[0,1],[-1,2]])]: 'Z', [createKey([[1,0],[2,1],[1,1]])]: 'Z',
+        };
+
+        const minoType = shapeMap[key];
+
+        if (minoType) {
+            whiteBlocks.forEach(block => {
+                board[block.y][block.x] = minoType;
+            });
+        }
+    }
 
     const getCoordsFromEvent = e => {
         const rect = canvas.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        const relativeX = (clientX - rect.left) / rect.width;
+const relativeX = (clientX - rect.left) / rect.width;
         const relativeY = (clientY - rect.top) / rect.height;
-        const x = Math.floor(relativeX * BOARD_WIDTH);
+const x = Math.floor(relativeX * BOARD_WIDTH);
         const y = Math.floor(relativeY * BOARD_VISIBLE_HEIGHT);
         return { x, y };
     };
-    
-    const applyDraw = (x, y) => {
-        if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_VISIBLE_HEIGHT) {
-            const boardY = y + editorData[playerId].viewY;
+const applyDraw = (x, y) => {
+        if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_VISIBLE_HEIGHT) return;
+
+        const selectedColor = editorData[playerId].activeColor;
+        const boardY = y + editorData[playerId].viewY;
+        const board = editorData[playerId].board;
+
+        if (selectedColor === 'AUTO') {
+            const currentCell = board[boardY][x];
             if (isEraserMode) {
-                editorData[playerId].board[boardY][x] = null;
+                if (currentCell === 'W') {
+                    board[boardY][x] = null;
+                }
             } else {
-                const color = editorData[playerId].activeColor;
-                editorData[playerId].board[boardY][x] = (color === 'EMPTY') ? null : color;
+                if (currentCell === null) {
+                    const whiteBlockCount = board.flat().filter(cell => cell === 'W').length;
+                    if (whiteBlockCount < 4) {
+                        board[boardY][x] = 'W';
+                        if (whiteBlockCount + 1 === 4) {
+                            checkForAndReplaceTetromino(playerId);
+                        }
+                    }
+                }
             }
-            drawEditorField(playerId);
+        } else {
+            if (isEraserMode) {
+                board[boardY][x] = null;
+            } else {
+                board[boardY][x] = (selectedColor === 'EMPTY') ? null : selectedColor;
+            }
         }
+        drawEditorField(playerId);
     };
 
     const handleDrawStart = e => {
         e.preventDefault();
-        isDrawing = true;
+isDrawing = true;
         const { x, y } = getCoordsFromEvent(e);
-        if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_VISIBLE_HEIGHT) {
-            const boardY = y + editorData[playerId].viewY;
-            const currentCellColor = editorData[playerId].board[boardY][x];
-            const selectedColor = editorData[playerId].activeColor;
-            isEraserMode = (selectedColor === 'EMPTY' || currentCellColor === selectedColor);
+        const selectedColor = editorData[playerId].activeColor;
+
+        if (selectedColor === 'AUTO') {
+            if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_VISIBLE_HEIGHT) {
+                const boardY = y + editorData[playerId].viewY;
+                const currentCellColor = editorData[playerId].board[boardY][x];
+                isEraserMode = (currentCellColor === 'W');
+            }
+        } else {
+            if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_VISIBLE_HEIGHT) {
+                const boardY = y + editorData[playerId].viewY;
+                const currentCellColor = editorData[playerId].board[boardY][x];
+                isEraserMode = (selectedColor === 'EMPTY' || currentCellColor === selectedColor);
+            }
         }
         applyDraw(x, y);
     };
-
-    const handleDrawMove = e => {
+const handleDrawMove = e => {
         if (!isDrawing) return;
         e.preventDefault();
-        const { x, y } = getCoordsFromEvent(e);
+const { x, y } = getCoordsFromEvent(e);
         applyDraw(x, y);
     };
-
-    const handleDrawEnd = () => {
+const handleDrawEnd = () => {
         if (!isDrawing) return;
         isDrawing = false;
-        isEraserMode = false;
+isEraserMode = false;
     };
 
     canvas.addEventListener('mousedown', handleDrawStart);
@@ -3211,6 +3298,7 @@ endIcon.textContent = 'END';
     canvas.addEventListener('touchend', handleDrawEnd, { passive: false });
     canvas.addEventListener('touchcancel', handleDrawEnd, { passive: false });
     canvas.addEventListener('touchmove', handleDrawMove, { passive: false });
+
     
     document.getElementById(`${playerId}-field-shift-up`).addEventListener('click', () => shiftField(playerId, 'up'));
     document.getElementById(`${playerId}-field-shift-down`).addEventListener('click', () => shiftField(playerId, 'down'));
@@ -3341,13 +3429,14 @@ function drawEditorField(playerId) {
         for (let x = 0; x < BOARD_WIDTH; x++) {
             const pieceType = data.board[y + data.viewY]?.[x];
             if (pieceType) {
-                ctx.fillStyle = activeSkin[pieceType];
-                ctx.fillRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
+                ctx.fillStyle = pieceType === 'W' ? '#FFFFFF' : activeSkin[pieceType];
+ctx.fillRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
             }
             ctx.strokeRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
-        }
+}
     }
 }
+
 
 function bindKey(binding) {
     if (!isBindingKey || !bindingPlayer || !bindingAction) return;
