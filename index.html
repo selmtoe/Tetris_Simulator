@@ -2993,13 +2993,36 @@ requestAiMove() {
                         if (path.length > 0) {
                             const lastMove = path[path.length - 1];
                             if ((lastMove === 'R' || lastMove === 'L') && isGrounded) {
-                                preferredPath = finalPath;
+                                const tempBoard = currentBoard.map(row => [...row]);
+                                const shape = this.getMinoShape_forAI(minoType, r);
+                                for (const [dx, dy] of shape) {
+                                    const nx = x + dx;
+                                    const ny = finalY + dy;
+                                    if (ny >= 0 && ny < BOARD_HEIGHT && nx >= 0 && nx < BOARD_WIDTH) {
+                                        tempBoard[ny][nx] = 1;
+                                    }
+                                }
+                                let linesCleared = 0;
+                                const checkedRows = new Set();
+                                for (const [, dy] of shape) {
+                                    const ny = finalY + dy;
+                                    if (ny >= 0 && ny < BOARD_HEIGHT && !checkedRows.has(ny)) {
+                                        checkedRows.add(ny);
+                                        if (tempBoard[ny].every(cell => cell === 1)) {
+                                            linesCleared++;
+                                        }
+                                    }
+                                }
+                                if (linesCleared > 0) {
+                                    preferredPath = finalPath;
+                                }
                             }
                         }
                     }
                     continue;
                 }
             }
+
 
             const actions = ['R', 'L', '←', '→', '↓'];
             for (const action of actions) {
