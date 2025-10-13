@@ -2219,9 +2219,11 @@ class Player {
         
         this.isDrawingOnBoard = false;
         this.drawnBlocks = new Map();
+        this.customGhosts = [];
 
         this.keys = {};
         const pData = editorData[`p${id}`];
+
 
         this.initialHold = pData.hold;
         this.board = pData.board.map(row => [...row]);
@@ -2242,7 +2244,8 @@ this.nextQueue = [];
         this.isExecutingSequence = false;
         this.drawnBlocks.clear();
         this.isDrawingOnBoard = false;
-        this.holdPiece = this.initialHold; this.canHold = true;
+        this.customGhosts = [];
+        this.holdPiece = this.initialHold;this.canHold = true;
 this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
 
         this.dasTimer = 0; this.arrTimer = 0; this.sdfTimer = 0; this.dasDirection = 0;
@@ -2479,11 +2482,34 @@ draw() {
 
         if (!this.gameOver && !this.gameClear && !this.isClearingLine && this.player.pieceType) { const shape = this.getShape(this.player.pieceType, this.player.rotation);
 const ghostY = this.getGhostY(); if (ghostY > this.player.y) this.drawPiece(shape, this.player.x, ghostY, this.player.pieceType, true); this.drawPiece(shape, this.player.x, this.player.y, this.player.pieceType, false);
+}
+
+        if (this.customGhosts.length > 0) {
+            const ghostMap = new Map();
+            this.customGhosts.forEach(ghost => {
+                const key = `${ghost.x},${ghost.y}`;
+                ghostMap.set(key, ghost.pieceType);
+            });
+
+            ghostMap.forEach((pieceType, key) => {
+                if (pieceType !== null) {
+                    const [x, y] = key.split(',').map(Number);
+                    const screenY = y - this.viewY;
+                    if (screenY >= 0 && screenY < BOARD_VISIBLE_HEIGHT) {
+                        ctx.globalAlpha = 0.3;
+                        ctx.fillStyle = activeSkin[pieceType] || '#FFF';
+                        ctx.fillRect(x * BLOCK_SIZE, screenY * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+                        ctx.globalAlpha = 1.0;
+                    }
+                }
+            });
         }
+
         if (this.drawnBlocks.size > 0) {
             ctx.fillStyle = '#FFFFFF';
-            ctx.globalAlpha = 0.8;
+ctx.globalAlpha = 0.8;
             for (const key of this.drawnBlocks.keys()) {
+
                 const [x, y] = key.split(',').map(Number);
                 const screenY = y - this.viewY;
                 if (screenY >= 0 && screenY < BOARD_VISIBLE_HEIGHT) {
@@ -4599,12 +4625,34 @@ type : null;
                     targetPlayer.gameOver = true;
                 }
             },
-            setCustomUIText: (player, text) => {
+            displayGhostBlock: (player, x, y, type) => {
                 const targetPlayer = (player === p1Proxy && players[0]) ?
                     players[0] :
                     (player === p2Proxy && players[1]) ?
                     players[1] : null;
                 if (targetPlayer) {
+                    if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT) {
+                        const pieceType = Object.keys(COLORS).includes(type) ? type : null;
+                        targetPlayer.customGhosts.push({x, y, pieceType});
+                    }
+                }
+            },
+            clearAllGhostBlocks: (player) => {
+                const targetPlayer = (player === p1Proxy && players[0]) ?
+                    players[0] :
+                    (player === p2Proxy && players[1]) ?
+                    players[1] : null;
+                if (targetPlayer) {
+                    targetPlayer.customGhosts = [];
+                }
+            },
+            setCustomUIText: (player, text) => {
+                const targetPlayer = (player === p1Proxy && players[0]) ?
+players[0] :
+                    (player === p2Proxy && players[1]) ?
+players[1] : null;
+                if (targetPlayer) {
+
                     targetPlayer.customUIText = String(text);
                 }
             },
@@ -5007,12 +5055,34 @@ document.getElementById('retryBtn').addEventListener('click', () => {
                     targetPlayer.gameOver = true;
                 }
             },
-            setCustomUIText: (player, text) => {
+            displayGhostBlock: (player, x, y, type) => {
                 const targetPlayer = (player === p1Proxy && tempPlayers[0]) ?
                     tempPlayers[0] :
                     (player === p2Proxy && tempPlayers[1]) ?
                     tempPlayers[1] : null;
                 if (targetPlayer) {
+                    if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT) {
+                        const pieceType = Object.keys(COLORS).includes(type) ? type : null;
+                        targetPlayer.customGhosts.push({x, y, pieceType});
+                    }
+                }
+            },
+            clearAllGhostBlocks: (player) => {
+                const targetPlayer = (player === p1Proxy && tempPlayers[0]) ?
+                    tempPlayers[0] :
+                    (player === p2Proxy && tempPlayers[1]) ?
+                    tempPlayers[1] : null;
+                if (targetPlayer) {
+                    targetPlayer.customGhosts = [];
+                }
+            },
+            setCustomUIText: (player, text) => {
+                const targetPlayer = (player === p1Proxy && tempPlayers[0]) ?
+tempPlayers[0] :
+                    (player === p2Proxy && tempPlayers[1]) ?
+tempPlayers[1] : null;
+                if (targetPlayer) {
+
                     targetPlayer.customUIText = String(text);
                 }
             },
