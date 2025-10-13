@@ -2029,12 +2029,14 @@ let gameSettings = {
     garbageRandomness: 0.3,
     maxNext: 8,
     showEffects: true,
+    showTimer: false,
     touchControlsEnabled: 'ontouchstart' in window,
     touchControlType: 'button',
     aiMoveDelay: 30,
     aiSdfDelay: 30,
     drawMoveDelay: 30,
 };
+
 
 const DRAW_SHAPE_MAP = {
     "1,0;2,0;3,0": { type: "I", rot: 0, offset: [0, 0] },
@@ -2260,9 +2262,11 @@ this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
         this.specialMoveText = [];
         this.specialMoveTextTimer = 0;
         this.customUIText = null;
+        this.elapsedTimeText = '0:00.000';
         this.lastGarbageHoleX = -1;
         this.spawnNewPiece();
-}
+    }
+
     
     spawnNewPiece() {
         this.player.pieceType = this.nextQueue.shift();
@@ -2317,14 +2321,22 @@ case 'rotateCW':  this.rotate(1); break;
     }
 update(dt) {
         if (this.gameOver || this.gameClear || this.isExecutingSequence) return;
-if (this.specialMoveTextTimer > 0) {
+        if (this.specialMoveTextTimer > 0) {
             this.specialMoveTextTimer -= dt;
         }
 
-this.processGarbageQueue();
+        if (this.gameApi && typeof this.gameApi.getTime === 'function') {
+            const totalMilliseconds = this.gameApi.getTime();
+            const minutes = Math.floor(totalMilliseconds / 60000);
+            const seconds = Math.floor((totalMilliseconds % 60000) / 1000);
+            const milliseconds = Math.floor(totalMilliseconds % 1000);
+            this.elapsedTimeText = `${minutes}:${String(seconds).padStart(2, '0')}.${String(milliseconds).padStart(3, '0')}`;
+        }
 
+this.processGarbageQueue();
         const left = this.isActionPressed('left');
         const right = this.isActionPressed('right');
+
         const horizDir = left ? -1 : (right ? 1 : 0);
         if (horizDir !== 0) {
             if (this.dasDirection !== horizDir) { 
@@ -2750,17 +2762,33 @@ const meterX = PLAYFIELD_X_OFFSET - 12;
 
 ctx.fillRect(meterX, meterMaxHeight - pendingHeight - queuedHeight + (0.5*BLOCK_SIZE), meterWidth, queuedHeight);
 }
-        if (this.customUIText !== null) {
+                if (this.customUIText !== null) {
             ctx.font = `bold ${BLOCK_SIZE * 1.6}px "Orbitron"`;
             ctx.fillStyle = '#FFFFFF';
             ctx.fillText(this.customUIText, HOLD_AREA_WIDTH / 2, 300);
             ctx.font = `bold ${BLOCK_SIZE * 1.2}px "Orbitron"`;
+        }
+
+        if (gameSettings.showTimer) {
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `bold ${BLOCK_SIZE * 0.8}px "Orbitron"`;
+const charSpacing = BLOCK_SIZE * 0.6;
+            const totalWidth = this.elapsedTimeText.length * charSpacing;
+let startX = (HOLD_AREA_WIDTH / 2) - (totalWidth / 2) + 15;
+for (let i = 0; i < this.elapsedTimeText.length - 1; i++) {
+                const char = this.elapsedTimeText[i];
+const charX = startX + (i * charSpacing) + (charSpacing / 2);
+                ctx.fillText(char, charX, CANVAS_HEIGHT - 20);
 }
+        }
 
         ctx.fillStyle = '#FFF';
 const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
 
         ctx.fillText('NEXT', rX, 40);
+
+
+
         for (let i = 0; i < gameSettings.maxNext; i++) {
             const pT = this.nextQueue[i];
             if (!pT) continue;
@@ -3753,17 +3781,19 @@ function populateGeneralSettingsTab() {
         item.append(label, input); list.appendChild(item);
     });
     
-    const checkboxSettings = { showEffects: 'エフェクトを表示する', touchControlsEnabled: 'タッチ操作を有効にする (P1)' };
-    Object.entries(checkboxSettings).forEach(([key, text], index) => {
+    const checkboxSettings = { showEffects: 'エフェクトを表示する', showTimer: 'タイマーを表示する', touchControlsEnabled: 'タッチ操作を有効にする (P1)' };
+Object.entries(checkboxSettings).forEach(([key, text], index) => {
         const item = document.createElement('div'); item.className = 'setting-item';
         if (index === 0) { item.style.cssText = 'margin-top:20px; border-top:1px solid var(--primary-color); padding-top:15px;'; }
         const label = document.createElement('label'); const checkbox = document.createElement('input');
         checkbox.type = 'checkbox'; checkbox.id = `setting-${key}`; checkbox.checked = !!gameSettings[key];
         checkbox.onchange = e => { gameSettings[key] = e.target.checked; };
         const span = document.createElement('span'); span.textContent = text;
-        label.append(checkbox, span); item.appendChild(label); list.appendChild(item);
+ 
+       label.append(checkbox, span); item.appendChild(label); list.appendChild(item);
     });
 }
+
 
 function populateKeyConfigTab(playerId) {
     const list = document.getElementById(`${playerId}-key-config-list`);
