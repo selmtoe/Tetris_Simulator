@@ -2726,12 +2726,42 @@ if (this.specialMoveText.length > 0) {
             const boardY = Math.round(centerY + cy);
             if (boardX < 0 || boardX >= BOARD_WIDTH || boardY < 0 || boardY >= BOARD_HEIGHT || this.board[boardY]?.[boardX]) occupiedFrontCorners++;
         });
-        if (occupiedFrontCorners === 2 || this.lastSrsKickIndex === 4) return 'TSPIN';
+                if (occupiedFrontCorners === 2 || this.lastSrsKickIndex === 4) return 'TSPIN';
         return 'MINI_TSPIN';
     }
 
-    clearLines() {let cl=0; for(let y=this.board.length-1;y>=0;y--){if(this.board[y].every(c=>c!==null)){this.board.splice(y,1);cl++;}} for(let i=0;i<cl;i++){this.board.unshift(Array(BOARD_WIDTH).fill(null));} return cl;}
-    addGarbage(lines) { if (this.opponent) { this.garbageQueue.push({ lines, receivedTime: performance.now() }); } }
+    clearLines() {
+        const clearedLinesY = [];
+        for (let y = 0; y < this.board.length; y++) {
+            if (this.board[y].every(c => c !== null)) {
+                clearedLinesY.push(y);
+            }
+        }
+
+        if (clearedLinesY.length === 0) {
+            return 0;
+        }
+
+        this.customGhosts = this.customGhosts.filter(ghost => !clearedLinesY.includes(ghost.y));
+
+        this.customGhosts.forEach(ghost => {
+            const linesClearedBelow = clearedLinesY.filter(clearedY => clearedY > ghost.y).length;
+            if (linesClearedBelow > 0) {
+                ghost.y += linesClearedBelow;
+            }
+        });
+
+        const newBoard = this.board.filter((row, y) => !clearedLinesY.includes(y));
+        const clearedCount = clearedLinesY.length;
+
+        for (let i = 0; i < clearedCount; i++) {
+            newBoard.unshift(Array(BOARD_WIDTH).fill(null));
+        }
+        this.board = newBoard;
+
+        return clearedCount;
+    }
+    addGarbage(lines) { if (this.opponent) { this.garbageQueue.push({ lines, receivedTime: performance.now() });} }
     processGarbageQueue() { const now = performance.now(); for (let i = this.garbageQueue.length - 1; i >= 0; i--) { if (now - this.garbageQueue[i].receivedTime > gameSettings.garbageGrace) { this.pendingGarbage += this.garbageQueue[i].lines; this.garbageQueue.splice(i, 1); } } }
     
     riseGarbage() {
