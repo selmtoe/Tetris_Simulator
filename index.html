@@ -4752,7 +4752,7 @@ return state ? [...state.fullMinoSequence] : [];
                     };
 self.onmessage = (e) => {
                         const { command, data } = e.data;
-if (data && data.playerStateProxy) {
+                        if (data && data.playerStateProxy) {
                             const { id, board, holdPiece, currentPiece, nextQueue, fullMinoSequence, stats } = data.playerStateProxy;
 if (playerStates[id]) {
                                 playerStates[id] = { id, board, holdPiece, currentPiece, nextQueue, fullMinoSequence, stats };
@@ -4760,6 +4760,12 @@ if (playerStates[id]) {
                         }
 
 if (command === 'init') {
+                            if (data.initialPlayerState) {
+                                const { id, board, holdPiece, currentPiece, nextQueue, fullMinoSequence, stats } = data.initialPlayerState;
+                                if (playerStates[id]) {
+                                    playerStates[id] = { id, board, holdPiece, currentPiece, nextQueue, fullMinoSequence, stats };
+                                }
+                            }
                             startTime = data.startTime;
 const p1Proxy = { id: '1', board: createBoardAPI('1') };
                             const p2Proxy = data.is2P ? { id: '2', board: createBoardAPI('2') } : null;
@@ -4851,13 +4857,23 @@ if(hooks.onInit){
                             p.finishLockPiece();
                         }
                     };
+                    const initialStateProxy = {
+                        id: p.id,
+                        board: p.board,
+                        holdPiece: p.holdPiece,
+                        currentPiece: p.player.pieceType,
+                        nextQueue: p.nextQueue,
+                        fullMinoSequence: p.fullMinoSequence,
+                        stats: p.stats
+                    };
 p.ruleWorker.postMessage({
                         command: 'init',
                         data: {
                             ruleCode: editorData.rule.code,
-                            startTime: startTime,
-                            is2P: gameMode === '2P'
-
+                     
+       startTime: startTime,
+                            is2P: gameMode === '2P',
+                            initialPlayerState: initialStateProxy
                         }
                     });
 });
@@ -5241,6 +5257,12 @@ if (playerStates[id]) {
                         }
 
 if (command === 'init') {
+                            if (data.initialPlayerState) {
+                                const { id, board, holdPiece, currentPiece, nextQueue, fullMinoSequence, stats } = data.initialPlayerState;
+                                if (playerStates[id]) {
+                                    playerStates[id] = { id, board, holdPiece, currentPiece, nextQueue, fullMinoSequence, stats };
+                                }
+                            }
                             startTime = data.startTime;
 const p1Proxy = { id: '1', board: createBoardAPI('1') };
                             const p2Proxy = data.is2P ?
@@ -5328,15 +5350,26 @@ if(hooks.onInit){
                         p.finishLockPiece();
                     }
                 };
+                const initialStateProxy = {
+                        id: p.id,
+                        board: p.board,
+                        holdPiece: p.holdPiece,
+                        currentPiece: p.player.pieceType,
+                        nextQueue: p.nextQueue,
+                        fullMinoSequence: p.fullMinoSequence,
+                        stats: p.stats
+                    };
 p.ruleWorker.postMessage({
                     command: 'init',
                     data: {
                         ruleCode: editorData.rule.code,
                         startTime: startTime,
-                        is2P: gameMode === '2P'
+        
+                is2P: gameMode === '2P',
+                        initialPlayerState: initialStateProxy
                     }
                 });
-            });
+});
         }
         
         if (!editorData.rule.code) {
