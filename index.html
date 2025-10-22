@@ -2519,24 +2519,19 @@ const ghostY = this.getGhostY(); if (ghostY > this.player.y) this.drawPiece(shap
 
         if (this.customGhosts.length > 0) {
             const ghostMap = new Map();
-            this.customGhosts.forEach(ghost => {
+this.customGhosts.forEach(ghost => {
                 const key = `${ghost.x},${ghost.y}`;
                 ghostMap.set(key, ghost.pieceType);
             });
-
-            ghostMap.forEach((pieceType, key) => {
-                if (pieceType !== null) {
-                    const [x, y] = key.split(',').map(Number);
-                    const screenY = y - this.viewY;
-                    if (screenY >= 0 && screenY < BOARD_VISIBLE_HEIGHT) {
-                        ctx.globalAlpha = 0.15;
-                        ctx.fillStyle = activeSkin[pieceType] || '#FFF';
-                        ctx.fillRect(x * BLOCK_SIZE, screenY * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-                        ctx.globalAlpha = 1.0;
-                    }
-                }
+ghostMap.forEach((pieceType, key) => {
+                const [x, y] = key.split(',').map(Number);
+                const screenY = y - this.viewY;
+                if (screenY >= 0 && screenY < BOARD_VISIBLE_HEIGHT) 
+{
+                    this.drawBlock(pieceType, x * BLOCK_SIZE, screenY * BLOCK_SIZE, true);
+}
             });
-        }
+}
 
         if (this.drawnBlocks.size > 0) {
             ctx.fillStyle = '#FFFFFF';
