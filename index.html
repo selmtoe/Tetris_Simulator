@@ -2286,9 +2286,9 @@ this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
         this.player.x = Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[this.player.pieceType].center[0]) -1;
 
         const shape = this.getShape(this.player.pieceType, this.player.rotation);
-        this.player.y = 19;
+        this.player.y = 20;
         if (this.checkCollision(this.player.x, this.player.y, shape)) {
-            this.player.y = 18;
+            this.player.y = 19;
             if (this.checkCollision(this.player.x, this.player.y, shape)) {
 
                  this.gameOver = true;
@@ -2394,9 +2394,9 @@ this.holdPiece = null;
                         this.lastMoveWasRotation = false;
 this.player.x = Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[this.player.pieceType].center[0]) -1;
                         const shape = this.getShape(this.player.pieceType, this.player.rotation);
-                        this.player.y = 19;
+                        this.player.y = 20;
 if (this.checkCollision(this.player.x, this.player.y, shape)) {
-                            this.player.y = 18;
+                            this.player.y = 19;
 if (this.checkCollision(this.player.x, this.player.y, shape)) {
                                  this.gameOver = true;
 }
@@ -2609,9 +2609,9 @@ hold() {
             
             this.player.x = Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[this.player.pieceType].center[0]) -1;
             const shape = this.getShape(this.player.pieceType, this.player.rotation);
-            this.player.y = 19;
+            this.player.y = 20;
             if (this.checkCollision(this.player.x, this.player.y, shape)) {
-                this.player.y = 18;
+                this.player.y = 19;
                 if (this.checkCollision(this.player.x, this.player.y, shape)) {
                      this.gameOver = true;
                 }
@@ -2761,9 +2761,9 @@ this.holdPiece = null;
                 this.lastMoveWasRotation = false;
 this.player.x = Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[this.player.pieceType].center[0]) -1;
                 const shape = this.getShape(this.player.pieceType, this.player.rotation);
-                this.player.y = 19;
+                this.player.y = 20;
 if (this.checkCollision(this.player.x, this.player.y, shape)) {
-                    this.player.y = 18;
+                    this.player.y = 19;
 if (this.checkCollision(this.player.x, this.player.y, shape)) {
                          this.gameOver = true;
 }
