@@ -221,7 +221,8 @@
     animation: fadeIn 0.3s ease-in-out;
 }
 @keyframes fadeIn {
-    from { opacity: 0; }
+    from { opacity: 0;
+}
     to { opacity: 1; }
 }
 
@@ -239,6 +240,7 @@
     <button id="settingsBtn" class="button" style="margin-left: 15px;">設定</button>
      <button id="shareBtn" class="button" style="margin-left: 5px;">共有</button>
      <button id="ruleBtn" class="button" style="margin-left: 5px;">ルール</button>
+     <button id="swapBtn" class="button" style="margin-left: 5px; display: none;">入れ替え</button>
 </div>
             <button id="startGameBtn" class="button">START GAME</button>
         </div>
@@ -4600,21 +4602,22 @@ if (gameMode === '2P') {
     
     if (editorData.rule.description) data.rd = editorData.rule.description;
     if (editorData.rule.code) data.rc = editorData.rule.code;
-
     return data;
 }
 function applyGameState(data) {
     try {
         if (!data || (data.v !== 1 && data.v !== 2)) {
-            alert('無効または非対応のデータです。'); return false;
+            alert('無効または非対応のデータです。');
+return false;
         }
         gameMode = data.m || '1P';
         document.getElementById('mode-1p').classList.toggle('active', gameMode === '1P');
-        document.getElementById('mode-2p').classList.toggle('active', gameMode === '2P');
+document.getElementById('mode-2p').classList.toggle('active', gameMode === '2P');
         document.getElementById('p2-editor-col').style.display = (gameMode === '2P') ? 'flex' : 'none';
+        document.getElementById('swapBtn').style.display = (gameMode === '2P') ? 'inline-block' : 'none';
         
         editorData.rule.description = data.rd || '';
-        editorData.rule.code = data.rc || '';
+editorData.rule.code = data.rc || '';
 
         if (data.p1) {
             editorData.p1.board = stringToBoard(data.p1.b);
@@ -4806,14 +4809,38 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('rule-save-close').addEventListener('click', () => {
         editorData.rule.description = document.getElementById('rule-description-input').value;
-        editorData.rule.code = document.getElementById('rule-code-input').value;
+editorData.rule.code = document.getElementById('rule-code-input').value;
         document.getElementById('rule-modal').style.display = 'none';
     });
     document.getElementById('rule-close').addEventListener('click', () => {
         document.getElementById('rule-modal').style.display = 'none';
     });
-    
-    document.getElementById('copy-link-btn').addEventListener('click', () => {
+
+    document.getElementById('swapBtn').addEventListener('click', () => {
+        if (gameMode !== '2P') return;
+        
+        const tempBoard = editorData.p1.board;
+        const tempNext = editorData.p1.nextQueue;
+        const tempHold = editorData.p1.hold;
+        const tempNextInsertion = editorData.p1.nextInsertionIndex;
+
+        editorData.p1.board = editorData.p2.board;
+        editorData.p1.nextQueue = editorData.p2.nextQueue;
+        editorData.p1.hold = editorData.p2.hold;
+        editorData.p1.nextInsertionIndex = editorData.p2.nextInsertionIndex;
+
+        editorData.p2.board = tempBoard;
+        editorData.p2.nextQueue = tempNext;
+        editorData.p2.hold = tempHold;
+        editorData.p2.nextInsertionIndex = tempNextInsertion;
+
+        drawEditorField('p1');
+        updateNextQueueDisplay('p1');
+        drawEditorField('p2');
+        updateNextQueueDisplay('p2');
+    });
+
+document.getElementById('copy-link-btn').addEventListener('click', () => {
         const input = document.getElementById('share-link-input');
         input.select();
         navigator.clipboard.writeText(input.value)
@@ -4853,23 +4880,23 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Failed to import from clipboard:', e);
         }
     });
-
-
-    document.getElementById('mode-1p').addEventListener('click', () => { 
+document.getElementById('mode-1p').addEventListener('click', () => { 
         gameMode = '1P'; 
         document.getElementById('mode-1p').classList.add('active'); 
         document.getElementById('mode-2p').classList.remove('active'); 
         document.getElementById('p2-editor-col').style.display = 'none'; 
+        document.getElementById('swapBtn').style.display = 'none';
         setTimeout(updateScale, 0);
     });
-    document.getElementById('mode-2p').addEventListener('click', () => { 
+document.getElementById('mode-2p').addEventListener('click', () => { 
         gameMode = '2P'; 
         document.getElementById('mode-2p').classList.add('active'); 
         document.getElementById('mode-1p').classList.remove('active'); 
         document.getElementById('p2-editor-col').style.display = 'flex';
+        document.getElementById('swapBtn').style.display = 'inline-block';
         setTimeout(updateScale, 0);
     });
-    document.getElementById('advanced-link-btn').addEventListener('click', () => {
+document.getElementById('advanced-link-btn').addEventListener('click', () => {
         document.getElementById('advanced-link-options').style.display = 'block';
     });
     
