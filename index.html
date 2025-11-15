@@ -340,6 +340,7 @@ left: 10px; top: 150px;">
 
 <div id="game-controls" style="display: none;
 position: fixed; top: 10px; right: 10px; z-index: 160; gap: 10px;">
+     <button id="exportFumenBtn" class="button">記録</button>
      <button id="retryBtn" class="button">リトライ</button>
      <button id="gameSettingsBtn" class="button">設定</button>
      <button id="backToEditorBtn" class="button">戻る</button>
@@ -2102,6 +2103,7 @@ const TETROMINOS = {
 const SRS_OFFSETS = { "JLSTZ": { "0_1": [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]], "1_0": [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]], "1_2": [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]], "2_1": [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]], "2_3": [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]], "3_2": [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]], "3_0": [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]], "0_3": [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]], }, "I": { "0_1": [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]], "1_0": [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]], "1_2": [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]], "2_1": [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]], "2_3": [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]], "3_2": [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]], "3_0": [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]], "0_3": [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]], } };
 
 let players = [], gameMode = '1P', gameState = 'EDITING', lastTime = 0, mainCanvas, ctx, aiWorkerBlob, gameStartTime = 0;
+let gameHistoryLog = [];
 function updateAiDebugDisplay(payload) {
     const display = document.getElementById('ai-debug-display');
 
@@ -2636,8 +2638,18 @@ lockPiece() {
         for (const b of shape) { const bx = Math.floor(this.player.x + b[0]), by = Math.floor(this.player.y + b[1]);
 if (by >= 0) this.board[by][bx] = this.player.pieceType; }
         
+        if (gameState === 'PLAYING') {
+            logCurrentGameState(this);
+}
+
         this.linesClearedLastLock = this.clearLines();
-        const lines = this.linesClearedLastLock;
+if (gameState === 'PLAYING') {
+            if (this.linesClearedLastLock > 0) {
+                logCurrentGameState(this);
+}
+}
+
+const lines = this.linesClearedLastLock;
 const isPC = lines > 0 && this.board.every(row => row.every(cell => cell === null));
         
         let attack = 0;
@@ -4579,6 +4591,57 @@ function stringToBoard(str) {
     return board;
 }
 
+// --- 圧縮ロジック (RLE & 差分) ---
+const RLE_EQUAL_CHAR = 'E';
+
+/**
+ * 1次元配列をランレングス圧縮する
+ * @param {Array<string>} data - 1次元配列 ('_' または 'E' を含む)
+ * @returns {Array<[string, number]>} 圧縮データ [[value, count], ...]
+ */
+function encodeRLE(data) {
+    if (!data || data.length === 0) return [];
+    const rle = [];
+    let lastValue = data[0];
+    let count = 1;
+    for (let i = 1; i < data.length; i++) {
+        const currentValue = data[i];
+        if (currentValue === lastValue) {
+            count++;
+        } else {
+            rle.push([lastValue, count]);
+            lastValue = currentValue;
+            count = 1;
+        }
+    }
+    rle.push([lastValue, count]); // 最後のデータを追加
+    return rle;
+}
+
+/**
+ * 2つの1次元配列ボードデータの差分を取得する
+ * 'E' (Equal) は変更なしを示す
+ * @param {Array<string>} prevBoard1D - 前のボード (1D, '_'含む)
+ * @param {Array<string>} currentBoard1D - 現在のボード (1D, '_'含む)
+ * @returns {Array<string>} 差分データ (1D)
+ */
+function getDifference(prevBoard1D, currentBoard1D) {
+    const diff = [];
+    const len = BOARD_WIDTH * BOARD_HEIGHT;
+    for (let i = 0; i < len; i++) {
+        const prev = prevBoard1D[i];
+        const curr = currentBoard1D[i];
+
+        if (prev === curr) {
+            diff.push(RLE_EQUAL_CHAR); // 'E' (Equal) 変更なし
+        } else {
+            diff.push(curr); // 変更後の値 (例: '_', 'I', 'O'...)
+        }
+    }
+    return diff;
+}
+// --- ここまで追加 ---
+
 let autoStartParams = { ss: false, nh: false, hb: false };
 
 function getGameStateForExport(options = {}) {
@@ -4919,6 +4982,7 @@ document.getElementById('advanced-link-btn').addEventListener('click', () => {
         });
     });
 document.getElementById('startGameBtn').addEventListener('click', () => {
+        gameHistoryLog = [];
         let currentRunSettings = { ...gameSettings };
         gameStartTime = performance.now();
         let startTime = gameStartTime;
@@ -4938,13 +5002,15 @@ document.getElementById('startGameBtn').addEventListener('click', () => {
             const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1, p2_isAi);
             p2.holdDisabled = autoStartParams.nh;
       
-      p1.opponent = p2;
+            p1.opponent = p2;
             p2.opponent = p1;
             players.push(p1, p2);
         }
 
+        logCurrentGameState();
+
         if (editorData.rule.code) {
-            try {
+ try {
         const ruleWorkerScript = `
                     let userFunctions = {};
 let startTime = 0;
@@ -5199,6 +5265,7 @@ if (gameSettings.touchControlsEnabled && gameSettings.touchControlType === 'butt
 
 document.getElementById('backToEditorBtn').addEventListener('click', () => {
         gameState = 'EDITING';
+        gameHistoryLog = [];
         
         if (players.length > 0) {
             players.forEach(p => {
@@ -5397,17 +5464,17 @@ e.preventDefault();
 document.getElementById('retryBtn').addEventListener('click', () => {
         if (gameState !== 'PLAYING' || !players.length) return;
         
-        players.forEach(p => {
+            players.forEach(p => {
             if (p.aiWorker) {
                 p.aiWorker.terminate();
             }
             if (p.ruleWorker) {
-
-           p.ruleWorker.terminate();
+                p.ruleWorker.terminate();
             }
         });
 
         loadGameSettings();
+        gameHistoryLog = [];
      
         let currentRunSettings = { ...gameSettings };
         gameStartTime = performance.now();
@@ -5433,6 +5500,8 @@ const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1, p2_isAi_retry
             p2.opponent = p1;
             players.push(p1, p2);
 }
+        
+        logCurrentGameState();
         
         if (editorData.rule.code) {
              const ruleWorkerScript = `
@@ -5655,7 +5724,7 @@ p.ruleWorker.postMessage({
         }
         
         const move = {
-            pieceType: piece,
+             pieceType: piece,
             x: x,
             y: y,
             rotation: rot
@@ -5663,7 +5732,206 @@ p.ruleWorker.postMessage({
 
         aiPlayer.executeAiMove(move);
     });
+
+    document.getElementById('exportFumenBtn').addEventListener('click', () => {
+        if (gameHistoryLog.length === 0) {
+            alert('記録するデータがありません。');
+            return;
+        }
+
+        // --- 圧縮ロジック開始 ---
+        const compressedPages = [];
+        let prevP1Board1D = null;
+        let prevP2Board1D = null;
+
+        for (let i = 0; i < gameHistoryLog.length; i++) {
+            const page = gameHistoryLog[i];
+            const pageData = {};
+
+            // P1
+            const currentP1Board1D = page.p1.b.split('');
+            let p1BoardCompressed;
+            if (i === 0) {
+                // 1ページ目: 生データをRLE
+                p1BoardCompressed = encodeRLE(currentP1Board1D);
+            } else {
+                // 2ページ目以降: 差分をRLE
+                const diff = getDifference(prevP1Board1D, currentP1Board1D);
+                p1BoardCompressed = encodeRLE(diff);
+            }
+            pageData.p1 = {
+                b: p1BoardCompressed, // 圧縮データを格納
+                h: page.p1.h || '',
+                n: page.p1.n || ''
+            };
+            prevP1Board1D = currentP1Board1D; // 次の差分のために現在地を保存
+
+            // P2 (2Pモード時)
+            if (gameMode === '2P' && page.p2) {
+                const currentP2Board1D = page.p2.b.split('');
+                let p2BoardCompressed;
+                if (i === 0) {
+                    p2BoardCompressed = encodeRLE(currentP2Board1D);
+                } else {
+                    const diff = getDifference(prevP2Board1D, currentP2Board1D);
+                    p2BoardCompressed = encodeRLE(diff);
+                }
+                pageData.p2 = {
+                    b: p2BoardCompressed,
+                    h: page.p2.h || '',
+                    n: page.p2.n || ''
+                };
+                prevP2Board1D = currentP2Board1D;
+            }
+            
+            compressedPages.push(pageData);
+        }
+        // --- 圧縮ロジック終了 ---
+
+        const fumenData = {
+            v: 'f2',
+            m: gameMode,
+            p: compressedPages
+        };
+
+        let jsonString, base64Data;
+
+        try {
+            jsonString = JSON.stringify(fumenData);
+            const uint8Array = new TextEncoder().encode(jsonString);
+            
+            let binaryString = '';
+            const CHUNK_SIZE = 8192; 
+            for (let i = 0; i < uint8Array.length; i += CHUNK_SIZE) {
+                const chunk = uint8Array.subarray(i, i + CHUNK_SIZE);
+                binaryString += String.fromCharCode.apply(null, chunk);
+            }
+            base64Data = btoa(binaryString);
+
+        } catch (e) {
+            console.error('譜面データのエンコードに失敗しました:', e);
+            if (confirm('譜面データのエンコードに失敗しました。データが大きすぎる可能性があります。\n\n生の譜面データ(JSON)をクリップボードにコピーしますか？ (Base64ではありません)')) {
+                navigator.clipboard.writeText(jsonString)
+                    .then(() => {
+                        alert('生の譜面データ(JSON)をクリップボードにコピーしました。');
+                    })
+                    .catch(err => {
+                        console.error('クリップボードへのコピーに失敗しました:', err);
+                        alert('クリップボードへのコピーに失敗しました。');
+                    });
+}
+                return;
+}
+            
+            
+            gameState = 'EDITING';
+            
+            if (players.length > 0) {
+                players.forEach(p => {
+                    if (p.aiWorker) {
+                        p.aiWorker.terminate();
+                    }
+                    if (p.ruleWorker) {
+                        p.ruleWorker.terminate();
+                    }
+                });
+            }
+            
+            players = [];
+            loadGameSettings();
+            document.getElementById('game-container').style.display = 'none';
+            document.getElementById('game-controls').style.display = 'none';
+            document.getElementById('editor-container').style.display = 'flex';
+            document.getElementById('rule-description-display').style.display = 'none';
+            
+            virtualController.hide();
+            
+            const aiDebugDisplay = document.getElementById('ai-debug-display');
+            const aiDebugControls = document.getElementById('ai-debug-controls');
+            if(aiDebugDisplay) aiDebugDisplay.style.display = 'none';
+            if(aiDebugControls) aiDebugControls.style.display = 'none';
+
+            setTimeout(updateScale, 0);
+
+        
+            try {
+                let fumenEditorURL 
+= './F/index.html';
+try {
+                const path = window.location.pathname;
+const parentPath = path.substring(0, path.lastIndexOf('/') + 1);
+fumenEditorURL = parentPath + 'F/index.html';
+} catch (e) { /* fallback */ }
+
+                window.open(`${fumenEditorURL}#${base64Data}`, '_blank');
+} catch (e) {
+                console.error('譜面データの生成に失敗しました:', e);
+if (confirm('リンクの生成に失敗しました。データが長すぎる可能性があります。\n譜面データ（Base64）をクリップボードにコピーしますか？')) {
+                navigator.clipboard.writeText(base64Data)
+                    .then(() => {
+                        alert('譜面データをクリップボードにコピーしました。\n譜面エディタで手動で読み込んでください。');
+                    })
+                
+
+    .catch(err => {
+                        console.error('クリップボードへのコピーに失敗しました:', err);
+                        alert('クリップボードへのコピーに失敗しました。');
+                    });
+}
+}
+    });
+
 });
+
+function logCurrentGameState(lockingPlayer = null) {
+    if (players.length === 0) return;
+const isInitialCall = gameHistoryLog.length === 0;
+
+const getPlayerData = (player, isOpponentOfLocking) => {
+        if (!player) return null;
+let nextPieces;
+        if (isInitialCall) {
+            nextPieces = [
+                player.player.pieceType, 
+                ...player.nextQueue.slice(0, Math.max(0, gameSettings.maxNext - 1))
+            ];
+} else if (lockingPlayer && isOpponentOfLocking) {
+            nextPieces = [
+                player.player.pieceType,
+                ...player.nextQueue.slice(0, Math.max(0, gameSettings.maxNext - 1))
+            ];
+        } else {
+            nextPieces = [
+                ...player.nextQueue.slice(0, Math.max(0, gameSettings.maxNext))
+            ];
+}
+
+const next = nextPieces.filter(p => p !== null && p !== 'E').join('');
+return {
+            b: boardToString(player.board),
+            h: player.holdPiece ||
+'',
+            n: next
+        };
+};
+
+    const p1 = players[0];
+    const p2 = (gameMode === '2P' && players[1]) ? players[1] : null;
+
+    const p1IsOpponent = (lockingPlayer && p2 && lockingPlayer.id === p2.id);
+    const p2IsOpponent = (lockingPlayer && p1 && lockingPlayer.id === p1.id);
+
+    const p1Data = getPlayerData(p1, p1IsOpponent);
+    const p2Data = getPlayerData(p2, p2IsOpponent);
+
+const pageData = { p1: p1Data };
+    if (p2Data) {
+        pageData.p2 = p2Data;
+}
+    
+    gameHistoryLog.push(pageData);
+}
+
 </script>
 </body>
 </html>
