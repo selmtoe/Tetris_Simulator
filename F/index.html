@@ -1,0 +1,1501 @@
+<!DOCTYPE html> 
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1a2e">
+<title>譜面エディタ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+<style>
+    :root {
+        --bg-color: #1a1a2e;
+        --primary-color: #4b4b7c;
+        --primary-hover-color: #6a6aff;
+        --font-color: #e0e0e0;
+        --border-color: #4b4b7c;
+        --canvas-bg-color: #0f0f18;
+        --font-display: 'Orbitron', sans-serif;
+        --font-ui: 'Noto Sans JP', sans-serif;
+    }
+    html, body {
+        margin: 0;
+        padding: 0;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        -webkit-tap-highlight-color: transparent;
+    }
+    body {
+        background-color: var(--bg-color);
+        color: var(--font-color);
+        font-family: var(--font-ui);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    .main-container {
+        text-align: center;
+        transform-origin: center center;
+    }
+    #editor-container {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        background-color: rgba(15, 15, 24, 0.8);
+        padding: 20px;
+        border-radius: 10px;
+        border: 2px solid var(--border-color);
+        width: 100%;
+        max-width: 1200px;
+    }
+    canvas {
+        background-color: var(--canvas-bg-color);
+        border-radius: 8px;
+        border: 2px solid var(--border-color);
+    }
+    h2 {
+        font-family: var(--font-display);
+        color: var(--primary-hover-color);
+        margin: 0 0 10px 0;
+        border-bottom: 2px solid var(--primary-color);
+        padding-bottom: 5px;
+        text-align: center;
+    }
+    .button, button {
+        background-color: var(--primary-color);
+        color: var(--font-color);
+        border: none;
+        padding: 8px 12px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        font-family: var(--font-display);
+        transition: background-color 0.2s;
+        text-align: center;
+        display: inline-block;
+    }
+    .button:hover, button:hover {
+        background-color: var(--primary-hover-color);
+    }
+    button:disabled {
+        background-color: #333;
+        color: #888;
+        cursor: not-allowed;
+    }
+
+    .edit-section {
+        background-color: rgba(255,255,255,0.05);
+        padding: 15px;
+        border-radius: 8px;
+    }
+    .top-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 15px;
+    }
+    .mode-selection, .page-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    .mode-selection .button.active {
+        background-color: var(--primary-hover-color);
+        box-shadow: 0 0 10px var(--primary-hover-color);
+    }
+    #page-indicator {
+        font-family: var(--font-display);
+        font-size: 16px;
+        padding: 0 10px;
+        min-width: 100px;
+    }
+    .player-editors {
+        display: flex;
+        justify-content: space-around;
+        gap: 20px;
+        flex-wrap: nowrap;
+        margin-top: 15px;
+    }
+    .editor-column {
+        flex: 1;
+        min-width: 320px;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .color-palette {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+        margin-bottom: 10px;
+    }
+    .color-swatch {
+        width: 40px;
+        height: 40px;
+        border-radius: 4px;
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: all 0.2s;
+        box-sizing: border-box;
+    }
+    .color-swatch:hover {
+        transform: scale(1.1);
+    }
+    .color-swatch.active {
+        border-color: #fff;
+        box-shadow: 0 0 8px #fff;
+    }
+    .field-editor canvas {
+        margin-bottom: 10px;
+        cursor: crosshair;
+        touch-action: none;
+}
+    .field-controls {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+flex-wrap: wrap;
+    }
+    #code-gen-modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0,0,0,0.7);
+        justify-content: center;
+        align-items: center;
+    }
+    #code-gen-content {
+        background-color: var(--bg-color);
+        border: 2px solid var(--border-color);
+        border-radius: 10px;
+        padding: 20px;
+        width: 90%;
+        max-width: 800px;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+    #code-gen-content h2 {
+        margin-top: 0;
+    }
+    #code-gen-tabs {
+        display: flex;
+        gap: 10px;
+        border-bottom: 2px solid var(--primary-color);
+    }
+    #code-gen-tabs .button {
+        background-color: var(--primary-color);
+        border-radius: 5px 5px 0 0;
+        border-bottom: none;
+        padding: 8px 12px;
+    }
+    #code-gen-tabs .button.active {
+        background-color: var(--primary-hover-color);
+    }
+    #code-gen-output {
+        width: 100%;
+        height: 300px;
+        background-color: var(--canvas-bg-color);
+        color: var(--font-color);
+        font-family: monospace;
+        font-size: 14px;
+        border: 1px solid var(--border-color);
+        border-radius: 5px;
+        padding: 10px;
+        box-sizing: border-box;
+        white-space: pre;
+        overflow: auto;
+}
+    #code-gen-controls {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+}
+    #viewer-container {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        justify-content: center;
+        align-items: center;
+        background-color: var(--bg-color);
+    }
+    #viewerCanvas {
+        background-color: transparent;
+        border: none;
+    width: auto;
+        height: auto;
+        max-width: 90vw;
+        max-height: 90vh;
+    }
+    #viewer-controls {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 160;
+        display: flex;
+        flex-direction: column; 
+        gap: 10px;
+        align-items: center;
+        background-color: rgba(15, 15, 24, 0.8);
+        padding: 15px; 
+        border-radius: 10px;
+        border: 2px solid var(--border-color);
+    }
+
+    .viewer-top-row {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+    .viewer-slider-container {
+        width: 300px;
+    }
+    #viewer-page-slider {
+        width: 100%;
+        cursor: pointer;
+    }
+    #viewer-page-indicator {
+        font-family: var(--font-display);
+        font-size: 16px;
+        color: var(--font-color);
+        min-width: 120px;
+        text-align: center;
+    }
+    .sequence-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 15px;
+        padding-top: 15px;
+        border-top: 1px solid var(--primary-color);
+    }
+    .sequence-controls label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--font-display);
+    }
+    .sequence-controls input {
+        flex: 1;
+        background-color: var(--canvas-bg-color);
+        color: var(--font-color);
+        border: 1px solid var(--border-color);
+        border-radius: 5px;
+        padding: 5px 8px;
+        font-family: monospace;
+        text-transform: uppercase;
+    }
+</style>
+</head>
+<body>
+
+<div class="main-container">
+    <div id="editor-container">
+        <div class="edit-section top-controls">
+            <div class="mode-selection">
+                <h2>MODE</h2>
+                <div class="button active" id="mode-1p">1P</div>
+                <div class="button" id="mode-2p">2P</div>
+                      </div>
+            <div class="page-controls">
+                <button id="prev-page">Prev ‹</button>
+                <span id="page-indicator">Page 1 / 1</span>
+                <button id="next-page">Next ›</button>
+                <button id="new-page" style="margin-left: 15px;">New Page</button>
+     
+           <button id="delete-page">Delete</button>
+                <button id="gen-code" style="margin-left: 15px; background-color: #00a0f0;">Gen Code</button>
+                <button id="share-btn" style="margin-left: 5px; background-color: #f0a000;">Share</button>
+                <button id="send-to-simulator" style="margin-left: 5px; background-color: #00a000;">Simulator</button>
+                <button id="view-mode-btn" style="margin-left: 5px;
+background-color: #30a070;">View</button>
+            </div>
+        </div>
+        <div class="player-editors">
+            <div class="editor-column" id="p1-editor-col">
+                <div class="edit-section field-editor">
+                    <h2>PLAYER 1 - FIELD</h2>
+                    <div class="color-palette" id="p1-palette"></div>
+                                    <canvas id="field-editor-canvas-p1"></canvas>
+                    <div class="field-controls">
+                        <button class="button" id="p1-field-shift-up">↑ Up</button>
+                        <button class="button" id="p1-field-shift-down">↓ Down</button>
+        
+                <button class="button" id="p1-field-shift-left">← Left</button>
+                        <button class="button" id="p1-field-shift-right">→ Right</button>
+                        <button class="button" id="p1-field-clear">Clear</button>
+                    </div>
+                    <div class="sequence-controls">
+                        <label>Hold: <input type="text" id="p1-hold-input" maxlength="1" placeholder="例: T"></label>
+                        <label>Next: <input type="text" id="p1-next-input" placeholder="例: SZJLO"></label>
+                    </div>
+               </div>
+            </div>
+            <div class="editor-column" id="p2-editor-col" style="display: none;">
+                <div class="edit-section field-editor">
+                    <h2>PLAYER 2 - FIELD</h2>
+                                  <div class="color-palette" id="p2-palette"></div>
+                    <canvas id="field-editor-canvas-p2"></canvas>
+                    <div class="field-controls">
+                        <button class="button" id="p2-field-shift-up">↑ Up</button>
+               
+         <button class="button" id="p2-field-shift-down">↓ Down</button>
+                        <button class="button" id="p2-field-shift-left">← Left</button>
+                        <button class="button" id="p2-field-shift-right">→ Right</button>
+                        <button class="button" id="p2-field-clear">Clear</button>
+                    </div>
+                    <div class="sequence-controls">
+                        <label>Hold: <input type="text" id="p2-hold-input" maxlength="1" placeholder="例: T"></label>
+                        <label>Next: <input type="text" id="p2-next-input" placeholder="例: SZJLO"></label>
+                    </div>
+                  </div>
+              </div>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+
+<div id="viewer-container">
+    <canvas id="viewerCanvas"></canvas>
+    <div id="viewer-controls"> 
+        <div class="viewer-top-row">
+            <span id="viewer-page-indicator">Page 1 / 1</span>
+            <button id="viewer-simulator-btn" class="button">Simulator</button>
+            <button id="back-to-editor-btn" class="button">Editor</button>
+        </div>
+        <div class="viewer-slider-container">
+            <input type="range" id="viewer-page-slider" min="0" max="0" value="0">
+        </div>
+    </div>
+</div>
+
+<div id="code-gen-modal">
+    <div id="code-gen-content">
+        <h2>Generate Simulator Code</h2>
+                <div id="code-gen-tabs">
+            <button class="button active" data-type="check">Check Blocks</button>
+            <button class="button" data-type="ghost">Draw Ghost</button>
+            <button class="button" data-type="place">Place Blocks</button>
+            <button class="button" data-type="export">Export P1 Data</button>
+        </div>
+        <textarea id="code-gen-output" readonly></textarea>
+        <div id="code-gen-controls">
+                    <button id="copy-code-button" class="button">Copy to Clipboard</button>
+            <button id="close-modal-button" class="button">Close</button>
+        </div>
+    </div>
+</div>
+
+<div id="share-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center; z-index: 200;">
+    <div class="modal-content" style="background-color: var(--bg-color); padding: 25px; border-radius: 10px; border: 2px solid var(--primary-color); width: 90%; max-width: 500px; font-family: var(--font-ui);">
+        <h2>共有</h2>
+        
+        <div class="share-section">
+            <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">エクスポート</h3>
+            <p></p>
+            <div class="share-item" style="display: flex; flex-direction: column; align-items: flex-start;">
+                 <span>共有リンク</span>
+                <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box; background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; font-family: var(--font-ui);">
+                <div style="display: flex; gap: 10px; margin-top: 5px;">
+                    <button id="copy-link-btn" class="button">リンクをコピー</button>
+                </div>
+            </div>
+        </div>
+        
+        <hr style="border-color: var(--primary-color); margin: 20px 0;">
+        
+        <div class="share-section">
+            <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">インポート</h3>
+            <p></p>
+            <button id="import-from-data-btn" class="button">クリップボードからインポート</button>
+        </div>
+
+        <div class="modal-controls" style="text-align: center; margin-top: 15px;">
+            <button id="share-close" class="button">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const EDITOR_BLOCK_SIZE = 50;
+const BOARD_WIDTH = 10;
+const BOARD_VISIBLE_HEIGHT = 20;
+const BOARD_HEIGHT = 40;
+const RESOLUTION_SCALE = 2;
+const BLOCK_SIZE = 28;
+const HOLD_AREA_WIDTH = 5 * BLOCK_SIZE;
+const PLAYFIELD_WIDTH = BOARD_WIDTH * BLOCK_SIZE;
+const NEXT_AREA_WIDTH = 5 * BLOCK_SIZE;
+const PADDING = 20;
+const PLAYER_CANVAS_WIDTH = HOLD_AREA_WIDTH + PLAYFIELD_WIDTH + NEXT_AREA_WIDTH + PADDING * 2;
+const CANVAS_HEIGHT = (BOARD_VISIBLE_HEIGHT + 0.5) * BLOCK_SIZE;
+const PLAYFIELD_X_OFFSET = HOLD_AREA_WIDTH + PADDING;
+const COLORS = { 'I': '#00f0f0', 'O': '#f0f000', 'T': '#a000f0', 'L': '#f0a000', 'J': '#0000f0', 'S': '#00f000', 'Z': '#f00000', 'G': '#999999' };
+const EDITOR_COLORS = {...COLORS, 'EMPTY': '#000000'};
+
+let gameMode = '1P';
+let fumenPages = [];
+let currentPageIndex = 0;
+let currentDisplayMode = 'viewer';
+let viewerCanvas, viewerCtx;
+let viewerLoopHandle;
+const TETROMINOS = {
+    'I': { shape: [[0, 0], [1, 0], [2, 0], [3, 0]], center: [1.5, 0.5] }, 'O': { shape: [[0, 0], [1, 0], [0, -1], [1, -1]], center: [0.5, -0.5] },
+    'T': { shape: [[0, 0], [-1, 0], [0, -1], [1, 0]], center: [0, 0] }, 'L': { shape: [[-1, 0], [0, 0], [1, 0], [1, -1]], center: [0, 0] },
+    'J': { shape: [[0, 0], [-1, 0], [1, 0], [-1, -1]], center: [0, 0] }, 'S': { shape: [[1, -1], [-1, 0], [0, 0], [0, -1]], center: [0, 0] },
+    'Z': { shape: [[0, 0], [1, 0], [0, -1], [-1, -1]], center: [0, 0] }
+};
+
+const createEmptyBoard = () => Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
+
+const createBlankPage = () => ({
+    p1: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '' },
+    p2: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '' }
+});
+
+function loadPage(index) {
+    if (index < 0 || index >= fumenPages.length) return;
+    currentPageIndex = index;
+
+    ['p1', 'p2'].forEach(playerId => {
+        const data = fumenPages[currentPageIndex][playerId];
+        const palette = document.getElementById(`${playerId}-palette`);
+        
+        palette.querySelector('.active')?.classList.remove('active');
+        const swatches = palette.querySelectorAll('.color-swatch');
+        swatches.forEach(swatch => {
+            if (swatch.dataset.color === data.activeColor) {
+      swatch.classList.add('active');
+            }
+        });
+
+        document.getElementById(`${playerId}-hold-input`).value = data.hold || '';
+        document.getElementById(`${playerId}-next-input`).value = data.next || '';
+
+        drawEditorField(playerId);
+    });
+updatePageControls();
+    if (currentDisplayMode === 'viewer') {
+        drawViewer();
+    }}
+
+function updatePageControls() {
+    const pageText = `Page ${currentPageIndex + 1} / ${fumenPages.length}`;
+    
+    document.getElementById('page-indicator').textContent = pageText;
+    document.getElementById('prev-page').disabled = (currentPageIndex === 0);
+    document.getElementById('next-page').disabled = (currentPageIndex === fumenPages.length - 1);
+    document.getElementById('delete-page').disabled = (fumenPages.length <= 1);
+
+    const viewerIndicator = document.getElementById('viewer-page-indicator');
+    const viewerSlider = document.getElementById('viewer-page-slider');
+    
+    if (viewerIndicator) {
+        viewerIndicator.textContent = pageText;
+    }
+    if (viewerSlider) {
+        viewerSlider.max = fumenPages.length - 1;
+        viewerSlider.value = currentPageIndex;
+        viewerSlider.disabled = (fumenPages.length <= 1);
+    }
+}
+
+function setupEditors() {
+    ['p1', 'p2'].forEach(setupPlayerEditor);
+}
+
+function setupPlayerEditor(playerId) {
+    const palette = document.getElementById(`${playerId}-palette`);
+
+
+    Object.keys(EDITOR_COLORS).forEach(key => {
+        const swatch = document.createElement('div');
+        swatch.className = 'color-swatch';
+        swatch.dataset.color = key; // データ属性として色を保持
+        swatch.style.backgroundColor = key === 'EMPTY' ? '#333' : EDITOR_COLORS[key];
+        if (key === 'EMPTY') {
+            swatch.style.border = '1px dashed #fff';
+            swatch.title = 'Eraser';
+        }
+        swatch.addEventListener('click', () => {
+            fumenPages[currentPageIndex][playerId].activeColor = key;
+            palette.querySelector('.active')?.classList.remove('active');
+            swatch.classList.add('active');
+        });
+        palette.appendChild(swatch);
+    });
+
+    const canvas = document.getElementById(`field-editor-canvas-${playerId}`);
+    canvas.width = BOARD_WIDTH * EDITOR_BLOCK_SIZE;
+    canvas.height = BOARD_VISIBLE_HEIGHT * EDITOR_BLOCK_SIZE;
+    
+    let isDrawing = false;
+    let isEraserMode = false;
+
+    const getCoordsFromEvent = e => {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const relativeX = (clientX - rect.left) / rect.width;
+        const relativeY = (clientY - rect.top) / rect.height;
+        const x = Math.floor(relativeX * BOARD_WIDTH);
+        const y = Math.floor(relativeY * BOARD_VISIBLE_HEIGHT);
+        return { x, y };
+    };
+    
+    const applyDraw = (x, y) => {
+        if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_VISIBLE_HEIGHT) return;
+        
+        const pageData = fumenPages[currentPageIndex][playerId];
+        const boardY = y + pageData.viewY;
+        
+        const newColor = isEraserMode ? null : pageData.activeColor;
+
+        if (pageData.board[boardY][x] !== newColor) {
+            pageData.board[boardY][x] = newColor;
+            drawEditorField(playerId);
+        }
+    };
+
+    const handleDrawStart = e => {
+        e.preventDefault();
+        isDrawing = true;
+
+        const { x, y } = getCoordsFromEvent(e);
+        const pageData = fumenPages[currentPageIndex][playerId];
+        const selectedColor = pageData.activeColor;
+        const boardY = y + pageData.viewY;
+        const currentCellColor = (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_VISIBLE_HEIGHT)
+            ? pageData.board[boardY][x]
+            : null;
+
+        isEraserMode = (selectedColor === 'EMPTY' || currentCellColor === selectedColor);
+        
+        applyDraw(x, y);
+    };
+
+    const handleDrawMove = e => {
+        if (!isDrawing) return;
+        e.preventDefault();
+        const { x, y } = getCoordsFromEvent(e);
+        applyDraw(x, y);
+    };
+    
+    const handleDrawEnd = () => {
+        isDrawing = false;
+    };
+
+    canvas.addEventListener('mousedown', handleDrawStart);
+    canvas.addEventListener('mouseup', handleDrawEnd);
+    canvas.addEventListener('mouseleave', handleDrawEnd);
+    canvas.addEventListener('mousemove', handleDrawMove);
+    canvas.addEventListener('touchstart', handleDrawStart, { passive: false });
+    canvas.addEventListener('touchend', handleDrawEnd, { passive: false });
+    canvas.addEventListener('touchcancel', handleDrawEnd, { passive: false });
+    canvas.addEventListener('touchmove', handleDrawMove, { passive: false });
+
+    document.getElementById(`${playerId}-field-shift-up`).addEventListener('click', () => shiftField(playerId, 'up'));
+    document.getElementById(`${playerId}-field-shift-down`).addEventListener('click', () => shiftField(playerId, 'down'));
+    document.getElementById(`${playerId}-field-shift-left`).addEventListener('click', () => shiftField(playerId, 'left'));
+    document.getElementById(`${playerId}-field-shift-right`).addEventListener('click', () => shiftField(playerId, 'right'));
+document.getElementById(`${playerId}-field-clear`).addEventListener('click', () => {
+        fumenPages[currentPageIndex][playerId].board.forEach(row => row.fill(null));
+        drawEditorField(playerId);
+    });
+
+    const holdInput = document.getElementById(`${playerId}-hold-input`);
+    const nextInput = document.getElementById(`${playerId}-next-input`);
+
+    holdInput.addEventListener('input', (e) => {
+        const val = e.target.value.toUpperCase().trim();
+        e.target.value = val;
+        fumenPages[currentPageIndex][playerId].hold = val;
+    });
+    nextInput.addEventListener('input', (e) => {
+        const val = e.target.value.toUpperCase().trim();
+        e.target.value = val;
+        fumenPages[currentPageIndex][playerId].next = val;
+    });
+}
+
+function shiftField(playerId, direction) {
+    const board = fumenPages[currentPageIndex][playerId].board;
+    if (direction === 'up') {
+        board.shift();
+        board.push(Array(BOARD_WIDTH).fill(null));
+    } else if (direction === 'down') {
+        board.pop();
+        board.unshift(Array(BOARD_WIDTH).fill(null));
+    } else if (direction === 'left') {
+        board.forEach(row => {
+            row.shift();
+            row.push(null);
+        });
+    } else if (direction === 'right') {
+        board.forEach(row => {
+            row.pop();
+            row.unshift(null);
+        });
+    }
+    drawEditorField(playerId);
+}
+
+function drawEditorField(playerId) {
+    const canvas = document.getElementById(`field-editor-canvas-${playerId}`);
+    const ctx = canvas.getContext('2d');
+    const data = fumenPages[currentPageIndex][playerId];
+    ctx.fillStyle = '#0f0f18';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#444';
+ctx.lineWidth = 1;
+
+    for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
+        const boardY = y + data.viewY;
+        let isLineClear = true;
+        if (data.board[boardY]) {
+            for (let xCheck = 0; xCheck < BOARD_WIDTH; xCheck++) {
+                if (!data.board[boardY][xCheck]) {
+                    isLineClear = false;
+                    break;
+                }
+            }
+        } else {
+            isLineClear = false;
+        }
+
+        for (let x = 0; x < BOARD_WIDTH; x++) {
+            const pieceType = data.board[y + data.viewY]?.[x];
+if (pieceType) {
+                ctx.fillStyle = COLORS[pieceType] ||
+'#FFF';
+                ctx.fillRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
+                
+                if (isLineClear) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                    ctx.fillRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
+                }
+            }
+            ctx.strokeRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
+        }
+    }
+}
+
+function updateScale() {
+    const mainContainer = document.querySelector('.main-container');
+    mainContainer.style.transform = 'none';
+
+    const rect = mainContainer.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const scale = Math.min(
+        window.innerWidth / rect.width,
+        window.innerHeight / rect.height
+    ) * 0.98;
+
+mainContainer.style.transform = `scale(${scale})`;
+}
+
+function boardToString(board) {
+    return board.map(row => 
+        row.map(cell => cell === null ? '_' : cell).join('')
+    ).join('');
+}
+
+function stringToBoard(str) {
+    const board = [];
+    if (!str || str.length !== BOARD_WIDTH * BOARD_HEIGHT) {
+        console.error('Invalid board string length. Returning empty board.');
+        return Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
+    }
+    for (let i = 0; i < BOARD_HEIGHT; i++) {
+        const rowStr = str.substring(i * BOARD_WIDTH, (i + 1) * BOARD_WIDTH);
+        const row = rowStr.split('').map(char => (char === '_') ? null : char);
+        board.push(row);
+    }
+    return board;
+}
+
+function getShape(p, r) { 
+    if(!p) return []; 
+    const o=TETROMINOS[p].shape; 
+    if(r===0||p==='O')return o; 
+    const c=TETROMINOS[p].center;
+    return o.map(b=>{
+        let [x,y]=[b[0]-c[0],b[1]-c[1]]; 
+        for(let i=0;i<r;i++){[x,y]=[-y,x];} 
+        return [x+c[0]+(p==='O'?0.5:0),y+c[1]+(p==='O'?0.5:0)];
+    });
+}
+
+function drawViewerBlock(ctx, p, x, y, alpha = 1.0) {
+    if(y < -BLOCK_SIZE) return;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = COLORS[p] || '#FFF';
+    ctx.fillRect(x, y, BLOCK_SIZE, BLOCK_SIZE);
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x, y, BLOCK_SIZE, BLOCK_SIZE);
+    ctx.globalAlpha = 1.0;
+}
+
+function drawViewerPiece(ctx, s, x, y, p, alpha) {
+    s.forEach(b => {
+        const px = Math.floor(x + b[0]) * BLOCK_SIZE;
+        const py = (Math.floor(y + b[1]) - (BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT)) * BLOCK_SIZE; 
+        drawViewerBlock(ctx, p, px, py, alpha);
+    });
+}
+
+function drawViewerUI(ctx, playerPageData, offsetX) {
+    ctx.save();
+    ctx.translate(offsetX, 0);
+    
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#FFF'; 
+    ctx.font = `bold ${BLOCK_SIZE * 0.8}px "Orbitron"`;
+
+    ctx.fillText('HOLD', HOLD_AREA_WIDTH / 2, 40);
+    const holdPiece = playerPageData.hold;
+    if (holdPiece) { 
+        const s = getShape(holdPiece, 0); 
+        s.forEach(b => { 
+            const px = (HOLD_AREA_WIDTH / 2) - (TETROMINOS[holdPiece].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE);
+            const py = 70 - (TETROMINOS[holdPiece].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE); 
+            drawViewerBlock(ctx, holdPiece, px, py); 
+        });
+    }
+
+    const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
+    ctx.fillStyle = '#FFF';
+ctx.fillText('NEXT', rX, 40);
+    const nextQueue = playerPageData.next.split('');
+    for (let i = 0; i < Math.min(nextQueue.length, 6); i++) {
+        const pT = nextQueue[i];
+        if (!pT) continue;
+        const s = getShape(pT, 0);
+        s.forEach(b => {
+            const px = rX - (TETROMINOS[pT].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE);
+            const py = 70 + (i * BLOCK_SIZE * 2.5) - (TETROMINOS[pT].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE);
+            drawViewerBlock(ctx, pT, px, py);
+        });
+    }
+    
+    ctx.restore();
+}
+
+function drawViewer() {
+    if (!viewerCtx) return;
+    
+    viewerCtx.clearRect(0, 0, viewerCanvas.width, viewerCanvas.height);
+    const page = fumenPages[currentPageIndex];
+    const playersToDraw = (gameMode === '1P') ? ['p1'] : ['p1', 'p2'];
+    
+    playersToDraw.forEach((pid, index) => {
+        const offsetX = index * PLAYER_CANVAS_WIDTH;
+        const playerData = page[pid];
+        
+        viewerCtx.save();
+        viewerCtx.translate(offsetX, 0);
+
+        drawViewerUI(viewerCtx, playerData, 0);
+
+        viewerCtx.save();
+        viewerCtx.translate(PLAYFIELD_X_OFFSET, 0.5 * BLOCK_SIZE);
+ 
+       
+        viewerCtx.fillStyle = 'rgba(0,0,0,0.5)';
+        viewerCtx.fillRect(0, 0, PLAYFIELD_WIDTH, BOARD_VISIBLE_HEIGHT * BLOCK_SIZE);
+        
+        viewerCtx.strokeStyle = '#444';
+        viewerCtx.lineWidth = 0.5;
+        for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
+            for (let x = 0; x < BOARD_WIDTH; x++) {
+      
+          viewerCtx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+            }
+        }
+        viewerCtx.strokeStyle = '#4b4b7c';
+        viewerCtx.lineWidth = 2; 
+        viewerCtx.strokeRect(1, 1, PLAYFIELD_WIDTH - 2, (BOARD_VISIBLE_HEIGHT * BLOCK_SIZE) - 2);
+
+        const viewY = BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT;
+for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) { 
+            const boardY = y + viewY;
+            
+            let isLineClear = true;
+            if (playerData.board[boardY]) {
+                for (let xCheck = 0; xCheck < BOARD_WIDTH; xCheck++) {
+                    if (!playerData.board[boardY][xCheck]) {
+                        isLineClear = false;
+                        break;
+                    }
+                }
+            } else {
+                isLineClear = false;
+            }
+
+            for (let x = 0; x < BOARD_WIDTH; x++) { 
+if (playerData.board[boardY]?.[x]) { 
+                    const pieceType = playerData.board[boardY][x];
+                    const drawX = x * BLOCK_SIZE;
+                    const drawY = y * BLOCK_SIZE;
+                    
+                    viewerCtx.globalAlpha = 1.0;
+                    viewerCtx.fillStyle = COLORS[pieceType] || '#FFF';
+                    viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
+                    
+                    if (isLineClear) {
+                        viewerCtx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                        viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
+                    }
+                    
+                    viewerCtx.strokeStyle = '#444';
+                    viewerCtx.lineWidth = 0.5;
+                    viewerCtx.strokeRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
+                    viewerCtx.globalAlpha = 1.0;
+} 
+            } 
+        }
+        
+        viewerCtx.restore();
+        viewerCtx.restore();
+    });
+}
+
+function viewerLoop() {
+    drawViewer();
+    viewerLoopHandle = requestAnimationFrame(viewerLoop);
+}
+
+function sendToSimulator() {
+    const currentPage = fumenPages[currentPageIndex];
+    
+    const sanitize = (str) => str.replace(/[^IOTLSJZ]/gi, '');
+    const p1Hold = sanitize(currentPage.p1.hold || '');
+    const p1Next = sanitize(currentPage.p1.next || '');
+
+    const stateData = {
+        v: 2,
+        m: gameMode,
+        p1: {
+            b: boardToString(currentPage.p1.board),
+            n: p1Next,
+            h: p1Hold
+        },
+    };
+
+    if (gameMode === '2P') {
+        const p2Hold = sanitize(currentPage.p2.hold || '');
+        const p2Next = sanitize(currentPage.p2.next || '');
+        stateData.p2 = {
+            b: boardToString(currentPage.p2.board),
+            n: p2Next,
+            h: p2Hold
+        };
+    }
+
+    const jsonString = JSON.stringify(stateData);
+    const uint8Array = new TextEncoder().encode(jsonString);
+    const base64Data = btoa(String.fromCharCode.apply(null, uint8Array));
+    
+    let simulatorURL = '../index.html';
+    try {
+        const path = window.location.pathname;
+const parentPath = path.substring(0, path.lastIndexOf('/') + 1);
+        simulatorURL = parentPath + '../index.html';
+} catch(e) { /* fallback to '../index.html' */ }
+
+    location.href = `${simulatorURL}#${base64Data}`;
+}
+
+// --- 圧縮ロジック (RLE & 差分) ---
+
+/**
+ * 1次元配列をランレングス圧縮する
+ * @param {Array<string>} data - 1次元配列 ('_' を含む)
+ * @returns {Array<[string, number]>} 圧縮データ [[value, count], ...]
+ */
+function encodeRLE(data) {
+    if (!data || data.length === 0) return [];
+    const rle = [];
+    let lastValue = data[0];
+    let count = 1;
+    for (let i = 1; i < data.length; i++) {
+        const currentValue = data[i];
+        if (currentValue === lastValue) {
+            count++;
+        } else {
+            rle.push([lastValue, count]);
+            lastValue = currentValue;
+            count = 1;
+        }
+    }
+    rle.push([lastValue, count]); // 最後のデータを追加
+    return rle;
+}
+
+/**
+ * ランレングス圧縮データを1次元配列にデコードする
+ * @param {Array<[string, number]>} rleData - 圧縮データ
+ * @returns {Array<string>} 1次元配列 ('_' を含む)
+ */
+function decodeRLE(rleData) {
+    const data = [];
+    for (const [value, count] of rleData) {
+        for (let i = 0; i < count; i++) {
+            data.push(value);
+        }
+    }
+    // 期待される長さ (400) をチェック
+    if (data.length !== BOARD_WIDTH * BOARD_HEIGHT) {
+        console.warn(`RLE decode length mismatch: ${data.length}. Expected ${BOARD_WIDTH * BOARD_HEIGHT}`);
+        // 足りない分を '_' で埋める (フォールバック)
+        while (data.length < BOARD_WIDTH * BOARD_HEIGHT) {
+            data.push('_');
+        }
+        // 多い場合は切り詰める
+        if (data.length > BOARD_WIDTH * BOARD_HEIGHT) {
+            data.splice(BOARD_WIDTH * BOARD_HEIGHT);
+        }
+    }
+    return data;
+}
+
+/**
+ * 2つの1次元配列ボードデータの差分を取得する
+ * 'E' (Equal) は変更なしを示す
+ * @param {Array<string>} prevBoard1D - 前のボード (1D, '_'含む)
+ * @param {Array<string>} currentBoard1D - 現在のボード (1D, '_'含む)
+ * @returns {Array<string>} 差分データ (1D)
+ */
+function getDifference(prevBoard1D, currentBoard1D) {
+    const diff = [];
+    for (let i = 0; i < prevBoard1D.length; i++) {
+        const prev = prevBoard1D[i];
+        const curr = currentBoard1D[i];
+        if (prev === curr) {
+            diff.push('E'); // 'E' (Equal) 変更なし
+        } else {
+            diff.push(curr); // 変更後の値 (例: '_', 'I', 'O'...)
+        }
+    }
+    return diff;
+}
+
+/**
+ * 差分データからボードを復元する
+ * @param {Array<string>} prevBoard1D - 前のボード (1D, '_'含む)
+ * @param {Array<string>} diffData1D - RLEデコード後の差分データ (1D)
+ * @returns {Array<string>} 復元されたボード (1D, '_'含む)
+ */
+function applyDifference(prevBoard1D, diffData1D) {
+    const currentBoard1D = [];
+    for (let i = 0; i < prevBoard1D.length; i++) {
+        const diffVal = diffData1D[i];
+        if (diffVal === 'E') {
+            currentBoard1D.push(prevBoard1D[i]);
+        } else {
+            currentBoard1D.push(diffVal);
+        }
+    }
+    return currentBoard1D;
+}
+
+// --- 共有 (Share) / URL処理ロジック ---
+
+function getFumenDataForExport() {
+    const exportedData = {
+        v: 'f2', // Fumen version 2 (圧縮対応)
+        m: gameMode,
+        p: []
+    };
+
+    // 差分圧縮のために直前の1Dボードデータを保持
+    let prevP1Board1D = null;
+    let prevP2Board1D = null;
+
+    for (let i = 0; i < fumenPages.length; i++) {
+        const page = fumenPages[i];
+        const pageData = {};
+
+        // P1
+        const currentP1Board1D = boardToString(page.p1.board).split('');
+        let p1BoardCompressed;
+        if (i === 0) {
+            // 1ページ目: 生データをRLE
+            p1BoardCompressed = encodeRLE(currentP1Board1D);
+        } else {
+            // 2ページ目以降: 差分をRLE
+            const diff = getDifference(prevP1Board1D, currentP1Board1D);
+            p1BoardCompressed = encodeRLE(diff);
+        }
+        pageData.p1 = {
+            b: p1BoardCompressed, // 圧縮データを格納
+            h: page.p1.hold || '',
+            n: page.p1.next || ''
+        };
+        prevP1Board1D = currentP1Board1D; // 次の差分のために現在地を保存
+
+        // P2 (2Pモード時)
+        if (gameMode === '2P') {
+            const currentP2Board1D = boardToString(page.p2.board).split('');
+            let p2BoardCompressed;
+            if (i === 0) {
+                p2BoardCompressed = encodeRLE(currentP2Board1D);
+            } else {
+                const diff = getDifference(prevP2Board1D, currentP2Board1D);
+                p2BoardCompressed = encodeRLE(diff);
+            }
+            pageData.p2 = {
+                b: p2BoardCompressed,
+                h: page.p2.hold || '',
+                n: page.p2.next || ''
+            };
+            prevP2Board1D = currentP2Board1D;
+        }
+        
+        exportedData.p.push(pageData);
+    }
+    
+    return exportedData;
+}
+
+
+function applyFumenData(data) {
+    try {
+        // v1 (非圧縮) と v2 (圧縮) の両方に対応
+        if (!data || !['f1', 'f2'].includes(data.v) || !data.p || data.p.length === 0) {
+            alert('無効または非対応のデータです。');
+            return false;
+        }
+        
+        gameMode = data.m || '1P';
+        document.getElementById('mode-1p').classList.toggle('active', gameMode === '1P');
+        document.getElementById('mode-2p').classList.toggle('active', gameMode === '2P');
+        document.getElementById('p2-editor-col').style.display = (gameMode === '2P') ? 'flex' : 'none';
+
+        fumenPages = []; // いったん空にする
+        let prevP1Board1D = null;
+        let prevP2Board1D = null;
+
+        for (let i = 0; i < data.p.length; i++) {
+            const pageData = data.p[i];
+            const newPage = createBlankPage();
+
+            // P1
+            if (pageData.p1) {
+                let currentP1Board1D;
+                if (data.v === 'f1') {
+                    // v1: 非圧縮
+                    currentP1Board1D = pageData.p1.b.split('');
+                } else {
+                    // v2: 圧縮 (RLE + 差分)
+                    const rleDecoded = decodeRLE(pageData.p1.b);
+                    if (i === 0) {
+                        // 1ページ目: 生データ
+                        currentP1Board1D = rleDecoded;
+                    } else {
+                        // 2ページ目以降: 差分
+                        currentP1Board1D = applyDifference(prevP1Board1D, rleDecoded);
+                    }
+                }
+                newPage.p1.board = stringToBoard(currentP1Board1D.join(''));
+                newPage.p1.hold = pageData.p1.h || '';
+                newPage.p1.next = pageData.p1.n || '';
+                prevP1Board1D = currentP1Board1D;
+            }
+
+            // P2
+            if (gameMode === '2P' && pageData.p2) {
+                    let currentP2Board1D;
+                if (data.v === 'f1') {
+                    currentP2Board1D = pageData.p2.b.split('');
+                } else {
+                    const rleDecoded = decodeRLE(pageData.p2.b);
+                    if (i === 0) {
+                        currentP2Board1D = rleDecoded;
+                    } else {
+                        currentP2Board1D = applyDifference(prevP2Board1D, rleDecoded);
+                    }
+                }
+                newPage.p2.board = stringToBoard(currentP2Board1D.join(''));
+                newPage.p2.hold = pageData.p2.h || '';
+                newPage.p2.next = pageData.p2.n || '';
+                prevP2Board1D = currentP2Board1D;
+            }
+            
+            fumenPages.push(newPage);
+        }
+
+        currentPageIndex = 0;
+        loadPage(0);
+        updateScale();
+        return true;
+    } catch (e) {
+        console.error('Failed to apply fumen data:', e);
+        alert('データの読み込みに失敗しました。');
+        return false;
+    }
+}
+    
+function generateAndDisplayLink() {
+    const stateData = getFumenDataForExport();
+    const jsonString = JSON.stringify(stateData);
+    const uint8Array = new TextEncoder().encode(jsonString);
+    const base64Data = btoa(String.fromCharCode.apply(null, uint8Array));
+    const url = new URL(window.location);
+    url.hash = base64Data;
+    document.getElementById('share-link-input').value = url.href;
+}
+
+function openShareModal() {
+    generateAndDisplayLink();
+    document.getElementById('share-modal').style.display = 'flex';
+}
+
+function loadStateFromURL() {
+    if (window.location.hash) {
+        try {
+            const base64Data = window.location.hash.substring(1);
+            const binaryString = atob(base64Data);
+            const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
+            const jsonString = new TextDecoder().decode(bytes);
+            const data = JSON.parse(jsonString);
+
+            if (data.v === 'f1' || data.v === 'f2') {
+                if (applyFumenData(data)) {       
+                }
+            } else if (data.v === 2) {
+                
+                fumenPages = [createBlankPage()];
+                
+                gameMode = data.m || '1P';
+                document.getElementById('mode-1p').classList.toggle('active', gameMode === '1P');
+                document.getElementById('mode-2p').classList.toggle('active', gameMode === '2P');
+                document.getElementById('p2-editor-col').style.display = (gameMode === '2P') ? 'flex' : 'none';
+
+                if (data.p1) {
+                    fumenPages[0].p1.board = stringToBoard(data.p1.b);
+                    fumenPages[0].p1.next = data.p1.n || '';
+                    fumenPages[0].p1.hold = data.p1.h || '';
+                }
+                if (gameMode === '2P' && data.p2) {
+                    fumenPages[0].p2.board = stringToBoard(data.p2.b);
+                    fumenPages[0].p2.next = data.p2.n || '';
+                    fumenPages[0].p2.hold = data.p2.h || '';
+                }
+                currentPageIndex = 0;
+                loadPage(0);
+                alert('シミュレータのデータを譜面の1ページ目として読み込みました。');
+            }
+
+            history.pushState("", document.title, window.location.pathname + window.location.search);
+        } catch (e) {
+            console.error('Failed to load state from URL hash:', e);
+            alert('URLからのデータ読み込みに失敗しました。');
+            history.pushState("", document.title, window.location.pathname + window.location.search);
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    fumenPages.push(createBlankPage());
+    setupEditors();
+    loadPage(0);
+    loadStateFromURL();
+viewerCanvas = document.getElementById('viewerCanvas');
+    viewerCtx = viewerCanvas.getContext('2d');
+
+    document.getElementById('editor-container').style.display = 'none';
+    document.getElementById('viewer-container').style.display = 'flex';
+    
+
+        viewerCtx.setTransform(1, 0, 0, 1, 0, 0);
+    if (gameMode === '1P') {
+        viewerCanvas.width = PLAYER_CANVAS_WIDTH * RESOLUTION_SCALE;
+        viewerCanvas.height = CANVAS_HEIGHT * RESOLUTION_SCALE;
+      
+  
+        
+    } else {
+        const totalWidth = PLAYER_CANVAS_WIDTH * 2;
+        viewerCanvas.width = totalWidth * RESOLUTION_SCALE; 
+        viewerCanvas.height = CANVAS_HEIGHT * RESOLUTION_SCALE;
+        
+        
+}
+    viewerCtx.scale(RESOLUTION_SCALE, RESOLUTION_SCALE);
+
+    updatePageControls();
+    drawViewer();
+    document.getElementById('mode-1p').addEventListener('click', () => {
+        gameMode = '1P';
+        document.getElementById('mode-1p').classList.add('active');
+        document.getElementById('mode-2p').classList.remove('active');
+        document.getElementById('p2-editor-col').style.display = 'none';
+        setTimeout(updateScale, 0);
+    });
+    document.getElementById('mode-2p').addEventListener('click', () => {
+        gameMode = '2P';
+        document.getElementById('mode-2p').classList.add('active');
+        document.getElementById('mode-1p').classList.remove('active');
+        document.getElementById('p2-editor-col').style.display = 'flex';
+        setTimeout(updateScale, 0);
+    });
+
+    document.getElementById('prev-page').addEventListener('click', () => {
+        if (currentPageIndex > 0) {
+            loadPage(currentPageIndex - 1);
+        }
+    });
+    document.getElementById('next-page').addEventListener('click', () => {
+        if (currentPageIndex < fumenPages.length - 1) {
+            loadPage(currentPageIndex + 1);
+        }
+    });
+    document.getElementById('new-page').addEventListener('click', () => {
+        fumenPages.splice(currentPageIndex + 1, 0, createBlankPage());
+        loadPage(currentPageIndex + 1);
+    });
+    document.getElementById('delete-page').addEventListener('click', () => {
+        if (fumenPages.length > 1) {
+            fumenPages.splice(currentPageIndex, 1);
+            if (currentPageIndex >= fumenPages.length) {
+                currentPageIndex = fumenPages.length - 1;
+            }
+                     loadPage(currentPageIndex);
+        }
+    
+});
+
+    document.getElementById('view-mode-btn').addEventListener('click', () => {
+        currentDisplayMode = 'viewer';
+        document.getElementById('editor-container').style.display = 'none';
+        document.getElementById('viewer-container').style.display = 'flex';
+
+                viewerCtx.setTransform(1, 0, 0, 1, 0, 0);
+        if (gameMode === '1P') {
+            viewerCanvas.width = PLAYER_CANVAS_WIDTH * RESOLUTION_SCALE;
+            viewerCanvas.height = CANVAS_HEIGHT * RESOLUTION_SCALE;
+          
+  
+            
+        } else {
+            const totalWidth = PLAYER_CANVAS_WIDTH * 2;
+            viewerCanvas.width = totalWidth * RESOLUTION_SCALE; 
+            viewerCanvas.height = CANVAS_HEIGHT * RESOLUTION_SCALE;
+            
+  
+          
+        }
+        viewerCtx.scale(RESOLUTION_SCALE, RESOLUTION_SCALE);
+
+        updatePageControls();
+        drawViewer();
+    });
+
+    document.getElementById('back-to-editor-btn').addEventListener('click', () => {
+        currentDisplayMode = 'editor';
+        document.getElementById('editor-container').style.display = 'flex';
+        document.getElementById('viewer-container').style.display = 'none';
+        
+        updateScale();
+    });
+    
+    document.getElementById('viewer-container').addEventListener('click', (e) => {
+        if (e.target.closest('#viewer-controls')) {
+            return;
+        }
+
+        const clickX = e.clientX;
+        const screenWidth = window.innerWidth;
+        
+        if (clickX < screenWidth / 2) {
+            
+            if (currentPageIndex > 0) {
+                loadPage(currentPageIndex - 1);
+            }
+        } else {
+            
+            if (currentPageIndex < fumenPages.length - 1) {
+                loadPage(currentPageIndex + 1);
+            }
+        }
+    });
+
+    document.getElementById('viewer-simulator-btn').addEventListener('click', sendToSimulator);
+
+    document.getElementById('viewer-page-slider').addEventListener('input', (e) => {
+        const newIndex = parseInt(e.target.value, 10);
+        if (newIndex !== currentPageIndex) {
+            loadPage(newIndex);
+        }
+    });
+
+    const modal = document.getElementById('code-gen-modal');   
+    const genCodeBtn = document.getElementById('gen-code');
+    const closeModalBtn = document.getElementById('close-modal-button');
+    const copyCodeBtn = document.getElementById('copy-code-button');
+    const codeOutput = document.getElementById('code-gen-output');
+    const codeGenTabs = document.getElementById('code-gen-tabs');
+    let currentGenType = 'check';
+
+    const generateCode = (type) => {
+        const page = fumenPages[currentPageIndex];
+        let code = '';
+        const playersToGen = (gameMode === '1P') ? ['p1'] : ['p1', 'p2'];
+
+        const getBoardData = (board) => {
+            const blocks = [];
+            for (let y = 0; y < BOARD_HEIGHT; y++) {
+                for (let x = 0; x < BOARD_WIDTH; x++) {
+                    if (board[y][x]) {
+                        blocks.push({ x, y, type: board[y][x] });
+                    }
+                }
+            }
+            return blocks;
+        };
+
+        if (type === 'check') {
+            code = 'let isSuccess = true;\n';
+            playersToGen.forEach(pid => {
+                const blocks = getBoardData(page[pid].board);
+                if (blocks.length > 0) {
+                    const conditions = blocks.map(b => `!api.${pid}.board.hasBlock(${b.x}, ${b.y})`);
+                    code += `if (${conditions.join(' ||\n    ')}) {\n`;
+                    code += `    isSuccess = false;\n`;
+                    code += `}\n`;
+                }
+            });
+            code += `if (!isSuccess) {\n    // Some blocks are missing\n}\n`;
+
+        } else if (type === 'ghost') {
+            playersToGen.forEach(pid => {
+                const blocks = getBoardData(page[pid].board);
+                code += `api.clearAllGhostBlocks(api.${pid});\n`;
+                if (blocks.length > 0) {
+                    blocks.forEach(b => {
+                        code += `api.displayGhostBlock(api.${pid}, ${b.x}, ${b.y}, '${b.type}');\n`;
+                    });
+                }
+            });
+
+        } else if (type === 'place') {
+            playersToGen.forEach(pid => {
+                const blocks = getBoardData(page[pid].board);
+                                if (blocks.length > 0) {
+                    blocks.forEach(b => {
+                        code += `api.${pid}.board.placeBlock(${b.x}, ${b.y}, '${b.type}');\n`;
+                    });
+                }
+            });
+        } else if (type === 'export') {
+            const board = page.p1.board;
+            code = JSON.stringify(board, null, 2);
+        }
+
+        codeOutput.value = code.trim();
+        currentGenType = type;
+
+        codeGenTabs.querySelectorAll('.button').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.type === type);
+        });
+    };
+
+    genCodeBtn.addEventListener('click', () => {
+        generateCode(currentGenType);
+        modal.style.display = 'flex';
+    });
+
+    closeModalBtn.addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
+
+    window.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+
+    copyCodeBtn.addEventListener('click', () => {
+        if (!navigator.clipboard) {
+            codeOutput.select();
+            document.execCommand('copy');
+            return;
+        }
+        navigator.clipboard.writeText(codeOutput.value).then(() => {
+        }, (err) => {
+        });
+    });
+codeGenTabs.querySelectorAll('.button').forEach(tab => {
+        tab.addEventListener('click', () => {
+            generateCode(tab.dataset.type);
+        });
+    });
+window.addEventListener('resize', updateScale);
+    setTimeout(updateScale, 100);
+
+    document.getElementById('send-to-simulator').addEventListener('click', sendToSimulator);
+
+    document.getElementById('share-btn').addEventListener('click', openShareModal);
+    document.getElementById('share-close').addEventListener('click', () => {
+        document.getElementById('share-modal').style.display = 'none';
+    });
+    document.getElementById('copy-link-btn').addEventListener('click', () => {
+        const input = document.getElementById('share-link-input');
+        input.select();
+        navigator.clipboard.writeText(input.value)
+            .then(() => alert('共有リンクをクリップボードにコピーしました！'))
+            .catch(err => alert('コピーに失敗しました: ' + err));
+    });
+    document.getElementById('import-from-data-btn').addEventListener('click', async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            if (!text) {
+                alert('クリップボードが空です。');
+                return;
+            }
+
+            let data;
+            if (text.startsWith('http') && text.includes('#')) {
+                const base64Data = text.substring(text.indexOf('#') + 1);
+                const binaryString = atob(base64Data);
+                const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
+                const jsonString = new TextDecoder().decode(bytes);
+                data = JSON.parse(jsonString);
+            } else {
+                data = JSON.parse(text);
+            }
+            
+            if(applyFumenData(data)) {
+                 alert('クリップボードから譜面データを読み込みました。');
+                 document.getElementById('share-modal').style.display = 'none';
+            }
+
+        } catch (e) {
+            alert('クリップボードのデータが無効か、読み込みに失敗しました。');
+            console.error('Failed to import from clipboard:', e);
+        }
+    });
+});
+</script>
+</body>
+</html>
+    
