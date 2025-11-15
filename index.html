@@ -4788,6 +4788,17 @@ function pollGamepads() {
                         const binding = p.keyBindings[action];
                         if (binding.type === 'pad_button' && gamepads[i].buttons[binding.value] && !prevGamepads[i]?.buttons[binding.value]) {
                            p.handlePress(action);
+                        } 
+                        else if (binding.type === 'pad_axis') {
+                            const [axis, dir] = [parseInt(binding.value[0]), binding.value[1]];
+                            const val = gamepads[i].axes[axis];
+                            const prevVal = prevGamepads[i] ? prevGamepads[i].axes[axis] : 0;
+                            const threshold = AXIS_THRESHOLD;
+                            if (dir === '+' && val > threshold && prevVal < threshold) {
+                                p.handlePress(action);
+                            } else if (dir === '-' && val < -threshold && prevVal > -threshold) {
+                                p.handlePress(action);
+                            }
                         }
                     });
                 }
