@@ -4640,7 +4640,6 @@ function getDifference(prevBoard1D, currentBoard1D) {
     }
     return diff;
 }
-// --- ここまで追加 ---
 
 let autoStartParams = { ss: false, nh: false, hb: false };
 
@@ -5738,8 +5737,7 @@ p.ruleWorker.postMessage({
             alert('記録するデータがありません。');
             return;
         }
-
-        // --- 圧縮ロジック開始 ---
+        
         const compressedPages = [];
         let prevP1Board1D = null;
         let prevP2Board1D = null;
@@ -5786,7 +5784,6 @@ p.ruleWorker.postMessage({
             
             compressedPages.push(pageData);
         }
-        // --- 圧縮ロジック終了 ---
 
         const fumenData = {
             v: 'f2',
