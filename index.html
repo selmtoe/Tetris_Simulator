@@ -226,9 +226,38 @@
     to { opacity: 1; }
 }
 
+/* デバッグコンソール用のスタイル追加 */
+#debug-console-overlay {
+    position: fixed; top: 0;
+    left: 0; width: 100%; height: 200px;
+    background: rgba(0,0,0,0.8); color: #ff4444; z-index: 9999;
+    overflow-y: scroll; font-family: monospace; font-size: 12px;
+    pointer-events: none;
+    /* クリックを下の要素に通す */
+    white-space: pre-wrap; padding: 10px; border-bottom: 2px solid red;
+    display: none;
+}
 </style>
 </head>
 <body>
+<div id="debug-console-overlay"></div>
+<script>
+    // エラーを画面に表示する仕組み
+    (function(){
+        const consoleDiv = document.getElementById('debug-console-overlay');
+        function logError(msg) {
+            consoleDiv.textContent += "ERROR: " + msg + "\n----------------\n";
+            consoleDiv.style.display = 'block';
+        }
+        window.onerror = function(msg, url, line, col, error) {
+            logError(`${msg}\nAt: ${line}:${col}\n${error ? error.stack : ''}`);
+            return false;
+        };
+        window.onunhandledrejection = function(e) {
+            logError(`Unhandled Promise Rejection: ${e.reason}`);
+        };
+    })();
+</script>
 
 <div class="main-container">
     <div id="editor-container">
@@ -358,9 +387,10 @@ position: fixed; top: 10px; right: 10px; z-index: 160; gap: 10px;">
 <div id="settings-modal">
     <div class="modal-content">
 <div class="modal-tabs">
-            <button class="tab-button active" data-tab="general">諸設定</button>
+            <button class="tab-button active" data-tab="general">基本設定</button>
             <button class="tab-button" data-tab="p1-keys">1P操作設定</button>
             <button class="tab-button" data-tab="p2-keys" id="p2-keys-tab-btn" style="display: none;">2P操作設定</button>
+            <button class="tab-button" data-tab="layout-settings">描画設定</button>
             <button class="tab-button" data-tab="ai-settings">AI設定</button>
         </div>
 
@@ -398,9 +428,15 @@ justify-content: center; gap: 10px; flex-wrap: wrap;">
         </div>
         
         <div class="tab-content" id="tab-content-p2-keys">
-            <h2 style="margin-top: 20px;">PLAYER 2 - 操作設定</h2>
+         <h2 style="margin-top: 20px;">PLAYER 2 - 操作設定</h2>
             <p></p>
             <div id="p2-key-config-list" class="key-config-list-container"></div>
+        </div>
+
+        <div class="tab-content" id="tab-content-layout-settings">
+            <h2 style="margin-top: 20px;">描画設定</h2>
+            <p></p>
+            <div id="layout-settings-list" class="key-config-list-container"></div>
         </div>
 
         <div class="tab-content" id="tab-content-ai-settings">
@@ -1650,6 +1686,1695 @@ if (type === 'start') {
 };
 `;
 
+const aiWorkerScript_Simplified = `
+/* --- AI 6: Cold Clear (Simplified & Optimized) --- */
+/* Optimizations Applied:
+   1. Vectorization: nodeMap uses Array (continuous memory) instead of Object.
+   2. Integer IDs: Replaced string IDs with simple integer counters.
+   3. Zobrist Hashing: Replaced string-based board hashing with XOR-based integer hashing.
+*/
+
+// --- Constants ---
+const WIDTH = 10;
+const BOARD_HEIGHT = 40;
+const SEARCH_ITERATION_LIMIT = 500000; // 最適化により探索数を増やしても高速動作可能
+
+// --- Precomputed Zobrist Table ---
+// 40行 x 1024パターン(10bit) の乱数テーブル
+const ZOBRIST_TABLE = new Int32Array(BOARD_HEIGHT * 1024);
+for (let i = 0; i < ZOBRIST_TABLE.length; i++) {
+    // 32bit signed integer range
+    ZOBRIST_TABLE[i] = (Math.random() * 0xFFFFFFFF) |
+0;
+}
+
+const TEMPLATES = [
+    {
+        name: 'meisou_1st',
+        type: 'meisou',
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,null,null,null,null],["G","G","G",null,"G",null,null,"G",null,null],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
+        moves: [
+            {t:'L', x:1, y:38, r:1},
+            {t:'J', x:7, y:38, r:3},
+            {t:'T', x:4, y:38, r:1},
+            {t:'O', x:8, y:39, r:0},
+            {t:'I', x:0, y:37, r:3},
+            {t:'S', x:2, y:38, r:1}
+        ],
+        trigger: (board, queue, hold) => {
+            // 1. ミノ列の取得 (Hold + Queueから計7個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 7) break;
+                minos.push(p);
+            }
+
+            // 2. 重複チェック
+            const counts = {};
+            for (const m of minos) {
+                counts[m] = (counts[m] || 0) + 1;
+                if (counts[m] > 1) return false;
+            }
+
+    const lIndex = minos.indexOf('L');
+    const sIndex = minos.indexOf('S');
+    const iIndex = minos.indexOf('I');
+
+    return lIndex !== -1 && sIndex !== -1 && iIndex !== -1 && !(lIndex > sIndex && lIndex > iIndex);
+        }
+    },
+        {
+        name: 'meisou_2nd_pattern1',
+        type: 'meisou',
+        startBoard: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,null,null,null,null],["G","G","G",null,"G",null,null,"G",null,null],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,"G","G","G","G"],["G",null,null,"G",null,null,"G","G","G","G"],["G","G","G","G",null,null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
+        moves: [
+            {t:'Z', x:8, y:37, r:0},
+            {t:'L', x:4, y:36, r:2},
+            {t:'J', x:8, y:34, r:3},
+            {t:'S', x:0, y:35, r:1},
+            {t:'O', x:6, y:34, r:0},
+            {t:'I', x:8, y:34, r:1},
+            {t:'Z', x:2, y:35, r:1}
+        ],
+        trigger: (board, queue, hold) => {
+            if (hold !== 'Z') return false;
+            const checkQueue = queue.slice(0, 7);
+            const qCounts = {};
+            for (const m of checkQueue) {
+                if (qCounts[m]) return false;
+                qCounts[m] = true;
+            }
+
+            // 1. ミノ列の取得 (Hold + Queueから計8個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 8) break;
+                minos.push(p);
+            }
+
+    const jIndex = minos.indexOf('J');
+    const oIndex = minos.indexOf('O');
+    return jIndex !== -1 && oIndex !== -1 && oIndex > jIndex;
+        }
+    },
+        {
+        name: 'meisou_2nd_pattern2',
+        type: 'meisou',
+        startBoard: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,null,null,null,null],["G","G","G",null,"G",null,null,"G",null,null],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,"G",null,null,null,null,null,null,null],[null,"G","G",null,null,null,null,null,null,null],[null,"G","G","G",null,null,"G","G","G","G"],["G","G","G","G",null,null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
+        moves: [
+            {t:'Z', x:1, y:36, r:0},
+            {t:'I', x:8, y:35, r:1},
+            {t:'L', x:4, y:36, r:2},
+            {t:'J', x:7, y:34, r:2},
+            {t:'S', x:7, y:36, r:1},
+            {t:'O', x:2, y:35, r:0},
+            {t:'Z', x:1, y:33, r:1}
+        ],
+        trigger: (board, queue, hold) => {
+            if (hold !== 'Z') return false;
+            const checkQueue = queue.slice(0, 7);
+            const qCounts = {};
+            for (const m of checkQueue) {
+                if (qCounts[m]) return false;
+                qCounts[m] = true;
+            }
+
+            // 1. ミノ列の取得 (Hold + Queueから計8個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 8) break;
+                minos.push(p);
+            }
+
+    const jIndex = minos.indexOf('J');
+    const sIndex = minos.indexOf('S');
+    return jIndex !== -1 && sIndex !== -1 && sIndex < jIndex;
+    }
+    },
+       {
+        name: 'meisou_2nd_pattern3',
+        type: 'meisou',
+        startBoard: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,null,null,null,null],["G","G","G",null,"G",null,null,"G",null,null],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,"G","G",null,null,null,null,null,null,null],[null,"G","G",null,null,null,null,null,null,"G"],[null,"G","G","G",null,null,"G","G",null,"G"],[null,"G","G","G",null,null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
+        moves: [
+            {t:'Z', x:8, y:37, r:0},
+            {t:'I', x:8, y:34, r:1},
+            {t:'L', x:4, y:36, r:2},
+            {t:'O', x:1, y:36, r:0},
+            {t:'Z', x:7, y:35, r:0},
+            {t:'J', x:1, y:33, r:1},
+            {t:'S', x:2, y:34, r:1}
+        ],
+        trigger: (board, queue, hold) => {
+            if (hold !== 'Z') return false;
+            const checkQueue = queue.slice(0, 7);
+            const qCounts = {};
+            for (const m of checkQueue) {
+                if (qCounts[m]) return false;
+                qCounts[m] = true;
+            }
+
+            // 1. ミノ列の取得 (Hold + Queueから計8個分)
+ 
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 8) break;
+                minos.push(p);
+            }
+
+    const jIndex = minos.indexOf('J');
+    const sIndex = minos.indexOf('S');
+    const oIndex = minos.indexOf('O');
+    return !(jIndex !== -1 && oIndex !== -1 && oIndex > jIndex) && !(jIndex !== -1 && sIndex !== -1 && sIndex < jIndex)
+        }
+    },
+    // 1. 山岳2号右 (1巡目)
+    {
+        name: 'sangaku_2_right_1st',
+        type: 'sangaku_2',
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,"G","G"],[null,null,"G",null,null,null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
+        moves: [
+            {t:'Z', x:7, y:37, r:1},
+            {t:'I', x:8, y:37, r:1},
+            {t:'T', x:2, y:38, r:1},
+            {t:'O', x:0, y:39, r:0},
+            {t:'S', x:4, y:39, r:0},
+            {t:'L', x:7, y:39, r:0}
+        ],
+        trigger: (board, queue, hold) => {
+            // 1. ミノ列の取得 (Hold + Queueから計7個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 7) break;
+                minos.push(p);
+            }
+
+            // 2. 重複チェック
+            const counts = {};
+            for (const m of minos) {
+                counts[m] = (counts[m] || 0) + 1;
+                if (counts[m] > 1) return false;
+            }
+
+            // 3. 順序チェック (LがJより先)
+            const lIndex = minos.indexOf('L');
+            const jIndex = minos.indexOf('J');
+            // 両方存在し、かつLのインデックスがJより小さい(速い)場合のみtrue
+            return lIndex !== -1 && jIndex !== -1 && lIndex <= jIndex;
+        }
+    },
+
+    // 2. 山岳2号左 (1巡目)
+    {
+        name: 'sangaku_2_left_1st',
+        type: 'sangaku_2',
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G","G",null,null,null,null,null,null,null,null],["G","G","G",null,null,null,null,"G",null,null],["G","G","G",null,"G","G","G","G","G","G"],["G","G","G","G",null,"G","G","G","G","G"]
+        ],
+        moves: [
+        {t:'I', x:0, y:37, r:3},
+        {t:'S', x:1, y:37, r:1},
+        {t:'T', x:7, y:38, r:3},
+        {t:'J', x:2, y:39, r:0},
+        {t:'Z', x:5, y:39, r:0},
+        {t:'O', x:8, y:39, r:0}
+
+        ],
+        // 条件: 直近でJがLより速い かつ ホールド含めた直近7ミノに重複がない
+        trigger: (board, queue, hold) => {
+            // 1. ミノ列の取得 (Hold + Queueから計7個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 7) break;
+                minos.push(p);
+            }
+
+            // 2. 重複チェック
+            const counts = {};
+            for (const m of minos) {
+                counts[m] = (counts[m] || 0) + 1;
+                if (counts[m] > 1) return false;
+            }
+
+            // 3. 順序チェック (JがLより先)
+            const jIndex = minos.indexOf('J');
+            const lIndex = minos.indexOf('L');
+            return jIndex !== -1 && lIndex !== -1 && jIndex < lIndex;
+        }
+    },
+
+    // 3. 山岳2号右の二巡目① (Z < O)
+    {
+        name: 'sangaku_2_right_2nd_pattern1',
+        type: 'sangaku_2',
+        startBoard: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,"G","G"],[null,null,"G",null,null,null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]
+        ],
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,"G","G","G","G"],["G",null,null,"G",null,null,"G","G","G","G"],["G","G","G","G",null,null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]
+        
+        ],
+        moves: [ 
+            {t:'J', x:3, y:35, r:3},
+            {t:'O', x:6, y:34, r:0},
+            {t:'L', x:9, y:34, r:3},
+            {t:'I', x:0, y:35, r:3},
+            {t:'Z', x:7, y:35, r:1},
+            {t:'J', x:1, y:36, r:1},
+            {t:'S', x:4, y:37, r:0}
+        ],
+        trigger: (board, queue, hold) => {
+            if (hold !== 'J') return false;
+            const checkQueue = queue.slice(0, 7);
+            const qCounts = {};
+            for (const m of checkQueue) {
+                if (qCounts[m]) return false;
+                qCounts[m] = true;
+            }
+
+            // 1. ミノ列の取得 (Hold + Queueから計8個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 8) break;
+                minos.push(p);
+            }
+
+            // 2. 順序チェック (ZがOより先)
+            const zIndex = minos.indexOf('Z');
+            const oIndex = minos.indexOf('O');
+            // ※2巡目は盤面形状(startBoard)でフィルタされる前提のため重複チェックは省略し順序のみ判定
+            return zIndex !== -1 && oIndex !== -1 && zIndex < oIndex;
+            }
+    },
+
+    // 4. 山岳2号右の二巡目② (O < Z)
+    {
+        name: 'sangaku_2_right_2nd_pattern2',
+        type: 'sangaku_2',
+        startBoard: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,"G","G"],[null,null,"G",null,null,null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]
+        ],
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,"G"],[null,null,null,null,null,null,null,null,null,"G"],[null,null,null,null,null,null,null,null,null,"G"],[null,null,null,null,null,null,null,null,null,"G"],[null,null,null,null,null,null,"G","G","G","G"],[null,null,null,null,null,null,"G","G","G","G"],[null,"G","G",null,null,null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
+        moves: [
+            {t:'J', x:9, y:34, r:3},
+            {t:'O', x:0, y:37, r:0},
+            {t:'L', x:7, y:33, r:2},
+            {t:'L', x:7, y:35, r:3},
+            {t:'J', x:7, y:35, r:1},
+            {t:'J', x:7, y:33, r:2},
+            {t:'Z', x:2, y:36, r:0},
+            {t:'S', x:4, y:37, r:0},
+            {t:'I', x:8, y:30, r:1}
+        ],
+        trigger: (board, queue, hold) => {
+            if (hold !== 'J') return false;
+            const checkQueue = queue.slice(0, 7);
+            const qCounts = {};
+            for (const m of checkQueue) {
+                if (qCounts[m]) return false;
+                qCounts[m] = true;
+            }
+
+            // 1. ミノ列の取得 (Hold + Queueから計8個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 8) break;
+                minos.push(p);
+            }
+            
+    const oIndex = minos.indexOf('O');
+    const zIndex = minos.indexOf('Z');
+    const iIndex = minos.indexOf('I');
+
+    return oIndex !== -1 && zIndex !== -1 && iIndex !== -1 && oIndex < zIndex && iIndex < oIndex;
+}
+    },
+
+        // 4. 山岳2号右の二巡目3 (O < Z)
+    {
+        name: 'sangaku_2_right_2nd_pattern3',
+        type: 'sangaku_2',
+        startBoard: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,"G","G"],[null,null,"G",null,null,null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]
+        ],
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,"G","G","G","G"],["G",null,null,null,null,null,"G","G","G","G"],["G","G","G",null,null,null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,null,"G","G","G"],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
+        moves: [
+            {t:'J', x:9, y:34, r:3},
+            {t:'O', x:0, y:37, r:0},
+            {t:'L', x:7, y:33, r:2},
+            {t:'L', x:7, y:35, r:3},
+            {t:'J', x:7, y:35, r:1},
+            {t:'J', x:7, y:33, r:2},
+            {t:'Z', x:2, y:36, r:0},
+            {t:'S', x:4, y:37, r:0},
+            {t:'I', x:0, y:33, r:3}
+        ],
+        trigger: (board, queue, hold) => {
+            if (hold !== 'J') return false;
+            const checkQueue = queue.slice(0, 7);
+            const qCounts = {};
+            for (const m of checkQueue) {
+                if (qCounts[m]) return false;
+                qCounts[m] = true;
+            }
+
+            // 1. ミノ列の取得 (Hold + Queueから計8個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 8) break;
+                minos.push(p);
+            }
+
+
+    const oIndex = minos.indexOf('O');
+    const zIndex = minos.indexOf('Z');
+    const iIndex = minos.indexOf('I');
+    // 3. 順序チェック
+    // すべてのミノが存在し、かつ O < Z と O < I を満たす
+    return oIndex !== -1 && zIndex !== -1 && iIndex !== -1 && oIndex < zIndex && oIndex < iIndex;
+}
+    },
+
+    // 5. 山岳2号左の二巡目① (S < O)
+    {
+        name: 'sangaku_2_left_2nd_pattern1',
+        type: 'sangaku_2',
+        startBoard:[[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G","G",null,null,null,null,null,null,null,null],["G","G","G",null,null,null,null,"G",null,null],["G","G","G",null,"G","G","G","G","G","G"],["G","G","G","G",null,"G","G","G","G","G"]],
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G","G","G","G",null,null,null,null,null,null],["G","G","G","G",null,null,"G",null,null,"G"],["G","G","G",null,null,null,"G","G","G","G"],["G","G","G",null,"G","G","G","G","G","G"],["G","G","G",null,null,"G","G","G","G","G"],["G","G","G",null,"G","G","G","G","G","G"],["G","G","G","G",null,"G","G","G","G","G"]],
+        moves: [
+            {t:'Z', x:5, y:37, r:0},
+            {t:'S', x:1, y:35, r:1},
+            {t:'L', x:6, y:35, r:1},
+            {t:'J', x:0, y:34, r:1},
+            {t:'O', x:2, y:34, r:0},
+            {t:'I', x:8, y:35, r:1},
+            {t:'L', x:8, y:36, r:3}     
+        ],
+        trigger: (board, queue, hold) => {
+            if (hold !== 'L') return false;
+            const checkQueue = queue.slice(0, 7);
+            const qCounts = {};
+            for (const m of checkQueue) {
+                if (qCounts[m]) return false;
+                qCounts[m] = true;
+            }
+
+            // 1. ミノ列の取得 (Hold + Queueから計8個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 8) break;
+                minos.push(p);
+            }
+
+            // 2. 順序チェック (SがOより先)
+            const sIndex = minos.indexOf('S');
+            const oIndex = minos.indexOf('O');
+            return sIndex !== -1 && oIndex !== -1 && sIndex < oIndex;
+}
+    },
+
+    // 6. 山岳2号左の二巡目② (O < S)
+    {
+        name: 'sangaku_2_left_2nd_pattern2',
+        type: 'sangaku_2',
+        startBoard:[[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G","G",null,null,null,null,null,null,null,null],["G","G","G",null,null,null,null,"G",null,null],["G","G","G",null,"G","G","G","G","G","G"],["G","G","G","G",null,"G","G","G","G","G"]],
+        board:[[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,null,null,null,null],["G","G","G","G",null,null,null,null,null,null],["G","G","G","G",null,null,null,null,null,null],["G","G","G",null,null,null,null,"G","G",null],["G","G","G",null,"G","G","G","G","G","G"],["G","G","G",null,null,"G","G","G","G","G"],["G","G","G",null,"G","G","G","G","G","G"],["G","G","G","G",null,"G","G","G","G","G"]],
+        moves: [
+            {t:'L', x:0, y:34, r:1},
+            {t:'O', x:8, y:37, r:0},
+            {t:'L', x:2, y:35, r:3},
+            {t:'L', x:2, y:33, r:2},
+            {t:'J', x:2, y:33, r:2},
+            {t:'J', x:2, y:35, r:1},
+            {t:'Z', x:5, y:37, r:0},
+            {t:'S', x:7, y:36, r:0},
+            {t:'I', x:0, y:30, r:3}
+        ],
+        trigger: (board, queue, hold) => {
+            if (hold !== 'L') return false;
+            const checkQueue = queue.slice(0, 7);
+            const qCounts = {};
+            for (const m of checkQueue) {
+                if (qCounts[m]) return false;
+                qCounts[m] = true;
+            }
+
+            // 1. ミノ列の取得 (Hold + Queueから計8個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 8) break;
+                minos.push(p);
+            }
+
+            const oIndex = minos.indexOf('O');
+            const sIndex = minos.indexOf('S');
+            const iIndex = minos.indexOf('I');
+            return oIndex !== -1 && sIndex !== -1 && iIndex !== -1 && oIndex < sIndex && oIndex > iIndex;
+}
+    },
+    {
+        name: 'sangaku_2_left_2nd_pattern3',
+        type: 'sangaku_2',
+        startBoard:[[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G","G",null,null,null,null,null,null,null,null],["G","G","G",null,null,null,null,"G",null,null],["G","G","G",null,"G","G","G","G","G","G"],["G","G","G","G",null,"G","G","G","G","G"]],
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,"G"],["G","G","G","G",null,null,null,null,null,"G"],["G","G","G","G",null,null,null,null,null,"G"],["G","G","G",null,null,null,null,"G","G","G"],["G","G","G",null,"G","G","G","G","G","G"],["G","G","G",null,null,"G","G","G","G","G"],["G","G","G",null,"G","G","G","G","G","G"],["G","G","G","G",null,"G","G","G","G","G"]],
+        moves: [
+            {t:'L', x:0, y:34, r:1},
+            {t:'O', x:8, y:37, r:0},
+            {t:'L', x:2, y:35, r:3},
+            {t:'L', x:2, y:33, r:2},
+            {t:'J', x:2, y:33, r:2},
+            {t:'J', x:2, y:35, r:1},
+            {t:'Z', x:5, y:37, r:0},
+            {t:'S', x:7, y:36, r:0},
+            {t:'I', x:8, y:33, r:1}
+        ],
+// 修正後
+        trigger: (board, queue, hold) => {
+            if (hold !== 'L') return false;
+            const checkQueue = queue.slice(0, 7);
+            const qCounts = {};
+            for (const m of checkQueue) {
+                if (qCounts[m]) return false;
+                qCounts[m] = true;
+            }
+
+            // 1. ミノ列の取得 (Hold + Queueから計8個分)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 8) break;
+                minos.push(p);
+            }
+
+            const oIndex = minos.indexOf('O');
+            const sIndex = minos.indexOf('S');
+            const iIndex = minos.indexOf('I');
+            return oIndex !== -1 && sIndex !== -1 && iIndex !== -1 && oIndex < sIndex && oIndex < iIndex;
+}
+    }
+];
+
+// --- Mino Definitions ---
+const MINO_DEFS = {
+    'I': [[[0,0], [-1,0], [1,0], [2,0]], [[1,0], [1,-1], [1,1], [1,2]], [[0,1], [-1,1], [1,1], [2,1]], [[0,0], [0,-1], [0,1], [0,2]]],
+    'O': [[[0,0], [1,0], [0,-1], [1,-1]], [[0,0], [1,0], [0,-1], [1,-1]], [[0,0], [1,0], [0,-1], [1,-1]], [[0,0], [1,0], [0,-1], [1,-1]]],
+    'T': [[[0,0], [-1,0], [1,0], [0,-1]], [[0,0], [0,-1], [1,0], [0,1]], [[0,0], [1,0], [-1,0], [0,1]], [[0,0], [0,1], [-1,0], [0,-1]]],
+    'S': [[[0,0], [-1,0], [0,-1], [1,-1]], [[0,0], [0,-1], [1,0], [1,1]], [[0,0], [1,0], [0,1], [-1,1]], [[0,0], [0,1], [-1,0], [-1,-1]]],
+    'Z': [[[0,0], [1,0], [0,-1], [-1,-1]], [[0,0], [0,1], [1,0], [1,-1]], [[0,0], [-1,0], [0,1], [1,1]], [[0,0], [0,-1], [-1,0], [-1,1]]],
+    'J': [[[0,0], [-1,0], [1,0], [-1,-1]], [[0,0], [0,-1], [0,1], [1,-1]], [[0,0], [1,0], [-1,0], [1,1]], [[0,0], [0,1], [0,-1], [-1,1]]],
+    'L': [[[0,0], [1,0], [-1,0], [1,-1]], [[0,0], [0,1], [0,-1], [1,1]], [[0,0], [-1,0], [1,0], [-1,1]], [[0,0], [0,-1], [0,1], [-1,-1]]]
+};
+const SRS_OFFSETS_RAW = {
+    common: {
+        '0->1': [[0,0], [-1,0], [-1,1], [0,-2], [-1,-2]], '1->0': [[0,0], [1,0], [1,-1], [0,2], [1,2]],
+        '1->2': [[0,0], [1,0], [1,-1], [0,2], [1,2]], '2->1': [[0,0], [-1,0], [-1,1], [0,-2], [-1,-2]],
+        '2->3': [[0,0], [1,0], [1,1], [0,-2], [1,-2]], '3->2': [[0,0], [-1,0], [-1,-1], [0,2], [-1,2]],
+        '3->0': [[0,0], [-1,0], [-1,-1], [0,2], [-1,2]], '0->3': [[0,0], [1,0], [1,1], [0,-2], [1,-2]],
+    },
+    I: {
+        '0->1': [[0,0], [-2,0], [1,0], [-2,-1], [1,2]], '1->0': [[0,0], [2,0], [-1,0], [2,1], [-1,-2]],
+        '1->2': [[0,0], [-1,0], [2,0], [-1,2], [2,-1]], '2->1': [[0,0], [1,0], [-2,0], [1,-2], [-2,1]],
+        '2->3': [[0,0], [2,0], [-1,0], [2,1], [-1,-2]], '3->2': [[0,0], [-2,0], [1,0], [-2,-1], [1,2]],
+        '3->0': [[0,0], [1,0], [-2,0], [1,-2], [-2,1]], '0->3': [[0,0], [-1,0], [2,0], [-1,2], [2,-1]],
+    }
+};
+const SPAWN_X = 4;
+const SPAWN_Y = 19;
+const SPAWN_ROT = 0;
+
+// グローバルキャッシュ (Mapキーを整数にするため高速)
+let lfgCache = new Map();
+let evaluationCache = new Map();
+
+// --- Classes ---
+class StandardWeights {
+    constructor() {
+        this.back_to_back = 52;
+        this.bumpiness = -24;
+        this.bumpiness_sq = -7;
+        this.row_transitions = -5;
+        this.height = -39;
+        this.top_half = -150;
+        this.top_quarter = -511;
+        this.jeopardy = -11;
+        this.cavity_cells = -173;
+        this.cavity_cells_sq = -3;
+        this.overhang_cells = -34;
+        this.overhang_cells_sq = -1;
+        this.covered_cells = -17;
+        this.covered_cells_sq = -1;
+        this.tslot = [8, 148, 192, 407];
+        this.well_depth = 57;
+        this.max_well_depth = 17;
+        this.well_column = [20, 23, 20, 50, 59, 21, 59, 10, -10, 24];
+        this.b2b_clear = 104;
+        this.clear1 = -320;
+        this.clear2 = -200;
+        this.clear3 = -178;
+        this.clear4 = 270;
+        this.tspin1 = 1;
+        this.tspin2 = 290;
+        this.tspin3 = 482;
+        this.mini_tspin1 = -158;
+        this.mini_tspin2 = -93;
+        this.perfect_clear = 999;
+        this.combo_garbage = 150;
+        this.wasted_t = -152;
+        this.soft_drop = -100;
+        this.COMBO_GARBAGE = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 5];
+    }
+}
+
+
+class TetrisBoard {
+    constructor(baseBoard = null) {
+        if (baseBoard) {
+            // 高速コピー
+            this.rows = baseBoard.rows.slice();
+        } else {
+            this.rows = new Array(BOARD_HEIGHT).fill(0);
+        }
+        this.zobristHash = 0; // ハッシュをキャッシュする場合はここで保持も可能だが、計算が速いので都度計算する
+    }
+
+    static fromSimulatorBoard(layout) {
+        const board = new TetrisBoard();
+        const layoutHeight = layout.length;
+        const width = WIDTH;
+        for (let y = 0; y < layoutHeight; y++) {
+            const internalY = y + (BOARD_HEIGHT - layoutHeight);
+            if (internalY < 0) continue;
+            let rowValue = 0;
+            const row = layout[y];
+            for (let x = 0; x < width; x++) {
+                if (row[x] !== null && row[x] !== 'null') {
+                    rowValue |= (1 << x);
+                }
+            }
+            board.rows[internalY] = rowValue;
+        }
+        return board;
+    }
+
+    // Zobrist Hashing Implementation
+    getHash() {
+        let h = 0;
+        for (let y = 0; y < BOARD_HEIGHT; y++) {
+            // rows[y] は 0-1023 の整数。
+            // ZOBRIST_TABLE は 1次元配列なので、y * 1024 + rowValue でインデックス計算
+            h ^= ZOBRIST_TABLE[(y << 10) + this.rows[y]];
+        }
+        return h;
+    }
+
+    isFilled(row, col) {
+        if (col < 0 || col >= WIDTH) return true;
+        if (row < 0) return false; 
+        if (row >= BOARD_HEIGHT) return true;
+        return (this.rows[row] & (1 << col)) !== 0;
+    }
+    
+    isFilledXY(x, y) { return this.isFilled(y, x); }
+
+    placeMino(placement) {
+        const newBoard = new TetrisBoard(this);
+        const shapeCoords = getMinoCoords(placement.pieceType, placement.rotation);
+        for (const [dx, dy] of shapeCoords) {
+            const boardX = placement.x + dx;
+            const boardY = placement.y + dy;
+            if (boardY >= 0 && boardY < BOARD_HEIGHT && boardX >= 0 && boardX < WIDTH) {
+                newBoard.rows[boardY] |= (1 << boardX);
+            }
+        }
+        return newBoard;
+    }
+
+    clearLines() {
+        let newBoard = new TetrisBoard(null); // 空作成
+        let linesCleared = 0;
+        // 高速化のため直接配列操作
+        let writePtr = BOARD_HEIGHT - 1;
+        const fullLineMask = (1 << WIDTH) - 1;
+        
+        for (let readPtr = BOARD_HEIGHT - 1; readPtr >= 0; readPtr--) {
+            const row = this.rows[readPtr];
+            if (row === fullLineMask) {
+                linesCleared++;
+            } else {
+                newBoard.rows[writePtr--] = row;
+            }
+        }
+        // 残りは0で埋める (constructorで0埋めされているが、writePtrより上は0のままなのでOK)
+        return { newBoard, linesCleared };
+    }
+
+    getColumnHeights() {
+        const heights = new Int8Array(WIDTH).fill(0); // Int8Arrayでメモリ削減
+        for (let c = 0; c < WIDTH; c++) {
+            for (let y = 0; y < BOARD_HEIGHT; y++) {
+                if ((this.rows[y] & (1 << c)) !== 0) {
+                    heights[c] = BOARD_HEIGHT - y;
+                    break;
+                }
+            }
+        }
+        return heights;
+    }
+
+    getBumpiness(wellColumn, heights) {
+        let bumpiness_val = 0;
+        let bumpiness_sq_val = 0;
+        let prev_col_idx = (wellColumn === 0) ? 1 : 0;
+        while (prev_col_idx < WIDTH && prev_col_idx === wellColumn) prev_col_idx++;
+        if (prev_col_idx >= WIDTH) return { bumpiness: 0, bumpiness_sq: 0 };
+        let current_height = heights[prev_col_idx];
+        for (let i = prev_col_idx + 1; i < WIDTH; ++i) {
+            if (i === wellColumn) continue;
+            const dh = Math.abs(heights[i] - current_height);
+            bumpiness_val += dh;
+            bumpiness_sq_val += dh * dh;
+            current_height = heights[i];
+        }
+        return { bumpiness: bumpiness_val, bumpiness_sq: bumpiness_sq_val };
+    }
+
+    getCavitiesAndOverhangs(heights) {
+        let cavities = 0;
+        let overhangs = 0;
+        let max_board_height = 0;
+        for(let i=0; i<WIDTH; i++) if(heights[i] > max_board_height) max_board_height = heights[i];
+        
+        if (max_board_height === 0) return { cavities: 0, overhangs: 0 };
+        
+        for (let y_cpp = 0; y_cpp < max_board_height; ++y_cpp) {
+            const y_js = BOARD_HEIGHT - 1 - y_cpp;
+            for (let x = 0; x < WIDTH; ++x) {
+                if (this.isFilledXY(x, y_js) || y_cpp >= heights[x]) continue;
+                let counted_as_overhang = false;
+                if (x > 1) {
+                    if (heights[x - 1] <= y_cpp && heights[x - 2] <= (y_cpp + 1)) {
+                        overhangs++;
+                        counted_as_overhang = true;
+                    }
+                }
+                if (counted_as_overhang) continue;
+                if (x < WIDTH - 2) {
+                    if (heights[x + 1] <= y_cpp && heights[x + 2] <= (y_cpp + 1)) {
+                        overhangs++;
+                        counted_as_overhang = true;
+                    }
+                }
+                if (counted_as_overhang) continue;
+                cavities++;
+            }
+        }
+        return { cavities, overhangs };
+    }
+
+    getCoveredCells(heights) {
+        let covered = 0;
+        let covered_sq = 0;
+        for (let x = 0; x < WIDTH; ++x) {
+            if (heights[x] <= 1) continue;
+            for (let y_cpp = heights[x] - 2; y_cpp >= 0; --y_cpp) {
+                const y_js = BOARD_HEIGHT - 1 - y_cpp;
+                if (!this.isFilledXY(x, y_js)) {
+                    const cells_above_hole = heights[x] - (y_cpp + 1);
+                    const actual_cells_counted = Math.min(6, cells_above_hole);
+                    covered += actual_cells_counted;
+                    covered_sq += actual_cells_counted * actual_cells_counted;
+                }
+            }
+        }
+        return { covered, covered_sq };
+    }
+
+    getWell(weights, heights) {
+        let well_col = -1;
+        let min_h = BOARD_HEIGHT + 1;
+        for (let c = 0; c < WIDTH; ++c) {
+            if (heights[c] < min_h) { min_h = heights[c]; well_col = c; }
+        }
+        let depth = 0;
+        if (well_col !== -1) {
+            const start_y_cpp = heights[well_col];
+            for (let y_cpp = start_y_cpp; y_cpp < BOARD_HEIGHT; ++y_cpp) {
+                const y_js = BOARD_HEIGHT - 1 - y_cpp;
+                if (y_js < 0) break;
+                let is_well_row = true;
+                for (let x = 0; x < WIDTH; ++x) {
+                    if (x !== well_col && !this.isFilledXY(x, y_js)) { is_well_row = false; break; }
+                }
+                if (is_well_row) depth++;
+                else break;
+            }
+        }
+        depth = Math.min(depth, weights.max_well_depth);
+        return { depth, well_col };
+    }
+    
+    check_sides(x, y_js) {
+        for (let dx = 1; dx <= 9; ++dx) {
+            if (x - dx < 0 || x + dx >= WIDTH) return false;
+            if (!this.isFilledXY(x - dx, y_js) || !this.isFilledXY(x + dx, y_js)) return false;
+        }
+        return true;
+    }
+    
+    check_top(x, y_js) {
+        const y_limit_js = BOARD_HEIGHT - 1 - 25;
+        for (let check_y_js = y_js - 1; check_y_js >= y_limit_js; --check_y_js) {
+            if (check_y_js < 0) break;
+            if (this.isFilledXY(x, check_y_js)) return false;
+        }
+        return true;
+    }
+
+    getTslotsAndRowTransitions(weights) {
+        let t_slot_score = 0.0;
+        let rowTransitions = 0; 
+        for (let y_js = 0; y_js < BOARD_HEIGHT; ++y_js) {
+            const r = this.rows[y_js];
+            const d = (r | (1 << WIDTH)) ^ (1 | (r << 1));
+            // Population Count
+            let count = 0;
+            let n = d;
+            while (n > 0) { n &= (n - 1); count++; }
+            rowTransitions += count;
+
+            // T-Slot Detection
+            for (let x = 0; x < WIDTH; ++x) {
+                // Inline isFilled logic for speed
+                const is_filled = (dx, dy) => {
+                    const ny = y_js + dy;
+                    if (ny < 0 || ny >= BOARD_HEIGHT) return true;
+                    const nx = x + dx;
+                    if (nx < 0 || nx >= WIDTH) return true;
+                    return (this.rows[ny] & (1 << nx)) !== 0;
+                };
+
+                if (!is_filled(-1, 0) && is_filled(1, 1) && is_filled(-1, 1) && is_filled(-1, -1)) {
+                    if (this.check_top(x, y_js) && this.check_top(x + 1, y_js)) {
+                        let c = 0;
+                        if (this.check_sides(x, y_js)) c++;
+                        if (this.check_sides(x, y_js - 1)) c++;
+                        t_slot_score += (c == 2) ? weights.tslot[2] : ((c == 1) ? weights.tslot[1] : weights.tslot[0]);
+                    }
+                }
+                if (!is_filled(1, 0) && is_filled(1, 1) && is_filled(-1, 1) && is_filled(1, -1)) {
+                     if (this.check_top(x, y_js) && this.check_top(x - 1, y_js)) {
+                        let c = 0;
+                        if (this.check_sides(x, y_js)) c++;
+                        if (this.check_sides(x, y_js - 1)) c++;
+                        t_slot_score += (c == 2) ? weights.tslot[2] : ((c == 1) ? weights.tslot[1] : weights.tslot[0]);
+                    }
+                }
+            }
+        }
+        return { t_slot_score, rowTransitions };
+    }
+    
+    isPerfectClear() { return this.rows[BOARD_HEIGHT - 1] === 0; }
+}
+
+class Placement {
+    constructor(x, y, rotation, pieceType, isTspin = false, isMiniTspin = false) {
+        this.x = x;
+        this.y = y; 
+        this.rotation = rotation; 
+        this.pieceType = pieceType;
+        this.isTspin = isTspin; 
+        this.isMiniTspin = isMiniTspin;
+    }
+}
+
+class Node {
+    // Integer IDs for vector-like access
+    constructor(id, board, place, parentID, depth, comboCount = 0, b2b = false, holdPiece = null, holdUsedThisTurn = false) {
+        this.id = id; // Integer
+        this.board = board; 
+        this.place = place; 
+        this.parentID = parentID; // Integer (or -1 for null)
+        this.depth = depth;
+        this.acc_eval = 0; 
+        this.transient_eval = 0;
+        this.expanded = false; 
+        this.childrenIDs = []; // Array of Integers
+        this.comboCount = comboCount; 
+        this.b2b = b2b;
+        this.holdPiece = holdPiece; 
+        this.holdUsedThisTurn = holdUsedThisTurn;
+    }
+    getTotalEval() { return this.acc_eval + this.transient_eval; }
+}
+
+// --- LFG Helpers ---
+// 既存のまま、ビットボード演算による高速化がされている
+const LFG_WIDTH = WIDTH; 
+const LFG_HEIGHT = BOARD_HEIGHT;
+const LFG_FULL_WIDTH_MASK = (1 << LFG_WIDTH) - 1;
+function lfg_create() { return new Int32Array(LFG_HEIGHT).fill(0); } // TypedArray
+function lfg_clone(board) { return new Int32Array(board); }
+function lfg_set(board, x, y, value = true) { 
+    if (y < 0 || y >= LFG_HEIGHT || x < 0 || x >= LFG_WIDTH) return;
+    if (value) board[y] |= (1 << x); else board[y] &= ~(1 << x);
+}
+function lfg_get(board, x, y) { 
+    if (y < 0 || y >= LFG_HEIGHT || x < 0 || x >= LFG_WIDTH) return false;
+    return (board[y] & (1 << x)) !== 0; 
+}
+function lfg_shiftLeft(board) { const nb = lfg_create(); for (let y = 0; y < LFG_HEIGHT; y++) nb[y] = (board[y] >> 1); return nb; }
+function lfg_shiftRight(board) { const nb = lfg_create(); for (let y = 0; y < LFG_HEIGHT; y++) nb[y] = (board[y] << 1) & LFG_FULL_WIDTH_MASK; return nb; }
+function lfg_shiftDown(board) { 
+    const nb = lfg_create();
+    nb[0] = 0;
+    for(let y=1; y<LFG_HEIGHT; y++) nb[y] = board[y-1];
+    return nb;
+}
+function lfg_shiftUp(board) { 
+    const nb = lfg_create();
+    for(let y=0; y<LFG_HEIGHT-1; y++) nb[y] = board[y+1];
+    nb[LFG_HEIGHT-1] = 0;
+    return nb;
+}
+function lfg_shift(board, dx, dy) {
+    let nb = lfg_clone(board);
+    if (dy > 0) for (let i = 0; i < dy; i++) nb = lfg_shiftDown(nb);
+    if (dy < 0) for (let i = 0; i < -dy; i++) nb = lfg_shiftUp(nb);
+    if (dx > 0) for (let i = 0; i < dx; i++) nb = lfg_shiftRight(nb);
+    if (dx < 0) for (let i = 0; i < -dx; i++) nb = lfg_shiftLeft(nb);
+    return nb;
+}
+function lfg_and(a, b) { const nb = lfg_create(); for (let y = 0; y < LFG_HEIGHT; y++) nb[y] = a[y] & b[y]; return nb; }
+function lfg_or(a, b) { const nb = lfg_create(); for (let y = 0; y < LFG_HEIGHT; y++) nb[y] = a[y] | b[y]; return nb; }
+function lfg_not(b) { const nb = lfg_create(); for (let y = 0; y < LFG_HEIGHT; y++) nb[y] = (~b[y]) & LFG_FULL_WIDTH_MASK; return nb; }
+function lfg_equals(a, b) { for (let y = 0; y < LFG_HEIGHT; y++) if (a[y] !== b[y]) return false; return true; }
+function lfg_isEmpty(b) { for (let y = 0; y < LFG_HEIGHT; y++) if (b[y] !== 0) return false; return true; }
+
+function getMinoCoords(type, rot) { return MINO_DEFS[type][rot]; }
+function getSrsOffsets(type, r1, r2) {
+    const key = r1 + "->" + r2;
+    const source = (type === 'I' || type === 'O') ? SRS_OFFSETS_RAW.I : SRS_OFFSETS_RAW.common;
+    if (type === 'O') return [[0,0]];
+    const offsets = source[key];
+    if (!offsets) return [[0,0]];
+    return offsets.map(([dx, dy]) => [dx, -dy]);
+}
+
+function applySrsRotation(sourceBits, targetPrecomputed, srsOffsets) {
+    let currentTestBits = lfg_clone(sourceBits);
+    let newTargetBits = lfg_create();
+    for (const [dx, dy] of srsOffsets) {
+        if (lfg_isEmpty(currentTestBits)) break;
+        const shiftedSource = lfg_shift(currentTestBits, dx, dy);
+        const successful = lfg_and(shiftedSource, targetPrecomputed);
+        newTargetBits = lfg_or(newTargetBits, successful);
+        const successfulOriginal = lfg_shift(successful, -dx, -dy);
+        currentTestBits = lfg_and(currentTestBits, lfg_not(successfulOriginal));
+    }
+    return newTargetBits;
+}
+
+function findLegalMoves(gameBoard, minoType, spawnX, spawnY, spawnRot) {
+    const precomputed = [lfg_create(), lfg_create(), lfg_create(), lfg_create()];
+    for (let r = 0; r < 4; r++) {
+        const coords = getMinoCoords(minoType, r);
+        for (let y = 0; y < BOARD_HEIGHT; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                let collision = false;
+                for (const [dx, dy] of coords) {
+                    if (gameBoard.isFilled(y + dy, x + dx)) { collision = true; break; }
+                }
+                if (!collision) lfg_set(precomputed[r], x, y);
+            }
+        }
+    }
+
+    let reachable = [lfg_create(), lfg_create(), lfg_create(), lfg_create()];
+    if (lfg_get(precomputed[spawnRot], spawnX, spawnY)) {
+         lfg_set(reachable[spawnRot], spawnX, spawnY);
+    }
+
+    let iteration = 0;
+    while (true) {
+        iteration++;
+        let changed = false;
+        let nextReachable = reachable.map(b => lfg_clone(b));
+        const currentReachableForRotation = reachable.map(b => lfg_clone(b));
+        for (let r = 0; r < 4; r++) {
+            const r_left = lfg_and(lfg_shiftLeft(reachable[r]), precomputed[r]);
+            const r_right = lfg_and(lfg_shiftRight(reachable[r]), precomputed[r]);
+            const r_down = lfg_and(lfg_shiftDown(reachable[r]), precomputed[r]);
+            nextReachable[r] = lfg_or(nextReachable[r], lfg_or(r_left, lfg_or(r_right, r_down)));
+        }
+        
+        for (let r_from = 0; r_from < 4; r_from++) {
+            if (lfg_isEmpty(currentReachableForRotation[r_from])) continue;
+            const r_to_cw = (r_from + 1) % 4;
+            const srs_cw = getSrsOffsets(minoType, r_from, r_to_cw);
+            const new_cw_bits = applySrsRotation(currentReachableForRotation[r_from], precomputed[r_to_cw], srs_cw);
+            nextReachable[r_to_cw] = lfg_or(nextReachable[r_to_cw], new_cw_bits);
+
+            const r_to_ccw = (r_from + 3) % 4;
+            const srs_ccw = getSrsOffsets(minoType, r_from, r_to_ccw);
+            const new_ccw_bits = applySrsRotation(currentReachableForRotation[r_from], precomputed[r_to_ccw], srs_ccw);
+            nextReachable[r_to_ccw] = lfg_or(nextReachable[r_to_ccw], new_ccw_bits);
+        }
+
+        for (let r = 0; r < 4; r++) {
+            if (!lfg_equals(reachable[r], nextReachable[r])) { changed = true; break; }
+        }
+        reachable = nextReachable;
+                if (!changed || iteration > (WIDTH * BOARD_HEIGHT)) break;
+    }
+
+    const hard_drop_reachable = [lfg_create(), lfg_create(), lfg_create(), lfg_create()];
+    for (let r = 0; r < 4; r++) {
+        let runningMask = LFG_FULL_WIDTH_MASK;
+        for (let y = 0; y < BOARD_HEIGHT; y++) {
+            runningMask &= precomputed[r][y];
+            hard_drop_reachable[r][y] = runningMask & reachable[r][y];
+        }
+    }
+
+    const landed = [lfg_create(), lfg_create(), lfg_create(), lfg_create()];
+    for (let r = 0; r < 4; r++) {
+        const canMoveDown = lfg_and(lfg_shiftDown(reachable[r]), precomputed[r]);
+        const canMoveDown_ShiftedUp = lfg_shiftUp(canMoveDown);
+        landed[r] = lfg_and(reachable[r], lfg_not(canMoveDown_ShiftedUp));
+    }
+
+    const landed_tspin = [lfg_create(), lfg_create(), lfg_create(), lfg_create()];
+    if (minoType === 'T') {
+        for (let r = 0; r < 4; r++) {
+            if (lfg_isEmpty(landed[r])) continue;
+            for (let y = 0; y < BOARD_HEIGHT; y++) {
+                for (let x = 0; x < WIDTH; x++) {
+                    if (lfg_get(landed[r], x, y)) {
+                        const corners = [
+                             gameBoard.isFilled(y - 1, x - 1), gameBoard.isFilled(y - 1, x + 1),
+                             gameBoard.isFilled(y + 1, x - 1), gameBoard.isFilled(y + 1, x + 1)
+                        ];
+                        const filledCorners = corners.filter(Boolean).length;
+                        if (filledCorners >= 3) {
+                            let frontCornersFilled = false;
+                            switch (r) {
+                                case 0: frontCornersFilled = corners[0] && corners[1]; break;
+                                case 1: frontCornersFilled = corners[1] && corners[3]; break;
+                                case 2: frontCornersFilled = corners[2] && corners[3]; break;
+                                case 3: frontCornersFilled = corners[0] && corners[2]; break;
+                            }
+                            if (frontCornersFilled) {
+                                lfg_set(landed_tspin[r], x, y);
+                                lfg_set(landed[r], x, y, false);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return { reachable, landed, landed_tspin, hard_drop_reachable };
+}
+
+class AIAgent {
+    constructor() {
+        this.weights = new StandardWeights();
+        // Vectorization: Fixed size array for node storage (faster than Object)
+        this.nodeMap = new Array(SEARCH_ITERATION_LIMIT + 1000);
+        this.nodeIdCounter = 0;
+        this.rootID = -1;
+        this.totalNodesInSearch = 0;
+        this.bestNodeIDAtDepth1 = -1;
+        
+        this.activeTemplate = null;
+        this.activeTemplateOffset = 0;
+        // 現在有効なテンプレート
+    }
+
+    // makeID: Simple integer increment
+    makeID() { return this.nodeIdCounter++; }
+    
+    clearCaches() {
+        lfgCache.clear();
+        evaluationCache.clear();
+    }
+
+            // ★引数 enabledTemplates を追加★
+            initSearch(currentBoard, pieceQueue, currentHoldPiece, isB2B, combo, enabledTemplates) {
+        const wasTemplateActive = this.activeTemplate !== null;
+        if (this.activeTemplate) {
+            let foundValidOffset = -1;
+            let isCompleted = false;
+
+            for (let offset = 0; offset <= 12; offset++) {
+                let valid = true;
+                let completed = true;
+                let hasTargets = false;
+                const tempBoard = this.activeTemplate.board;
+
+                if (tempBoard && tempBoard.length === BOARD_HEIGHT) {
+                    for (let y = 0; y < BOARD_HEIGHT; y++) {
+                        const templateY = y + offset;
+                        const row = currentBoard.rows[y];
+
+                        if (templateY >= BOARD_HEIGHT) continue;
+
+                        for (let x = 0; x < WIDTH; x++) {
+                            const isFilled = (row & (1 << x)) !== 0;
+                            const tempCell = tempBoard[templateY][x];
+
+                            if (tempCell === null) {
+                                if (isFilled) valid = false;
+                            } else {
+                                hasTargets = true;
+                                if (!isFilled) completed = false;
+                            }
+                        }
+                        if (!valid) break;
+                    }
+                }
+
+                if (valid) {
+                    if (hasTargets && completed) {
+                        isCompleted = true;
+                        foundValidOffset = -1;
+                    } else {
+                        foundValidOffset = offset;
+                    }
+                    break;
+                }
+            }
+
+            if (isCompleted) {
+                this.activeTemplate = null;
+                this.activeTemplateOffset = 0;
+                self.postMessage({ type: 'debug', message: 'Template: Completed' });
+            } else if (foundValidOffset !== -1) {
+                this.activeTemplateOffset = foundValidOffset;
+                const offsetMsg = foundValidOffset > 0 ? ' (Offset: ' + foundValidOffset + ')' : '';
+                self.postMessage({ type: 'debug', message: 'Template: Cont. ' + this.activeTemplate.name + offsetMsg });
+            } else {
+                this.activeTemplate = null;
+                this.activeTemplateOffset = 0;
+                self.postMessage({ type: 'debug', message: 'Template: Cancelled (Mismatch)' });
+            }
+        }
+
+                if (!this.activeTemplate) {
+            this.activeTemplateOffset = 0;
+            for (const temp of TEMPLATES) {
+                if (enabledTemplates && temp.type && !enabledTemplates[temp.type]) continue;
+
+                let match = true;
+                // A. 開始盤面パターン (startBoard) のチェック
+                if (temp.startBoard) {
+                    // startBoardがある場合: パターン完全一致チェック
+                    for (let y = 0; y < BOARD_HEIGHT; y++) {
+                        if (!match) break;
+                        const row = currentBoard.rows[y];
+                        for (let x = 0; x < WIDTH; x++) {
+                            const isFilled = (row & (1 << x)) !== 0;
+                            // nullなら空、それ以外(G等)ならブロックがあること
+                            const isPatternNull = temp.startBoard[y][x] === null;
+                            if (isPatternNull && isFilled) { match = false; break; }
+                            if (!isPatternNull && !isFilled) { match = false; break; }
+                        }
+                    }
+                } else {
+                    // B. startBoardがない場合 (略記法): 「盤面が空」であることを条件とする
+                    for (let y = 0; y < BOARD_HEIGHT; y++) {
+                        if (currentBoard.rows[y] !== 0) { match = false; break; }
+                    }
+                }
+
+                // C. 追加条件 (trigger関数) のチェック
+                if (match && temp.trigger) {
+                    if (!temp.trigger(currentBoard, pieceQueue, currentHoldPiece)) {
+                        match = false;
+                    }
+                }
+
+                if (match) {
+                    this.activeTemplate = temp;
+                    self.postMessage({ type: 'debug', message: 'Template: Active (' + temp.name + ')' });
+                    break;
+                }
+            }
+        }
+        
+        // ----------------------
+
+        let reuseTree = false;
+        // 探索木の再利用チェック
+        // テンプレートが「現在アクティブ」または「直前までアクティブだった」場合はリセットする
+        if (!this.activeTemplate && !wasTemplateActive && this.rootID !== -1 && this.nodeMap[this.rootID]) {
+            const rootNode = this.nodeMap[this.rootID];
+            // Zobrist Hash Compare
+            const hashCurrent = currentBoard.getHash();
+            const hashRoot = rootNode.board.getHash();
+            
+            if (hashCurrent === hashRoot && rootNode.holdPiece === currentHoldPiece) {
+                reuseTree = true;
+                rootNode.b2b = isB2B;
+                rootNode.comboCount = combo;
+            }
+        }
+
+        if (!reuseTree) {
+            // Reset Vector
+            this.nodeIdCounter = 0;
+            this.rootID = this.makeID();
+            
+            const rootNode = new Node(this.rootID, currentBoard, null, -1, 0, combo, isB2B, currentHoldPiece, false);
+            this.nodeMap[this.rootID] = rootNode;
+            
+            const { transient_eval } = this.evaluate(rootNode, { 
+                linesCleared: 0, isTspin: false, isMiniTspin: false, 
+                b2bActive: isB2B, combo: combo, holdUsed: false, wastedT: false, 
+                perfectClear: rootNode.board.isPerfectClear() 
+            });
+            rootNode.transient_eval = transient_eval;
+            
+            this.clearCaches();
+            this.totalNodesInSearch = 1;
+            self.postMessage({ type: 'debug', message: 'Tree RESET (New Search)' });
+        } else {
+            self.postMessage({ type: 'debug', message: 'Tree REUSED (Continuing)' });
+            // nodeMapの有効な要素数を数え直すのはコストが高いので概算またはそのまま
+            // pruneAndRerootでtotalNodesはリセットされているはず
+        }
+        
+        const rootNode = this.nodeMap[this.rootID];
+        if (!rootNode.expanded && pieceQueue.length >= 2) {
+            this.expand(this.rootID, pieceQueue[0], pieceQueue[1]);
+        }
+        
+        // 配列なのでlengthではなくCounterを使う
+        this.totalNodesInSearch = this.nodeIdCounter;
+    }
+
+    searchStep(iterations, pieceQueue) {
+        if (this.rootID === -1 || !this.nodeMap[this.rootID]) return;
+        let count = 0;
+        while (count < iterations && this.totalNodesInSearch < SEARCH_ITERATION_LIMIT) {
+            const selectedNode = this.select(this.rootID);
+            
+            // テンプレートモード時は深さ1以上（ルートの子ノード以降）を展開しない
+            if (this.activeTemplate && selectedNode.depth >= 1) break;
+
+            if (selectedNode.expanded) break; 
+            
+            const depth = selectedNode.depth;
+            const pieceForExpand = pieceQueue[depth];
+            const nextPieceForExpand = pieceQueue[depth + 1];
+            if (pieceForExpand && nextPieceForExpand) {
+                this.expand(selectedNode.id, pieceForExpand, nextPieceForExpand);
+            } else {
+                break;
+            }
+            count++;
+        }
+    }
+    
+    getBestMove() {
+        this.bestNodeIDAtDepth1 = this.findBestChildNodeID(this.rootID);
+        if (this.bestNodeIDAtDepth1 === -1) {
+            const root = this.nodeMap[this.rootID];
+            if (root && root.childrenIDs.length > 0) {
+                return this.nodeMap[root.childrenIDs[0]].place;
+            }
+            return null;
+        }
+        return this.nodeMap[this.bestNodeIDAtDepth1].place;
+    }
+    
+    advanceTreeToBestMove() {
+        if (this.bestNodeIDAtDepth1 !== -1) {
+            this.pruneAndReroot(this.bestNodeIDAtDepth1);
+        }
+    }
+
+    expand(nodeID, pieceToPlace, nextPiece) {
+        const parentNode = this.nodeMap[nodeID];
+        if (!parentNode || parentNode.expanded || !pieceToPlace || !nextPiece) return;
+        parentNode.expanded = true;
+        
+        let nodesAddedThisExpand = 0;
+        const { placements: placementsNoHold } = this.getLegalPlacements(parentNode.board, pieceToPlace);
+        for (const placement of placementsNoHold) {
+            this.createAndAddChildNode(parentNode, placement, false, parentNode.holdPiece);
+            nodesAddedThisExpand++;
+        }
+
+        if (parentNode.holdUsedThisTurn) {
+            this.totalNodesInSearch += nodesAddedThisExpand;
+            return; 
+        }
+
+        let pieceForHoldMove = null;
+        let newHoldPiece = null;
+        if (parentNode.holdPiece === null) {
+            pieceForHoldMove = nextPiece;
+            newHoldPiece = pieceToPlace;
+        } else {
+            pieceForHoldMove = parentNode.holdPiece;
+            newHoldPiece = pieceToPlace;
+        }
+
+        const { placements: placementsHold } = this.getLegalPlacements(parentNode.board, pieceForHoldMove);
+        for (const placement of placementsHold) {
+            this.createAndAddChildNode(parentNode, placement, true, newHoldPiece);
+            nodesAddedThisExpand++;
+        }
+        this.totalNodesInSearch += nodesAddedThisExpand;
+    }
+
+    createAndAddChildNode(parentNode, placement, holdUsed, newHoldPiece) {
+        const boardAfterPlace = parentNode.board.placeMino(placement);
+        const { newBoard, linesCleared } = boardAfterPlace.clearLines();
+
+        const isTspin = placement.isTspin;
+        const isMiniTspin = placement.isMiniTspin;
+        const combo = linesCleared > 0 ? parentNode.comboCount + 1 : 0;
+        const moveWasSpecialForB2B = (isTspin && linesCleared > 0) || (linesCleared >= 4);
+        let b2b_after_move = parentNode.b2b;
+        if (moveWasSpecialForB2B) b2b_after_move = true;
+        else if (linesCleared > 0) b2b_after_move = false;
+
+        const placementResult = {
+            linesCleared: linesCleared, isTspin: isTspin, isMiniTspin: isMiniTspin,
+            b2bActive: parentNode.b2b, combo: combo, holdUsed: holdUsed,
+            wastedT: (placement.pieceType === 'T' && (linesCleared === 0 || !(isTspin || isMiniTspin))),
+            perfectClear: newBoard.isPerfectClear()
+        };
+        
+        // Create Node with Integer ID
+        const newNodeID = this.makeID();
+        const newNode = new Node(newNodeID, newBoard, placement, parentNode.id, parentNode.depth + 1, combo, b2b_after_move, newHoldPiece, holdUsed);
+        
+        const { acc_eval, transient_eval } = this.evaluate(newNode, placementResult);
+        newNode.acc_eval = parentNode.acc_eval + acc_eval;
+        newNode.transient_eval = transient_eval;
+
+        this.nodeMap[newNodeID] = newNode;
+        parentNode.childrenIDs.push(newNodeID);
+        this.propagateEvaluation(newNodeID);
+    }
+
+    evaluate(node, placementResult) {
+        let acc_eval = 0;
+        const board = node.board;
+        const weights = this.weights;
+        
+        if (placementResult.perfectClear) acc_eval += weights.perfect_clear;
+        if (true) { 
+            if (placementResult.b2bActive && placementResult.linesCleared > 0) acc_eval += weights.b2b_clear;
+            if (placementResult.combo > 0) {
+                const combo_idx = Math.min(placementResult.combo, weights.COMBO_GARBAGE.length - 1);
+                acc_eval += weights.combo_garbage * weights.COMBO_GARBAGE[combo_idx];
+            }
+            if (placementResult.isTspin) {
+                if (placementResult.linesCleared === 1) acc_eval += weights.tspin1;
+                else if (placementResult.linesCleared === 2) acc_eval += weights.tspin2;
+                else if (placementResult.linesCleared === 3) acc_eval += weights.tspin3;
+            } else if (placementResult.isMiniTspin) {
+                if (placementResult.linesCleared === 1) acc_eval += weights.mini_tspin1;
+                else if (placementResult.linesCleared === 2) acc_eval += weights.mini_tspin2;
+            } else {
+                if (placementResult.linesCleared === 1) acc_eval += weights.clear1;
+                else if (placementResult.linesCleared === 2) acc_eval += weights.clear2;
+                else if (placementResult.linesCleared === 3) acc_eval += weights.clear3;
+                else if (placementResult.linesCleared === 4) acc_eval += weights.clear4;
+            }
+        }
+                if (placementResult.wastedT) acc_eval += weights.wasted_t;
+        if (node.place && node.place.isSoftDrop) acc_eval += weights.soft_drop;
+
+        // --- Template Bonus ---
+        if (this.activeTemplate && node.place) {
+            const p = node.place;
+            // リスト内のいずれかの手と一致するかチェック (上から優先)
+            for (let i = 0; i < this.activeTemplate.moves.length; i++) {
+                const move = this.activeTemplate.moves[i];
+                const targetY = move.y - this.activeTemplateOffset;
+                if (move.t === p.pieceType && move.x === p.x && targetY === p.y && move.r === p.rotation) {
+                    if (targetY >= 0) {
+                        // 一致する手があれば超高評価。リストの上位(iが小さい)ほど点数を高くする
+                        acc_eval += 1000000000 - (i * 10000);
+                        break; 
+                    }
+                }
+            }
+        }
+        // ----------------------
+
+        // Cache Check (Zobrist Hash = Integer)
+        const boardHash = board.getHash();
+        if (evaluationCache.has(boardHash)) {
+            const transient_eval = evaluationCache.get(boardHash);
+            return { acc_eval, transient_eval };
+        }
+
+        let transient_eval = 0;
+        if (node.b2b) transient_eval += weights.back_to_back;
+
+        const heights = board.getColumnHeights();
+        const highest_point = Math.max(0, ...heights);
+        transient_eval += weights.top_quarter * Math.max(0, highest_point - 15);
+        transient_eval += weights.top_half * Math.max(0, highest_point - 10);
+        transient_eval += weights.height * highest_point;
+        transient_eval += weights.jeopardy * Math.max(0, highest_point - 10); 
+        
+        const { t_slot_score, rowTransitions } = board.getTslotsAndRowTransitions(weights);
+        transient_eval += t_slot_score;
+        transient_eval += weights.row_transitions * rowTransitions;
+
+        const { depth: well_d, well_col } = board.getWell(weights, heights);
+        transient_eval += weights.well_depth * well_d;
+        if (well_d > 0 && well_col >= 0 && well_col < weights.well_column.length) transient_eval += weights.well_column[well_col];
+        const { bumpiness, bumpiness_sq } = board.getBumpiness(well_col, heights);
+        transient_eval += bumpiness * weights.bumpiness;
+        transient_eval += bumpiness_sq * weights.bumpiness_sq;
+        const { cavities, overhangs } = board.getCavitiesAndOverhangs(heights);
+        transient_eval += weights.cavity_cells * cavities;
+        transient_eval += weights.cavity_cells_sq * cavities * cavities;
+        transient_eval += weights.overhang_cells * overhangs;
+        transient_eval += weights.overhang_cells_sq * overhangs * overhangs;
+
+        const { covered, covered_sq } = board.getCoveredCells(heights);
+        transient_eval += weights.covered_cells * covered;
+        transient_eval += weights.covered_cells_sq * covered_sq;
+
+        evaluationCache.set(boardHash, transient_eval);
+        return { acc_eval, transient_eval };
+    }
+
+    propagateEvaluation(startNodeID) {
+        let currentNode = this.nodeMap[startNodeID];
+        if (!currentNode) return;
+        let parentID = currentNode.parentID;
+
+        while (parentID !== -1) {
+            const parentNode = this.nodeMap[parentID];
+            if (!parentNode) break; 
+            let maxChildEval = -Infinity;
+            // childrenIDs is array of integers
+            for (const childID of parentNode.childrenIDs) {
+                const childNode = this.nodeMap[childID];
+                if (childNode) maxChildEval = Math.max(maxChildEval, childNode.getTotalEval());
+            }
+            if (maxChildEval === -Infinity) break;
+            const newTransient = maxChildEval - parentNode.acc_eval;
+            if (newTransient > parentNode.transient_eval) {
+                parentNode.transient_eval = newTransient;
+                if (parentNode.parentID === this.rootID) this.updateBestDepth1Node(parentNode.id);
+                parentID = parentNode.parentID;
+            } else {
+                break;
+            }
+        }
+    }
+    
+    updateBestDepth1Node(depth1NodeID) {
+        if(this.bestNodeIDAtDepth1 === -1) { this.bestNodeIDAtDepth1 = depth1NodeID; return; }
+        const currentBest = this.nodeMap[this.bestNodeIDAtDepth1];
+        const newCandidate = this.nodeMap[depth1NodeID];
+        if (!currentBest || !newCandidate) return; 
+        if (newCandidate.getTotalEval() > currentBest.getTotalEval()) this.bestNodeIDAtDepth1 = depth1NodeID;
+    }
+    
+    findBestChildNodeID(nodeID) {
+        const parentNode = this.nodeMap[nodeID];
+        if (!parentNode || parentNode.childrenIDs.length === 0) return -1;
+        let bestChildID = -1;
+        let maxEval = -Infinity;
+        for (const childID of parentNode.childrenIDs) {
+            const childNode = this.nodeMap[childID];
+            if (childNode) {
+                const evalSum = childNode.getTotalEval();
+                if (evalSum > maxEval) { maxEval = evalSum; bestChildID = childID; }
+            }
+        }
+        return bestChildID;
+    }
+
+    select(nodeID) {
+        let currentNode = this.nodeMap[nodeID];
+        while (currentNode.expanded) {
+            if (currentNode.childrenIDs.length === 0) return currentNode;
+            const children = currentNode.childrenIDs.map(id => this.nodeMap[id]).filter(Boolean); 
+            if (children.length === 0) return currentNode; 
+            
+            const evals = children.map(c => c.getTotalEval());
+            const Emin = Math.min(...evals);
+            const indexedEvals = evals.map((e, i) => ({ eval: e, index: i }));
+            indexedEvals.sort((a, b) => b.eval - a.eval); 
+            const ranks = new Int32Array(children.length);
+            indexedEvals.forEach((item, rank_minus_1) => { ranks[item.index] = rank_minus_1 + 1; });
+
+            let totalWeight = 0;
+            const weights = children.map((child, i) => {
+                const E_I = evals[i];
+                const rank_I = ranks[i];
+                const eval_part = Math.pow(E_I - Emin + 1.0, 2) + 10.0;
+                const rank_part = Math.pow(rank_I - 1.0, 2) + 1.0;
+                const weight = eval_part / rank_part;
+                totalWeight += weight;
+                return weight;
+            });
+            let rand = Math.random() * totalWeight;
+            let selectedChild = null;
+            for (let i = 0; i < weights.length; i++) {
+                rand -= weights[i];
+                if (rand <= 0) { selectedChild = children[i]; break; }
+            }
+            if (!selectedChild) selectedChild = children[children.length - 1];
+            currentNode = selectedChild;
+        }
+        return currentNode;
+    }
+
+    // Prune and Reroot: Vectorized optimization
+    pruneAndReroot(chosenNodeID) {
+        const oldRootNode = this.nodeMap[chosenNodeID];
+        if (!oldRootNode) {
+            // Reset if invalid
+            this.nodeMap = new Array(SEARCH_ITERATION_LIMIT + 1000);
+            this.nodeIdCounter = 0;
+            this.rootID = -1; 
+            return;
+        }
+        
+        // Create a NEW array to serve as vector
+        const new_nodeMap = new Array(SEARCH_ITERATION_LIMIT + 1000);
+        let newIdCounter = 0;
+
+        // Queue for BFS copying
+        // stores { oldID, newID, newDepth }
+        const queue = [{ oldID: chosenNodeID, newID: newIdCounter++, newDepth: 0 }];
+        
+        // Map old IDs to new IDs to fix parent/child references
+        const idMapping = new Map();
+        
+        while (queue.length > 0) {
+            const { oldID, newID, newDepth } = queue.shift();
+            const oldNode = this.nodeMap[oldID];
+            if (!oldNode) continue;
+
+            idMapping.set(oldID, newID);
+            
+            // Shallow copy node properties
+            const newNode = new Node(
+                newID, oldNode.board, oldNode.place, 
+                -1, // parentID fixed later 
+                newDepth, oldNode.comboCount, oldNode.b2b, oldNode.holdPiece, oldNode.holdUsedThisTurn
+            );
+            newNode.acc_eval = oldNode.acc_eval;
+            newNode.transient_eval = oldNode.transient_eval;
+            newNode.expanded = oldNode.expanded;
+            newNode.childrenIDs = []; // Will fill
+
+            new_nodeMap[newID] = newNode;
+
+            // Process children
+            for (const oldChildID of oldNode.childrenIDs) {
+                if (this.nodeMap[oldChildID] !== undefined) {
+                    const newChildID = newIdCounter++;
+                    queue.push({ oldID: oldChildID, newID: newChildID, newDepth: newDepth + 1 });
+                    newNode.childrenIDs.push(newChildID);
+                }
+            }
+        }
+
+        // Fix parent IDs
+        for(let i=0; i<newIdCounter; i++) {
+            const node = new_nodeMap[i];
+            // If it was the chosen node (now root 0), parent is -1.
+            // Otherwise, look up new parent ID.
+            // Note: We only copied the chosen branch. The old parent of chosenNode is not in mapping.
+            // We need a way to find parent. But BFS guarantees we visit parent first.
+            // Actually simpler: We can just set parentID inside the loop if we pass it in queue.
+        }
+        // Re-loop to fix parents using mapping (slower but correct)
+        // Optimization: Pass parentID in queue
+        // Let's re-do the queue slightly to handle parentID efficiently
+        
+        // Clear and Reset
+        // Simple approach: Just reset mapping logic. 
+        // Since we construct childrenIDs in the loop above, we just need to set parentID.
+        // The Root (0) has parent -1.
+        for(let i=0; i<newIdCounter; i++) {
+            const node = new_nodeMap[i];
+            for(const childID of node.childrenIDs) {
+                new_nodeMap[childID].parentID = node.id;
+            }
+        }
+        new_nodeMap[0].parentID = -1;
+
+        this.nodeMap = new_nodeMap;
+        this.nodeIdCounter = newIdCounter;
+        this.rootID = 0; // New root is always at index 0
+        this.bestNodeIDAtDepth1 = -1; // Reset best choice
+    }
+
+    getLegalPlacements(board, pieceType) {
+        // Zobrist Hash for Cache Key
+        const boardHash = board.getHash();
+        const cacheKey = pieceType + ':' + boardHash;
+
+                if (lfgCache.has(cacheKey)) return lfgCache.get(cacheKey);
+
+        const placements = [];
+        const { landed, landed_tspin, hard_drop_reachable } = findLegalMoves(board, pieceType, SPAWN_X, SPAWN_Y, SPAWN_ROT);
+        for (let r = 0; r < 4; r++) {
+            if (lfg_isEmpty(landed[r])) continue;
+            for (let y = 0; y < BOARD_HEIGHT; y++) {
+                for (let x = 0; x < WIDTH; x++) {
+                    if (lfg_get(landed[r], x, y)) {
+                        const p = new Placement(x, y, r, pieceType, false, false);
+                        if (!lfg_get(hard_drop_reachable[r], x, y)) p.isSoftDrop = true;
+                        placements.push(p);
+                    }
+                }
+            }
+        }
+        for (let r = 0; r < 4; r++) {
+            if (lfg_isEmpty(landed_tspin[r])) continue;
+            for (let y = 0; y < BOARD_HEIGHT; y++) {
+                for (let x = 0; x < WIDTH; x++) {
+                    if (lfg_get(landed_tspin[r], x, y)) {
+                        const p = new Placement(x, y, r, pieceType, true, false);
+                        if (!lfg_get(hard_drop_reachable[r], x, y)) p.isSoftDrop = true;
+                        placements.push(p);
+                    }
+                }
+            }
+        }
+        
+        const result = { placements };
+        lfgCache.set(cacheKey, result);
+        return result;
+    }
+}
+
+// --- Worker Logic ---
+let isThinking = false;
+let aiAgent = new AIAgent();
+let currentQueue = [];
+let lastUpdateTime = 0; // ★通信間引き用の時間を記録する変数を追加
+
+function thinkingLoop() {
+    if (!isThinking) return;
+
+    // ★修正: 回数固定ではなく、時間いっぱいまで計算を回す
+    const start = performance.now();
+    while (performance.now() - start < 100) {
+        aiAgent.searchStep(5000, currentQueue); // 小分けに実行
+        if (aiAgent.totalNodesInSearch >= SEARCH_ITERATION_LIMIT) break;
+    }
+
+    // ★修正: 画面更新用のメッセージは 50ms に1回だけ送る (通信負荷の削減)
+    const now = performance.now();
+    if (now - lastUpdateTime > 50) {
+        self.postMessage({ 
+            type: 'nodeCount', 
+            count: aiAgent.totalNodesInSearch,
+            template: aiAgent.activeTemplate ? aiAgent.activeTemplate.name : null
+        });
+        lastUpdateTime = now;
+    }
+
+    setTimeout(thinkingLoop, 0);
+}
+
+self.onmessage = (e) => {
+    // ★activeTemplates を受け取る★
+    const { type, boardString, nextString, holdPiece, canHold, isB2B, ren, activeTemplates } = e.data;
+    if (type === 'start') {
+        try {
+            const layout = JSON.parse(boardString);
+            const board = TetrisBoard.fromSimulatorBoard(layout);
+            
+            currentQueue = nextString.split('');
+            let hold = null;
+            if (holdPiece !== undefined) {
+                hold = holdPiece;
+            } else if (aiAgent.rootID !== -1 && aiAgent.nodeMap[aiAgent.rootID]) {
+                hold = aiAgent.nodeMap[aiAgent.rootID].holdPiece;
+            }
+
+            // ★activeTemplates を渡す★
+            aiAgent.initSearch(board, currentQueue, hold, isB2B, ren, activeTemplates);
+            if (canHold !== undefined && aiAgent.rootID !== -1 && aiAgent.nodeMap[aiAgent.rootID]) {
+                aiAgent.nodeMap[aiAgent.rootID].holdUsedThisTurn = !canHold;
+            }
+
+            if (!isThinking) {
+                isThinking = true;
+                thinkingLoop();
+            }
+        } catch (err) {
+            console.error("AI Worker Error (start):", err);
+        }
+
+    } else if (type === 'stop') {
+        const bestPlacement = aiAgent.getBestMove();
+        if (bestPlacement) {
+            let finalX = bestPlacement.x;
+            if (bestPlacement.pieceType === 'I') {
+                finalX -= 1;
+            }
+            self.postMessage({
+                type: 'debug',
+                message: 'Move: ' + bestPlacement.pieceType + ' (x:' + finalX + ', y:' + bestPlacement.y + ', r:' + bestPlacement.rotation + ')'
+            });
+            self.postMessage({
+                piece: bestPlacement.pieceType,
+                x: finalX,
+                y: bestPlacement.y,
+                rotation: bestPlacement.rotation,
+            });
+            aiAgent.advanceTreeToBestMove();
+            if (currentQueue.length > 0) {
+                currentQueue.shift();
+            }
+        } else {
+            self.postMessage(null);
+            isThinking = false;
+        }
+    }
+};
+`;
+
 const virtualController = (() => {
 
     let container, canvas, ctx, editControls;
@@ -2021,6 +3746,36 @@ const CANVAS_HEIGHT = (BOARD_VISIBLE_HEIGHT + 0.5) * BLOCK_SIZE;
 const PLAYFIELD_X_OFFSET = HOLD_AREA_WIDTH + PADDING;
 const AXIS_THRESHOLD = 0.8;
 
+const AI_TEMPLATE_CONFIG = [
+    { id: 'meisou', label: '迷走砲' },
+    { id: 'sangaku_2', label: '山岳積み2号' }
+];
+// デフォルトのレイアウト生成関数
+function generateDefaultLayout() {
+    const blockSize = 28;
+    // 従来の定数計算に基づく配置
+    const p1OriginX = 0;
+    const p2OriginX = (5 * blockSize + 10 * blockSize + 5 * blockSize + 20 * 2);
+    // PLAYER_CANVAS_WIDTH
+
+    const createPlayerLayout = (offsetX) => ({
+        board: { x: offsetX + (5 * blockSize + 20), y: 0.5 * blockSize },
+        hold: { x: offsetX + (5 * blockSize / 2), y: 70 },
+        next: Array.from({ length: 8 }).map((_, i) => ({
+                    x: offsetX + 
+(5 * blockSize + 20 + 10 * blockSize + 20 + 5 * blockSize / 2),
+            y: 70 + (i * blockSize * 2.5)
+        }))
+    });
+    return {
+        backgroundImage: null, // 設定されている場合、個別背景やUIラベルを描画しない
+        blockSize: blockSize,
+        uiBlockSize: blockSize,
+        p1: createPlayerLayout(p1OriginX),
+        p2: createPlayerLayout(p2OriginX)
+    };
+}  
+
 let gameSettings = {
     das: 140,
     arr: 30,
@@ -2038,9 +3793,13 @@ let gameSettings = {
     aiMoveDelay: 30,
     aiSdfDelay: 30,
     drawMoveDelay: 30,
+        aiTemplates: { meisou: true, sangaku_2: true },
+   
+    debugEnabled: false,
+    pieceForPieceMode: false,
+   
+ layout: generateDefaultLayout() 
 };
-
-
 const DRAW_SHAPE_MAP = {
     "1,0;2,0;3,0": { type: "I", rot: 0, offset: [0, 0] },
     "0,1;0,2;0,3": { type: "I", rot: 1, offset: [2, -1] },
@@ -2107,9 +3866,8 @@ let gameHistoryLog = [];
 function updateAiDebugDisplay(payload) {
     const display = document.getElementById('ai-debug-display');
 
-    if (!display) return;
-
-    // 盤面データをJavaScriptの2D配列形式の文字列に変換します
+    if (!display || !gameSettings.debugEnabled) return;
+// 盤面データをJavaScriptの2D配列形式の文字列に変換します
     let boardArrayString = '[\n';
     for (let y = 0; y < payload.board.length; y++) {
         const row = payload.board[y];
@@ -2138,29 +3896,38 @@ function updateAiDebugDisplay(payload) {
 }
 
 let keyBindings = {
-    p1: {
+        p1: {
         left:      { type: 'key', value: 'a',           label: 'a' },
         right:     { type: 'key', value: 'd',           label: 'd' },
         softDrop:  { type: 'key', value: 's',           label: 's' },
+    
         hardDrop:  { type: 'key', value: ' ',           label: 'Space' },
         rotateCW:  { type: 'key', value: 'e',           label: 'e' },
         rotateCCW: { type: 'key', value: 'q',           label: 'q' },
-        hold:      { type: 'key', value: 'w',           label: 'w' },
+        hold:      { type: 'key', value: 'w',     
+      label: 'w' },
+        retry:     { type: 'key', value: 'r',           label: 'r' },
+        exit:      { type: 'key', value: 'escape',      label: 'Esc' },
     },
     p2: {
         left:      { type: 'key', value: 'arrowleft',   label: 'ArrowLeft' },
         right:     { type: 'key', value: 'arrowright',  label: 'ArrowRight' },
         softDrop:  { type: 'key', value: 'arrowdown',   label: 'ArrowDown' },
-        hardDrop:  { type: 'key', value: 'enter',       label: 'Enter' },
+        hardDrop:  { type: 'key', value: 'enter',      
+ label: 'Enter' },
         rotateCW:  { type: 'key', value: 'arrowup',     label: 'ArrowUp' },
-        rotateCCW: { type: 'key', value: '.',           label: '.' },
+        rotateCCW: { type: 'key', value: '.',           label: '.'
+},
         hold:      { type: 'key', value: '/',           label: '/' },
+        retry:     { type: 'key', value: 'backspace',   label: 'BackSpace' },
+        exit:      { type: 'key', value: 'delete',      label: 'Del' },
     }
 };
 const keyActionLabels = {
     left: '左移動', right: '右移動', softDrop: 'ソフトドロップ',
     rotateCW: '右回転', rotateCCW: '左回転',
-    hardDrop: 'ハードドロップ', hold: 'ホールド'
+    hardDrop: 'ハードドロップ', hold: 'ホールド',
+    retry: 'リトライ', exit: '中断'
 };
 let isBindingKey = false, bindingPlayer = null, bindingAction = null;
 let gamepads = {}, prevGamepads = {};
@@ -2194,25 +3961,46 @@ function* createMinoGenerator(customQueue) {
 
 class Player {
     constructor(id, offsetX, keyBindings, padIndex, isAi = false) {
-        this.id = id; this.offsetX = offsetX; this.keyBindings = keyBindings; this.padIndex = padIndex;
+        this.id = id;
+        this.offsetX = offsetX; this.keyBindings = keyBindings; this.padIndex = padIndex;
         this.isAi = isAi;
         this.isAiThinking = false;
         this.aiWorker = null;
+        
+        this.aiType = gameSettings.aiType || 'simplified'; 
+
         if (this.isAi) {
-            this.aiWorker = new Worker(URL.createObjectURL(aiWorkerBlob));
-            this.aiWorker.onmessage = (e) => {
+            // AIタイプによって読み込むスクリプトを変える
+            let scriptToLoad = aiWorkerScript_Simplified;
+            if (this.aiType === 'default') {
+                scriptToLoad = aiWorkerScript;//strongly simplified
+            }
+
+            const blob = new Blob([scriptToLoad], { type: 'application/javascript' });
+            this.aiWorker = new Worker(URL.createObjectURL(blob));
+
+                        this.aiWorker.onmessage = (e) => {
                 if (e.data && e.data.type === 'debug') {
                     const debugDisplay = document.getElementById('ai-tree-debug-display');
-                    if (debugDisplay) {
-                        debugDisplay.textContent = e.data.message;
-                    }
-                } else if (e.data && e.data.type === 'nodeCount') {
-                    const debugDisplay = document.getElementById('ai-tree-debug-display');
-                    if (debugDisplay) {
+if (debugDisplay && gameSettings.debugEnabled) {
+                        debugDisplay.dataset.status = e.data.message;
+const count = debugDisplay.dataset.count || 0;
                         
+                        debugDisplay.style.display = 'block';
+                        debugDisplay.innerHTML = `Status: <span style="color: ${e.data.message.includes('RESET') ? '#ff4444' : '#44ff44'}">${e.data.message}</span><br>Nodes: ${count}`;
                     }
-} else if (gameState === 'PLAYING' && this.isAiThinking) {
-                    
+                                } else if (e.data && e.data.type === 'nodeCount') {
+                    const debugDisplay = document.getElementById('ai-tree-debug-display');
+if (debugDisplay && gameSettings.debugEnabled) {
+                        debugDisplay.dataset.count = e.data.count;
+const status = debugDisplay.dataset.status || 'Waiting...';
+                        
+                        debugDisplay.style.display = 'block';
+                        const color = status.includes('RESET') ? '#ff4444' : (status.includes('REUSED') ? '#44ff44' : 'white');
+                        const templateInfo = e.data.template ? `<br>Template: <span style="color: #00ffff">${e.data.template}</span>` : '';
+                        debugDisplay.innerHTML = `Status: <span style="color: ${color}">${status}</span><br>Nodes: ${e.data.count}${templateInfo}`;
+                    }
+                } else if (gameState === 'PLAYING' && this.isAiThinking) {
                     this.executeAiMove(e.data);
                 }
             };
@@ -2237,6 +4025,7 @@ class Player {
     }
 
 reset() {
+        this.pieceCount = 0;
         this.linesClearedLastLock = 0;
         this.player = { x: 0, y: 0, pieceType: null, rotation: 0 };
 this.nextQueue = [];
@@ -2320,8 +4109,10 @@ this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
 
         return false;
     }
-
     handlePress(action) {
+        if (action === 'retry') { document.getElementById('retryBtn').click(); return; }
+        if (action === 'exit') { document.getElementById('backToEditorBtn').click(); return; }
+
         if (this.gameOver || this.isClearingLine || this.isExecutingSequence) return;
 switch (action) {
             case 'rotateCCW': this.rotate(-1); break;
@@ -2329,8 +4120,9 @@ case 'rotateCW':  this.rotate(1); break;
 
             case 'hardDrop':  this.hardDrop(); break;
             case 'hold':      this.hold(); break;
-        }
 }
+}
+    
 update(dt) {
         if (gameStartTime > 0) {
             const totalMilliseconds = performance.now() - gameStartTime;
@@ -2418,10 +4210,13 @@ return;
 
         if (this.isAi) {
             if (!this.isAiThinking) {
+                if (gameSettings.pieceForPieceMode && this.opponent && this.pieceCount >= this.opponent.pieceCount) {
+                    return;
+                }
                 this.requestAiMove();
-}
+            }
             return;
-}
+        }
 
         if (this.activeRuleHooks.onUpdate) {
             const playerStateProxy = {
@@ -2482,106 +4277,133 @@ if (this.isActionPressed('softDrop')) {
                     }
                  } else { 
                     this.player.y = this.getGhostY();
-                 }
+ }
             }
         }
     }
-draw() {
+    draw() {
+        const layout = gameSettings.layout;
+        const pLayout = (this.id === '1') ? layout.p1 : layout.p2;
+        const bSize = layout.blockSize;
+        const uiBSize = layout.uiBlockSize || bSize;
+        const useCustomBG = !!layout.backgroundImage;
+        // UI描画 (Hold, Next)
+        this.drawUI(pLayout, uiBSize, useCustomBG);
+        // 盤面の描画位置へ移動
+        // 従来は translate(this.offsetX + PLAYFIELD_X_OFFSET, 0.5 * BLOCK_SIZE) だったものを
         ctx.save();
-ctx.translate(this.offsetX, 0);
-        this.drawUI();
+        ctx.translate(pLayout.board.x, pLayout.board.y);
 
-        ctx.save(); ctx.translate(PLAYFIELD_X_OFFSET, 0.5 * BLOCK_SIZE);
-        if (activeSkin['BG'] && activeSkin['BG'].src) {
-            ctx.fillStyle = 'rgba(0,0,0,0.5)';
-            ctx.fillRect(0, 0, PLAYFIELD_WIDTH, CANVAS_HEIGHT);
+        // 背景描画: グローバル背景画像がある場合は、盤面の背景(黒半透明)を描画しないか、あるいは薄くするなどの制御が可能
+        // ここでは「背景画像設定時はデフォルトのUI描画(枠線や背景)をスキップする」という要望に沿う形にするが、
+        // 盤面が見えなくなるのを防ぐため、グリッド等は残すか、完全にユーザー任せにする。
+        // リクエスト通り「背景画像を設定...HoldとかNextなどの描画は全てしなくなる(枠など)」とするため、
+        // boardの背景や枠線も useCustomBG が true ならスキップする
+        
+        if (!useCustomBG) {
+            if (activeSkin['BG'] && activeSkin['BG'].src) {
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(0, 0, BOARD_WIDTH * bSize, BOARD_VISIBLE_HEIGHT * bSize);
+                
+                for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
+                    for (let x = 0; x < BOARD_WIDTH; x++) {
+                        ctx.drawImage(activeSkin['BG'], x * bSize, y * bSize, bSize, bSize);
+                    }
+                }
+            } else {
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(0, 0, BOARD_WIDTH * bSize, BOARD_VISIBLE_HEIGHT * bSize);
+            }
             
+            // Grid
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 0.5;
             for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
                 for (let x = 0; x < BOARD_WIDTH; x++) {
-                    ctx.drawImage(activeSkin['BG'], x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+                    ctx.strokeRect(x * bSize, y * bSize, bSize, bSize);
                 }
             }
-        } else {
-            ctx.fillStyle = 'rgba(0,0,0,0.5)';
-
-            ctx.fillRect(0, 0, PLAYFIELD_WIDTH, CANVAS_HEIGHT);
+            // Border
+            ctx.strokeStyle = '#4b4b7c';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(0, 0, BOARD_WIDTH * bSize, BOARD_VISIBLE_HEIGHT * bSize);
         }
-        ctx.strokeStyle = '#444';
-ctx.lineWidth = 0.5;
+
+        // Blocks
         for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
             for (let x = 0; x < BOARD_WIDTH; x++) {
-                ctx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+                const boardY = y + this.viewY;
+                if (this.board[boardY]?.[x]) {
+                    this.drawBlock(this.board[boardY][x], x * bSize, y * bSize, 1.0, bSize);
+                }
             }
         }
-        ctx.strokeStyle = '#4b4b7c'; ctx.lineWidth = 2; ctx.strokeRect(1, 1, PLAYFIELD_WIDTH - 2, CANVAS_HEIGHT - 2);
-        for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) { for (let x = 0; x < BOARD_WIDTH; x++) { const boardY = y + this.viewY; if (this.board[boardY]?.[x]) { this.drawBlock(this.board[boardY][x], x * BLOCK_SIZE, y * BLOCK_SIZE); } } }
 
         const occupiedCells = new Set();
         let shape, ghostY;
-
         if (!this.gameOver && !this.gameClear && !this.isClearingLine && this.player.pieceType) { 
             shape = this.getShape(this.player.pieceType, this.player.rotation);
-ghostY = this.getGhostY(); 
+            ghostY = this.getGhostY(); 
             
             if (ghostY > this.player.y) {
-                this.drawPiece(shape, this.player.x, ghostY, this.player.pieceType, 0.4);
-shape.forEach(b => {
+                // Ghost
+                this.drawPiece(shape, this.player.x, ghostY, this.player.pieceType, 0.4, bSize);
+                shape.forEach(b => {
                     const bx = Math.floor(this.player.x + b[0]);
                     const by = Math.floor(ghostY + b[1]);
                     occupiedCells.add(`${bx},${by}`);
                 });
-}
+            }
             
-            this.drawPiece(shape, this.player.x, this.player.y, this.player.pieceType, 1.0);
-shape.forEach(b => {
+            // Active Piece
+            this.drawPiece(shape, this.player.x, this.player.y, this.player.pieceType, 1.0, bSize);
+            shape.forEach(b => {
                 const bx = Math.floor(this.player.x + b[0]);
                 const by = Math.floor(this.player.y + b[1]);
                 occupiedCells.add(`${bx},${by}`);
             });
-}
+        }
 
+        // Custom Ghosts
         if (this.customGhosts.length > 0) {
             const ghostMap = new Map();
-this.customGhosts.forEach(ghost => {
+            this.customGhosts.forEach(ghost => {
                 const key = `${ghost.x},${ghost.y}`;
                 ghostMap.set(key, ghost.pieceType);
             });
-ghostMap.forEach((pieceType, key) => {
+            ghostMap.forEach((pieceType, key) => {
                 const [x, y] = key.split(',').map(Number);
-
                 if (occupiedCells.has(key) || (y >= 0 && y < BOARD_HEIGHT && this.board[y][x])) {
                     return;
                 }
-
-             
-   const screenY = y - this.viewY;
+                const screenY = y - this.viewY;
                 if (screenY >= 0 && screenY < BOARD_VISIBLE_HEIGHT) {
-                    this.drawBlock(pieceType, x * BLOCK_SIZE, screenY * BLOCK_SIZE, 0.2);
+                    this.drawBlock(pieceType, x * bSize, screenY * bSize, 0.2, bSize);
                 }
-     
-       });
-}
+            });
+        }
 
+        // Drawn Blocks
         if (this.drawnBlocks.size > 0) {
             ctx.fillStyle = '#FFFFFF';
-ctx.globalAlpha = 0.8;
+            ctx.globalAlpha = 0.8;
             for (const key of this.drawnBlocks.keys()) {
-
                 const [x, y] = key.split(',').map(Number);
                 const screenY = y - this.viewY;
                 if (screenY >= 0 && screenY < BOARD_VISIBLE_HEIGHT) {
-                    ctx.fillRect(x * BLOCK_SIZE, screenY * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+                    ctx.fillRect(x * bSize, screenY * bSize, bSize, bSize);
                 }
             }
             ctx.globalAlpha = 1.0;
         }
-        this.drawSpecialMoveText();
-        if (this.gameOver) this.drawMessage("GAME OVER");
-        else if (this.gameClear) this.drawMessage("CLEAR!");
-        ctx.restore(); ctx.restore();
-    }
+        
+        this.drawSpecialMoveText(bSize);
+        if (this.gameOver) this.drawMessage("GAME OVER", bSize);
+        else if (this.gameClear) this.drawMessage("CLEAR!", bSize);
+        ctx.restore();
+}
     
-    getShape(p, r) { if(!p) return []; const o=TETROMINOS[p].shape; if(r===0||p==='O')return o; const c=TETROMINOS[p].center; return o.map(b=>{let [x,y]=[b[0]-c[0],b[1]-c[1]]; for(let i=0;i<r;i++){[x,y]=[-y,x];} return [x+c[0]+(p==='O'?0.5:0),y+c[1]+(p==='O'?0.5:0)];});}
+    getShape(p, r) { if(!p) return []; const o=TETROMINOS[p].shape; if(r===0||p==='O')return o; const c=TETROMINOS[p].center;return o.map(b=>{let [x,y]=[b[0]-c[0],b[1]-c[1]]; for(let i=0;i<r;i++){[x,y]=[-y,x];} return [x+c[0]+(p==='O'?0.5:0),y+c[1]+(p==='O'?0.5:0)];});}
     checkCollision(x,y,s) { for(const b of s) { const bx=Math.floor(x+b[0]), by=Math.floor(y+b[1]); if(bx<0||bx>=BOARD_WIDTH||by>=BOARD_HEIGHT||(by>=0&&this.board[by]?.[bx])) return true; } return false; }
     rotate(d) { if(this.gameOver||!this.player.pieceType||this.player.pieceType==='O')return; const oR=this.player.rotation, nR=(oR+d+4)%4; const oD=(this.player.pieceType==='I'?SRS_OFFSETS.I:SRS_OFFSETS.JLSTZ)[`${oR}_${nR}`]; const nS=this.getShape(this.player.pieceType,nR); for(let i=0;i<oD.length;i++){const t=oD[i];const oX=t[0],oY=-t[1]; if(!this.checkCollision(this.player.x+oX,this.player.y+oY,nS)){this.player.x+=oX;this.player.y+=oY;this.player.rotation=nR;this.lockTimer=0;this.lastMoveWasRotation=true;this.lastSrsKickIndex=i;return;}}}
     move(dx,dy,isPlayer=true) { if(this.gameOver||!this.player.pieceType)return; const s=this.getShape(this.player.pieceType,this.player.rotation); if(!this.checkCollision(this.player.x+dx,this.player.y+dy,s)){this.player.x+=dx;this.player.y+=dy;if(isPlayer){this.lockTimer=0;this.lastMoveWasRotation=false;}}}
@@ -2758,9 +4580,10 @@ this.ruleWorker.postMessage({
         this.finishLockPiece();
     }
     
-    finishLockPiece() {
+        finishLockPiece() {
+        this.pieceCount++;
         if (this.gameOver || this.gameClear) return;
-if (this.specialMoveText.length > 0) {
+        if (this.specialMoveText.length > 0) {
             this.specialMoveTextTimer = 1500;
 }
 
@@ -2876,88 +4699,124 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
             this.board.push(newRow);
         }
         this.pendingGarbage = 0;
+
+}
+
+    drawBlock(p, x, y, alpha = 1.0, bSize = BLOCK_SIZE) {
+        if (y < -bSize) return;
+        const skinImage = activeSkin[p];
+        ctx.globalAlpha = alpha;
+        if (skinImage && skinImage.src) {
+            ctx.drawImage(skinImage, x, y, bSize, bSize);
+        } else {
+            ctx.fillStyle = activeSkinColors[p] || '#FFF';
+            ctx.fillRect(x, y, bSize, bSize);
+        }
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(x, y, bSize, bSize);
+        ctx.globalAlpha = 1.0;
     }
 
-    drawBlock(p,x,y,alpha=1.0) {
-        if(y<-BLOCK_SIZE)return;
-        const skinImage = activeSkin[p];
-        ctx.globalAlpha=alpha;
-if (skinImage && skinImage.src) {
-            ctx.drawImage(skinImage, x, y, BLOCK_SIZE, BLOCK_SIZE);
-} else {
-            ctx.fillStyle=activeSkinColors[p]||'#FFF';
-            ctx.fillRect(x,y,BLOCK_SIZE,BLOCK_SIZE);
-}
-        ctx.strokeStyle = '#444';
-ctx.lineWidth = 0.5;
-        ctx.strokeRect(x,y,BLOCK_SIZE,BLOCK_SIZE);
-        ctx.globalAlpha=1.0;
-}
+    drawPiece(s, x, y, p, alpha, bSize) {
+        s.forEach(b => {
+            const px = Math.floor(x + b[0]) * bSize;
+            const py = (Math.floor(y + b[1]) - this.viewY) * bSize;
+            this.drawBlock(p, px, py, alpha, bSize);
+        });
+    }
 
-drawPiece(s,x,y,p,alpha) {s.forEach(b=>{const px=Math.floor(x+b[0])*BLOCK_SIZE, py=(Math.floor(y+b[1])-this.viewY)*BLOCK_SIZE; this.drawBlock(p,px,py,alpha);});}
-    drawUI() {
-        ctx.textAlign = 'center'; ctx.fillStyle = '#FFF'; ctx.font = `bold ${BLOCK_SIZE * 0.8}px "Orbitron"`;
+    drawUI(layout, bSize, useCustomBG) {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#FFF'; 
+        ctx.font = `bold ${bSize * 0.8}px "Orbitron"`;
+
+        // HOLD
         if (!this.holdDisabled) {
-            ctx.fillText('HOLD', HOLD_AREA_WIDTH / 2, 40);
-            if (this.holdPiece) { const s = this.getShape(this.holdPiece, 0); s.forEach(b => { const px = (HOLD_AREA_WIDTH / 2) - (TETROMINOS[this.holdPiece].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE), py = 70 - (TETROMINOS[this.holdPiece].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE); this.drawBlock(this.holdPiece, px, py); }); }
-        }
-        
-const meterX = PLAYFIELD_X_OFFSET - 12;
-        const meterWidth = 8; const meterMaxHeight = BOARD_VISIBLE_HEIGHT * BLOCK_SIZE;
-        const pendingHeight = Math.min(this.pendingGarbage, BOARD_VISIBLE_HEIGHT) * BLOCK_SIZE;
-        if (pendingHeight > 0) { ctx.fillStyle = 'red'; ctx.fillRect(meterX, meterMaxHeight - pendingHeight + (0.5 * BLOCK_SIZE), meterWidth, pendingHeight);
-        }
-        const queuedLines = this.garbageQueue.reduce((sum, g) => sum + g.lines, 0);
-        const queuedHeight = Math.min(queuedLines, BOARD_VISIBLE_HEIGHT - this.pendingGarbage) * BLOCK_SIZE;
-        if (queuedHeight > 0) { ctx.fillStyle = 'yellow';
-
-ctx.fillRect(meterX, meterMaxHeight - pendingHeight - queuedHeight + (0.5*BLOCK_SIZE), meterWidth, queuedHeight);
-}
-                if (this.customUIText !== null) {
-            ctx.font = `bold ${BLOCK_SIZE * 1.6}px "Orbitron"`;
-            ctx.fillStyle = '#FFFFFF';
-            ctx.fillText(this.customUIText, HOLD_AREA_WIDTH / 2, 300);
-            ctx.font = `bold ${BLOCK_SIZE * 1.2}px "Orbitron"`;
+            if (!useCustomBG) ctx.fillText('HOLD', layout.hold.x, layout.hold.y - bSize);
+            if (this.holdPiece) {
+                const s = this.getShape(this.holdPiece, 0);
+                s.forEach(b => {
+                    // 中心合わせ
+                    const cx = layout.hold.x;
+                    const cy = layout.hold.y;
+                    const px = cx - (TETROMINOS[this.holdPiece].center[0] * bSize) + (b[0] * bSize);
+                    const py = cy - (TETROMINOS[this.holdPiece].center[1] * bSize) + (b[1] * bSize);
+                    this.drawBlock(this.holdPiece, px, py, 1.0, bSize);
+                });
+            }
         }
 
-        if (gameSettings.showTimer) {
+        // Garbage Meter (盤面の左横)
+        // カスタム背景時は描画しない、または位置調整が必要だが、ここでは標準位置(盤面左)依存とする
+        if (!useCustomBG) {
+            const meterX = layout.board.x - 12;
+            const meterWidth = 8; 
+            const meterMaxHeight = BOARD_VISIBLE_HEIGHT * bSize;
+            const pendingHeight = Math.min(this.pendingGarbage, BOARD_VISIBLE_HEIGHT) * bSize;
+            
+            if (pendingHeight > 0) { 
+                ctx.fillStyle = 'red'; 
+                ctx.fillRect(meterX, layout.board.y + meterMaxHeight - pendingHeight, meterWidth, pendingHeight);
+            }
+            const queuedLines = this.garbageQueue.reduce((sum, g) => sum + g.lines, 0);
+            const queuedHeight = Math.min(queuedLines, BOARD_VISIBLE_HEIGHT - this.pendingGarbage) * bSize;
+            if (queuedHeight > 0) { 
+                ctx.fillStyle = 'yellow';
+                ctx.fillRect(meterX, layout.board.y + meterMaxHeight - pendingHeight - queuedHeight, meterWidth, queuedHeight);
+            }
+        }
+
+        // Custom UI Text
+        if (this.customUIText !== null) {
+            ctx.font = `bold ${bSize * 1.6}px "Orbitron"`;
             ctx.fillStyle = '#FFFFFF';
-            ctx.font = `bold ${BLOCK_SIZE * 0.8}px "Orbitron"`;
-const charSpacing = BLOCK_SIZE * 0.6;
+            // 盤面中央付近などに表示
+            ctx.fillText(this.customUIText, layout.board.x + (BOARD_WIDTH * bSize)/2, layout.board.y + 150);
+        }
+
+                // Timer
+        if (gameSettings.showTimer && !useCustomBG) {
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `bold ${bSize * 0.8}px "Orbitron"`;
+            const charSpacing = bSize * 0.6;
             const totalWidth = this.elapsedTimeText.length * charSpacing;
-let startX = (HOLD_AREA_WIDTH / 2) - (totalWidth / 2) + 15;
-for (let i = 0; i < this.elapsedTimeText.length - 1; i++) {
+
+            let startX = Math.max(5, layout.hold.x - (totalWidth / 2) + 30);
+            const timerY = layout.hold.y + 490;
+
+            for (let i = 0; i < this.elapsedTimeText.length - 1; i++) {
                 const char = this.elapsedTimeText[i];
-const charX = startX + (i * charSpacing) + (charSpacing / 2);
-                ctx.fillText(char, charX, CANVAS_HEIGHT - 20);
-}
+                const charX = startX + (i * charSpacing);
+                ctx.fillText(char, charX, timerY);
+            }
         }
 
+        // NEXT
         ctx.fillStyle = '#FFF';
-const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
-
-        ctx.fillText('NEXT', rX, 40);
-
-
-
-        for (let i = 0; i < gameSettings.maxNext; i++) {
+        if (!useCustomBG) ctx.fillText('NEXT', layout.next[0].x, layout.next[0].y - bSize);
+        
+        for (let i = 0; i < Math.min(gameSettings.maxNext, layout.next.length); i++) {
             const pT = this.nextQueue[i];
             if (!pT) continue;
             if (pT === 'E') break;
             const s = this.getShape(pT, 0);
+            const pos = layout.next[i];
             s.forEach(b => {
-                const px = rX - (TETROMINOS[pT].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE);
-                const py = 70 + (i * BLOCK_SIZE * 2.5) - (TETROMINOS[pT].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE);
-                this.drawBlock(pT, px, py);
+                const px = pos.x - (TETROMINOS[pT].center[0] * bSize) + (b[0] * bSize);
+                const py = pos.y - (TETROMINOS[pT].center[1] * bSize) + (b[1] * bSize);
+                this.drawBlock(pT, px, py, 1.0, bSize);
             });
         }
     }
     
-    drawSpecialMoveText() {
+        drawSpecialMoveText(bSize) {
         if (this.specialMoveTextTimer <= 0 || this.specialMoveText.length === 0 || !gameSettings.showEffects) return;
         
-        const centerX = PLAYFIELD_WIDTH / 2;
-        const startY = CANVAS_HEIGHT / 2 - (this.specialMoveText.length * 18);
+        // 盤面中央（ctx.translateで盤面左上が(0,0)になっているため、相対座標を使用）
+        const centerX = (BOARD_WIDTH * bSize) / 2;
+        const startY = (BOARD_VISIBLE_HEIGHT * bSize) / 2 - (this.specialMoveText.length * 18);
+        
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         
@@ -2965,7 +4824,7 @@ const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
             const text = this.specialMoveText[i];
             const y = startY + (i * 35);
             
-            ctx.font = `bold ${BLOCK_SIZE}px "Orbitron"`;
+            ctx.font = `bold ${bSize}px "Orbitron"`;
             ctx.fillStyle = '#FFFFFF';
             ctx.strokeStyle = 'black';
             ctx.lineWidth = 4;
@@ -2976,7 +4835,20 @@ const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
         ctx.textBaseline = 'alphabetic';
     }
 
-drawMessage(t) { const cX = PLAYFIELD_WIDTH / 2; const cY = CANVAS_HEIGHT / 2; ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, -0.5*BLOCK_SIZE, PLAYFIELD_WIDTH, CANVAS_HEIGHT); ctx.fillStyle = '#FFF'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `bold ${BLOCK_SIZE * 1.5}px "Orbitron"`; ctx.fillText(t, cX, cY); ctx.textBaseline = 'alphabetic'; }
+        drawMessage(t, bSize) { 
+        // 盤面中央（ctx.translateで盤面左上が(0,0)になっているため、相対座標を使用）
+        const cX = (BOARD_WIDTH * bSize) / 2;
+        const cY = (BOARD_VISIBLE_HEIGHT * bSize) / 2;
+        
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.fillRect(0, 0, BOARD_WIDTH * bSize, BOARD_VISIBLE_HEIGHT * bSize); 
+        ctx.fillStyle = '#FFF'; 
+        ctx.textAlign = 'center'; 
+        ctx.textBaseline = 'middle';
+        ctx.font = `bold ${bSize * 1.5}px "Orbitron"`;
+        ctx.fillText(t, cX, cY); 
+        ctx.textBaseline = 'alphabetic';
+    }
 
 requestAiMove() {
         this.isAiThinking = true; 
@@ -3001,22 +4873,45 @@ requestAiMove() {
             }
         }
         boardString += '\n]';
-        let nextPiecesForWorker;
-        if (this.holdPiece) {
-            nextPiecesForWorker = [this.holdPiece, this.player.pieceType, ...this.nextQueue];
+        let aiWorkerStartPayload;
+        if (this.aiType === 'default') {
+            let nextPiecesForWorker;
+            if (this.holdPiece) {
+                nextPiecesForWorker = [this.holdPiece, this.player.pieceType, ...this.nextQueue];
+            } else {
+                nextPiecesForWorker = [this.player.pieceType, ...this.nextQueue];
+            }
+            const nextString = nextPiecesForWorker.join('');
+            aiWorkerStartPayload = {
+                type: 'start',
+                boardString: boardString,
+                nextString: nextString,
+                isB2B: this.isB2B,
+                ren: this.ren + 1,
+            };
         } else {
-            nextPiecesForWorker = [this.player.pieceType, ...this.nextQueue];
+            let nextString;
+            let holdPieceToSend = this.holdPiece;
+
+            if (!holdPieceToSend) {
+                holdPieceToSend = this.player.pieceType;
+                nextString = this.nextQueue.join('');
+            } else {
+                const nextPiecesForWorker = [this.player.pieceType, ...this.nextQueue];
+                nextString = nextPiecesForWorker.join('');
+            }
+
+                        aiWorkerStartPayload = {
+                type: 'start',
+                boardString: boardString,
+                nextString: nextString,
+                holdPiece: holdPieceToSend,
+                canHold: this.canHold,
+                isB2B: this.isB2B,
+                ren: this.ren + 1,
+                activeTemplates: gameSettings.aiTemplates
+            };
         }
-        const nextString = nextPiecesForWorker.join('');
-        
-        const aiWorkerStartPayload = {
-            type: 'start',
-            boardString: boardString,
-            nextString: nextString,
-            isB2B: this.isB2B,
-            ren: this.ren + 1,
-        };
-        
         if (this.aiWorker) {
             this.aiWorker.postMessage(aiWorkerStartPayload);
             this.aiWorker.postMessage({ type: 'stop' });
@@ -3342,40 +5237,49 @@ async executeAiMove(move) {
         }
 
         const startState = { x: this.player.x, y: this.player.y, r: this.player.rotation };
-        const targetState = { x: move.x, y: move.y, r: move.rotation };
+const targetState = { x: move.x, y: move.y, r: move.rotation };
         const minoType = this.player.pieceType;
-        if (minoType === 'I') {
+if (minoType === 'I') {
             targetState.x += 1;
-            startState.x += 1;
+startState.x += 1;
         }
+        
+                const debugDisplay = document.getElementById('ai-tree-debug-display');
+if (debugDisplay && gameSettings.debugEnabled) {
+            debugDisplay.style.display = 'block';
+debugDisplay.innerHTML += `<br><span style="color:#ff88ff">AI Path: ${minoType} ${startState.x},${startState.y},${startState.r} -> ${targetState.x},${targetState.y},${targetState.r}</span>`;
+        }
+
         const pathfinderBoard = this.board.map(row => row.map(cell => (cell === null ? 0 : 1)));
-        const path = this.findShortestPath_forAI(startState, targetState, minoType, pathfinderBoard);
+const path = this.findShortestPath_forAI(startState, targetState, minoType, pathfinderBoard);
 
         if (path) {
             for (const action of path) {
-                switch (action) {
+                                switch (action) {
                     case '←': this.player.x--;
-                        break;
+break;
                     case '→': this.player.x++; break;
                     case '↓': this.player.y++; break;
                     case 'R': {
-                        const newState = this.tryRotate_forAI(minoType, this.player.x, this.player.y, this.player.rotation, 1, pathfinderBoard);
-                        if (newState) {
-                            this.player.x = newState.x;
-                            this.player.y = newState.y;
+                        const offset = minoType === 'I' ? 1 : 0;
+                        const newState = this.tryRotate_forAI(minoType, this.player.x + offset, this.player.y, this.player.rotation, 1, pathfinderBoard);
+if (newState) {
+                            this.player.x = newState.x - offset;
+this.player.y = newState.y;
                             this.player.rotation = newState.r;
                         }
                         break;
-                    }
+}
                     case 'L': {
-                        const newState = this.tryRotate_forAI(minoType, this.player.x, this.player.y, this.player.rotation, -1, pathfinderBoard);
-                        if (newState) {
-                            this.player.x = newState.x;
-                            this.player.y = newState.y;
+                        const offset = minoType === 'I' ? 1 : 0;
+                        const newState = this.tryRotate_forAI(minoType, this.player.x + offset, this.player.y, this.player.rotation, -1, pathfinderBoard);
+if (newState) {
+                            this.player.x = newState.x - offset;
+this.player.y = newState.y;
                             this.player.rotation = newState.r;
                         }
                         break;
-                    }
+}
                     case '↑':
                         this.player.y = this.getGhostY();
                         break;
@@ -3526,11 +5430,17 @@ if (!shapeInfo) return;
         if (startState) {
             if (pieceForPathfinding === 'I') {
                 startState.x += 1;
-                targetState.x += 1;
+targetState.x += 1;
+            }
+
+                        const debugDisplay = document.getElementById('ai-tree-debug-display');
+if (debugDisplay) {
+                debugDisplay.style.display = 'block';
+debugDisplay.innerHTML = `<span style="color:#88ffff">Draw Path: ${pieceForPathfinding} ${startState.x},${startState.y},${startState.r} -> ${targetState.x},${targetState.y},${targetState.r}</span>`;
             }
             
             const pathfinderBoard = this.board.map(row => row.map(cell => (cell === null ? 0 : 1)));
-            path = this.findShortestPath_forAI(startState, targetState, pieceForPathfinding, pathfinderBoard);
+path = this.findShortestPath_forAI(startState, targetState, pieceForPathfinding, pathfinderBoard);
         }
         
         if (path) {
@@ -4073,12 +5983,12 @@ function populateGeneralSettingsTab() {
         das: { label: 'DAS (ms)', min: 0, max: 500, step: 10 },
         arr: { label: 'ARR (ms)', min: 0, max: 100, step: 1 },
         sdf: { label: 'SDF (ms)', min: 0, max: 100, step: 1 },
-        lineClearDelay: { label: 'Line Clear Delay (ms)', min: 0, max: 2000, step: 50 },
-        gravity: { label: 'Gravity Interval (ms)', min: 0, max: 9999999, step: 50 },
-        lockDelay: { label: 'Lock Delay (ms)', min: 0, max: 9999999, step: 50 },
-        maxNext: { label: 'Max NEXT Display', min: 1, max: 8, step: 1 },
-        garbageGrace: { label: 'Garbage Grace (ms)', min: 0, max: 5000, step: 100 },
-        garbageRandomness: { label: 'Garbage Hole Randomness (%)', min: 0, max: 100, step: 1 }
+        lineClearDelay: { label: 'ライン消去時間 (ms)', min: 0, max: 2000, step: 50 },
+        gravity: { label: '落下間隔時間 (ms)', min: 0, max: 9999999, step: 50 },
+        lockDelay: { label: '設置猶予時間 (ms)', min: 0, max: 9999999, step: 50 },
+        maxNext: { label: 'ネクスト表示数', min: 1, max: 8, step: 1 },
+        garbageGrace: { label: 'おじゃま猶予時間 (ms)', min: 0, max: 5000, step: 100 },
+        garbageRandomness: { label: '穴バラ率 (%)', min: 0, max: 100, step: 1 }
     };
     Object.keys(settingDetails).forEach(key => {
         const item = document.createElement('div'); item.className = 'setting-item';
@@ -4097,7 +6007,7 @@ function populateGeneralSettingsTab() {
     });
     
     const checkboxSettings = { showEffects: 'エフェクトを表示する', showTimer: 'タイマーを表示する', touchControlsEnabled: 'タッチ操作を有効にする (P1)' };
-Object.entries(checkboxSettings).forEach(([key, text], index) => {
+    Object.entries(checkboxSettings).forEach(([key, text], index) => {
         const item = document.createElement('div'); item.className = 'setting-item';
         if (index === 0) { item.style.cssText = 'margin-top:20px; border-top:1px solid var(--primary-color); padding-top:15px;'; }
         const label = document.createElement('label'); const checkbox = document.createElement('input');
@@ -4108,73 +6018,7 @@ Object.entries(checkboxSettings).forEach(([key, text], index) => {
 
        label.append(checkbox, span); item.appendChild(label); list.appendChild(item);
     });
-    
-    const skinItem = document.createElement('div');
-    skinItem.className = 'setting-item';
-    skinItem.style.cssText = 'margin-top:20px; border-top:1px solid var(--primary-color); padding-top:15px; flex-direction: column; align-items: flex-start; gap: 10px;';
-    
-    const skinLabel = document.createElement('label');
-skinLabel.textContent = 'カスタムスキン (I,O,T,L,J,S,Z,G,BG.png)';
-    
-    const skinInput = document.createElement('input');
-    skinInput.type = 'file';
-    skinInput.multiple = true;
-    skinInput.accept = 'image/*';
-    skinInput.style.display = 'block';
-    skinInput.style.minWidth = '0';
-    
-    skinInput.addEventListener('change', (e) => {
-        const files = e.target.files;
-        if (!files) return;
-        
-        let filesLoaded = 0;
-        const totalFiles = files.length;
-        
-        const redrawEditors = () => {
-            if (++filesLoaded === totalFiles) {
-                ['p1', 'p2'].forEach(setupPlayerEditor);
-                ['p1', 'p2'].forEach(updateNextQueueDisplay);
-                ['p1', 'p2'].forEach(drawEditorField);
-                alert(`${totalFiles}個のスキンを読み込みました。`);
-            }
-        };
-        
-        for (const file of files) {
-            const pieceType = file.name.split('.')[0].toUpperCase();
-            const validTypes = ['I', 'O', 'T', 'L', 'J', 'S', 'Z', 'G', 'E', 'BG'];
-            
-            if (validTypes.includes(pieceType)) {
-                const reader = new FileReader();
-              
-  reader.onload = (re) => {
-                    activeSkin[pieceType].src = re.target.result;
-                    activeSkin[pieceType].onload = () => {
-                        redrawEditors();
-                        saveSkinsToLocalStorage();
-                    };
-activeSkin[pieceType].onerror = () => {
-                        redrawEditors();
-                        saveSkinsToLocalStorage();
-                    };
-                };
-                reader.onerror = redrawEditors;
-                reader.readAsDataURL(file);
-            } else {
-                redrawEditors();
 }
-        }
-    });
-    
-    const skinResetButton = document.createElement('button');
-    skinResetButton.className = 'button';
-    skinResetButton.textContent = 'カスタムスキンをリセット';
-    skinResetButton.style.marginTop = '10px';
-    skinResetButton.onclick = resetSkins;
-    
-    skinItem.append(skinLabel, skinInput, skinResetButton);
-    list.appendChild(skinItem);
-}
-
 
 function populateKeyConfigTab(playerId) {
     const list = document.getElementById(`${playerId}-key-config-list`);
@@ -4210,10 +6054,7 @@ function populateKeyConfigTab(playerId) {
     }
 }
 
-
-
 function populateAiSettingsTab() {
-
     const list = document.getElementById('ai-settings-list');
     list.innerHTML = '';
 
@@ -4221,14 +6062,31 @@ function populateAiSettingsTab() {
     itemType.className = 'setting-item';
     const labelType = document.createElement('span');
     labelType.textContent = 'AIの種類';
+    
     const selectType = document.createElement('select');
+    selectType.id = 'ai-type-select';
     selectType.style.minWidth = '150px';
     selectType.style.backgroundColor = 'var(--primary-color)';
     selectType.style.color = 'var(--font-color)';
     selectType.style.border = '1px solid var(--border-color)';
     selectType.style.padding = '5px';
     selectType.style.borderRadius = '4px';
-    selectType.innerHTML = '<option value="default">Cold Clear (Strongly Simplified)</option>';
+
+    selectType.innerHTML = `
+        <option value="simplified" selected>Cold Clear (一部改変)</option>
+        <option value="default">Cold Clear (旧弱体化版・テンプレ非対応)</option>
+    `;
+
+    selectType.onchange = (e) => {
+        gameSettings.aiType = e.target.value;
+    };
+    
+    if (gameSettings.aiType) {
+        selectType.value = gameSettings.aiType;
+    } else {
+        gameSettings.aiType = 'simplified';
+    }
+
     itemType.append(labelType, selectType);
     list.appendChild(itemType);
 
@@ -4237,7 +6095,7 @@ function populateAiSettingsTab() {
         aiSdfDelay: { label: 'AI SDF (ms)', min: 0, max: 500, step: 1 }
     };
     
-    Object.keys(settingDetails).forEach(key => {
+        Object.keys(settingDetails).forEach(key => {
         const item = document.createElement('div');
         item.className = 'setting-item';
         const label = document.createElement('span');
@@ -4249,28 +6107,291 @@ function populateAiSettingsTab() {
         input.onchange = e => {
             gameSettings[key] = Math.max(settingDetails[key].min, Math.min(settingDetails[key].max, parseInt(e.target.value, 10)));
         };
-        item.append(label, input);
+                item.append(label, input);
         list.appendChild(item);
     });
+    const pfpItem = document.createElement('div');
+    pfpItem.className = 'setting-item';
+    
+    const pfpLabel = document.createElement('label');
+    const pfpCheckbox = document.createElement('input');
+    pfpCheckbox.type = 'checkbox';
+    pfpCheckbox.checked = !!gameSettings.pieceForPieceMode;
+    pfpCheckbox.onchange = e => {
+        gameSettings.pieceForPieceMode = e.target.checked;
+    };
+    
+    const pfpSpan = document.createElement('span');
+    pfpSpan.textContent = 'Piece For Piece';
+    
+    pfpLabel.append(pfpCheckbox, pfpSpan);
+    pfpItem.appendChild(pfpLabel);
+    list.appendChild(pfpItem);
+    const tempHeader = document.createElement('div');
+    tempHeader.className = 'setting-item';
+    tempHeader.style.cssText = 'margin-top:20px; border-top:1px solid var(--primary-color); padding-top:15px; font-weight:bold;';
+    tempHeader.textContent = '使用するテンプレ';
+    list.appendChild(tempHeader);
+
+    AI_TEMPLATE_CONFIG.forEach(config => {
+        const item = document.createElement('div');
+        item.className = 'setting-item';
+        
+        const label = document.createElement('label');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = gameSettings.aiTemplates[config.id];
+        checkbox.onchange = e => {
+            gameSettings.aiTemplates[config.id] = e.target.checked;
+        };
+        
+        const span = document.createElement('span');
+        span.textContent = config.label;
+        label.append(checkbox, span);
+        item.appendChild(label);
+        list.appendChild(item);
+    });
+}
+
+function populateLayoutSettingsTab() {
+    const list = document.getElementById('layout-settings-list');
+    list.innerHTML = '';
+if (!gameSettings.layout) {
+        gameSettings.layout = generateDefaultLayout();
+}
+    const layout = gameSettings.layout;
+
+    // --- Custom Skins (Moved from General) ---
+    const skinItem = document.createElement('div');
+    skinItem.className = 'setting-item';
+    skinItem.style.cssText = 'flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 20px;';
+    
+    const skinLabel = document.createElement('label');
+    skinLabel.textContent = 'カスタムスキン (I,O,T,L,J,S,Z,G,BG.png)';
+    
+    const skinInput = document.createElement('input');
+    skinInput.type = 'file';
+    skinInput.multiple = true;
+    skinInput.accept = 'image/*';
+    skinInput.style.display = 'block';
+    skinInput.style.minWidth = '0';
+    
+    skinInput.addEventListener('change', (e) => {
+        const files = e.target.files;
+        if (!files) return;
+        
+        let filesLoaded = 0;
+        const totalFiles = files.length;
+        
+        const redrawEditors = () => {
+            if (++filesLoaded === totalFiles) {
+                 ['p1', 'p2'].forEach(setupPlayerEditor);
+                ['p1', 'p2'].forEach(updateNextQueueDisplay);
+                ['p1', 'p2'].forEach(drawEditorField);
+                alert(`${totalFiles}個のスキンを読み込みました。`);
+            }
+        };
+        
+        for (const file of files) {
+            const pieceType = file.name.split('.')[0].toUpperCase();
+            const validTypes = ['I', 'O', 'T', 'L', 'J', 'S', 'Z', 'G', 'E', 'BG'];
+            
+            if (validTypes.includes(pieceType)) {
+                const reader = new FileReader();
+                reader.onload = (re) => {
+                    activeSkin[pieceType].src = re.target.result;
+                    activeSkin[pieceType].onload = () => {
+                        redrawEditors();
+                        saveSkinsToLocalStorage();
+                    };
+                    activeSkin[pieceType].onerror = () => {
+                        redrawEditors();
+                        saveSkinsToLocalStorage();
+                    };
+                };
+                reader.onerror = redrawEditors;
+                reader.readAsDataURL(file);
+            } else {
+                redrawEditors();
+            }
+        }
+    });
+    
+    const skinResetButton = document.createElement('button');
+    skinResetButton.className = 'button';
+    skinResetButton.textContent = 'カスタムスキンをリセット';
+    skinResetButton.style.marginTop = '10px';
+    skinResetButton.onclick = resetSkins;
+    
+    skinItem.append(skinLabel, skinInput, skinResetButton);
+    list.appendChild(skinItem);
+    // --- Global Settings ---
+    const globalHeader = document.createElement('h3');
+globalHeader.textContent = '全体設定';
+    globalHeader.style.marginTop = '10px';
+    list.appendChild(globalHeader);
+
+    // Block Size
+    const blockSizeItem = document.createElement('div');
+    blockSizeItem.className = 'setting-item';
+const bsLabel = document.createElement('span'); bsLabel.textContent = 'ブロックサイズ (px)';
+    const bsInput = document.createElement('input'); bsInput.type = 'number';
+    bsInput.value = layout.blockSize;
+bsInput.min = 10; bsInput.max = 100;
+    bsInput.onchange = (e) => { layout.blockSize = parseInt(e.target.value, 10); updateScale(); };
+    blockSizeItem.append(bsLabel, bsInput);
+    list.appendChild(blockSizeItem);
+const uiBlockSizeItem = document.createElement('div');
+    uiBlockSizeItem.className = 'setting-item';
+    const uibsLabel = document.createElement('span'); uibsLabel.textContent = 'UIブロックサイズ (px)';
+    const uibsInput = document.createElement('input');
+uibsInput.type = 'number';
+    uibsInput.value = layout.uiBlockSize || layout.blockSize;
+    uibsInput.min = 10; uibsInput.max = 100;
+uibsInput.onchange = (e) => { layout.uiBlockSize = parseInt(e.target.value, 10); updateScale(); };
+    uiBlockSizeItem.append(uibsLabel, uibsInput);
+    list.appendChild(uiBlockSizeItem);
+// Background Image
+    const bgItem = document.createElement('div');
+    bgItem.className = 'setting-item';
+    bgItem.style.flexDirection = 'column'; bgItem.style.alignItems = 'flex-start';
+const bgLabel = document.createElement('span'); bgLabel.textContent = '背景画像';
+    const bgInput = document.createElement('input'); bgInput.type = 'file'; bgInput.accept = 'image/*';
+    bgInput.style.display = 'block';
+// CSSで非表示になっているため明示的に表示
+    bgInput.style.marginTop = '5px';
+    bgInput.onchange = (e) => {
+        const file = e.target.files[0];
+if (file) {
+            const reader = new FileReader();
+reader.onload = (evt) => {
+                layout.backgroundImage = evt.target.result;
+layout._bgImageCache = null;
+                alert('背景画像を設定しました。');
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+    const bgClearBtn = document.createElement('button'); bgClearBtn.className = 'button';
+bgClearBtn.textContent = '背景をクリア'; bgClearBtn.style.marginTop = '5px';
+    bgClearBtn.onclick = () => { layout.backgroundImage = null; alert('背景をクリアしました。'); };
+    
+    bgItem.append(bgLabel, bgInput, bgClearBtn);
+    list.appendChild(bgItem);
+// --- Player Layouts ---
+    const createCoordInputs = (label, obj, keyX, keyY) => {
+        const div = document.createElement('div');
+div.className = 'setting-item';
+        div.style.flexWrap = 'wrap';
+        
+        const title = document.createElement('span');
+        title.textContent = label;
+        title.style.width = '100%';
+        title.style.marginBottom = '5px';
+const xLabel = document.createElement('span'); xLabel.textContent = 'X:';
+        const xInput = document.createElement('input'); xInput.type = 'number';
+        xInput.value = obj[keyX]; xInput.style.width = '60px';
+xInput.onchange = (e) => { obj[keyX] = parseInt(e.target.value, 10); };
+
+        const yLabel = document.createElement('span'); yLabel.textContent = 'Y:';
+const yInput = document.createElement('input'); yInput.type = 'number';
+        yInput.value = obj[keyY]; yInput.style.width = '60px';
+yInput.onchange = (e) => { obj[keyY] = parseInt(e.target.value, 10); };
+
+        div.append(title, xLabel, xInput, yLabel, yInput);
+        return div;
+    };
+const playersList = (gameMode === '1P') ? ['p1'] : ['p1', 'p2'];
+playersList.forEach(pid => {
+        const pHeader = document.createElement('h3');
+        pHeader.textContent = `Player ${pid.replace('p','')}`;
+        list.appendChild(pHeader);
+        const pLayout = layout[pid];
+
+        // Board
+        list.appendChild(createCoordInputs('盤面位置', pLayout.board, 'x', 'y'));
+        
+        // Hold
+        list.appendChild(createCoordInputs('HOLD位置', pLayout.hold, 'x', 'y'));
+
+        // Next (Start + Offset)
+        const nextDiv = document.createElement('div');
+        nextDiv.className = 'setting-item';
+        nextDiv.style.flexWrap = 'wrap';
+        
+        const nextTitle = document.createElement('span');
+        nextTitle.textContent = 'NEXT (開始位置 & 間隔)';
+        nextTitle.style.width = '100%'; nextTitle.style.marginBottom = '5px';
+
+        const nxLabel = document.createElement('span'); nxLabel.textContent = 'Start X:';
+      
+  const nxInput = document.createElement('input'); nxInput.type = 'number';
+        nxInput.value = pLayout.next[0].x;
+nxInput.style.width = '50px';
+
+        const nyLabel = document.createElement('span'); nyLabel.textContent = 'Start Y:';
+        const nyInput = document.createElement('input'); nyInput.type = 'number';
+nyInput.value = pLayout.next[0].y; nyInput.style.width = '50px';
+
+        const offsetYLabel = document.createElement('span'); offsetYLabel.textContent = 'Step Y:';
+        const offsetYInput = document.createElement('input');
+offsetYInput.type = 'number';
+        // 推定オフセット
+        const currentStep = (pLayout.next.length > 1) ?
+(pLayout.next[1].y - pLayout.next[0].y) : (layout.blockSize * 2.5);
+        offsetYInput.value = currentStep; offsetYInput.style.width = '50px';
+const updateNextArray = () => {
+            const startX = parseInt(nxInput.value, 10);
+const startY = parseInt(nyInput.value, 10);
+            const step = parseInt(offsetYInput.value, 10);
+pLayout.next = Array.from({ length: 8 }).map((_, i) => ({
+                x: startX,
+                y: startY + (i * step)
+            }));
+};
+
+        nxInput.onchange = updateNextArray;
+        nyInput.onchange = updateNextArray;
+        offsetYInput.onchange = updateNextArray;
+
+        nextDiv.append(nextTitle, nxLabel, nxInput, nyLabel, nyInput, offsetYLabel, offsetYInput);
+        list.appendChild(nextDiv);
+    });
+
+    // --- Reset Layout Button (Moved to bottom) ---
+    const resetLayoutBtn = document.createElement('button');
+    resetLayoutBtn.className = 'button';
+    resetLayoutBtn.style.width = '100%';
+    resetLayoutBtn.style.marginTop = '20px';
+    resetLayoutBtn.textContent = 'レイアウト設定を全て初期化';
+    resetLayoutBtn.onclick = () => {
+        if (confirm('レイアウト設定を全て初期状態に戻しますか？')) {
+            gameSettings.layout = generateDefaultLayout();
+            updateScale();
+            populateLayoutSettingsTab(); // UI Refresh
+        }
+    };
+    list.appendChild(resetLayoutBtn);
 }
 
 function openUnifiedSettingsModal(initialTab = 'general') {
     const modal = document.getElementById('settings-modal');
     
     const p2TabBtn = document.getElementById('p2-keys-tab-btn');
-    if (gameMode === '2P') {
+if (gameMode === '2P') {
         p2TabBtn.style.display = 'block';
-    } else {
+} else {
         p2TabBtn.style.display = 'none';
         if (initialTab === 'p2-keys') initialTab = 'general';
-    }
+}
 
     populateGeneralSettingsTab();
+    populateLayoutSettingsTab();
     populateKeyConfigTab('p1');
     populateAiSettingsTab();
     if (gameMode === '2P') {
         populateKeyConfigTab('p2');
-    }
+}
 
     const tabs = modal.querySelectorAll('.tab-button');
     const contents = modal.querySelectorAll('.tab-content');
@@ -4816,10 +6937,12 @@ function gameLoop(currentTime) {
     pollGamepads();
     const dt = currentTime - lastTime;
     lastTime = currentTime;
-    ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+        ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
     if (gameState === 'PLAYING') {
+        // ここにあった画像描画処理を削除しました
+        
         players.forEach(p => p.update(dt || 0));
-        players.forEach(p => p.draw());
+players.forEach(p => p.draw());
     } else if (gameState.startsWith('SCAN')) {
         drawScanner();
     }
@@ -4845,18 +6968,42 @@ function updateScale() {
         return;
     }
 
-    const viewportWidth = window.innerWidth;
+        const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-
     const scale = Math.min(
         viewportWidth / nativeWidth,
         viewportHeight / nativeHeight
     ) * 0.98;
-
     mainContainer.style.transform = `scale(${scale})`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    const modeTitle = document.querySelector('.mode-selection h2');
+    let debugClickCount = 0;
+    let debugClickTimer = null;
+
+    if (modeTitle) {
+        modeTitle.style.userSelect = 'none'; 
+        
+        modeTitle.addEventListener('click', () => {
+            debugClickCount++;
+            
+            if (debugClickTimer) clearTimeout(debugClickTimer);
+            debugClickTimer = setTimeout(() => { debugClickCount = 0; }, 400);
+
+            if (debugClickCount >= 10) {
+                gameSettings.debugEnabled = !gameSettings.debugEnabled;
+                alert(`デバッグモード: ${gameSettings.debugEnabled ? "ON" : "OFF"}`);
+                debugClickCount = 0;
+                
+                const aiDebugDisplay = document.getElementById('ai-tree-debug-display');
+                if (aiDebugDisplay) {
+                    aiDebugDisplay.style.display = gameSettings.debugEnabled ? 'block' : 'none';
+                }
+            }
+        });
+    }
+
     mainCanvas = document.getElementById('mainCanvas'); ctx = mainCanvas.getContext('2d');
     
     aiWorkerBlob = new Blob([aiWorkerScript], { type: 'application/javascript' });
@@ -5206,10 +7353,32 @@ p.ruleWorker.postMessage({
             }
         }
         
-        const originalSettingsBeforeRun = { ...gameSettings };
+                const originalSettingsBeforeRun = { ...gameSettings };
         if(!editorData.rule.code) {
              Object.assign(gameSettings, currentRunSettings);
         }
+
+        // --- 追加: 背景画像の設定 ---
+        if (gameSettings.layout && gameSettings.layout.backgroundImage) {
+            // bodyに背景画像を設定して全画面表示にする
+            document.body.style.backgroundImage = `url(${gameSettings.layout.backgroundImage})`;
+            document.body.style.backgroundSize = 'cover';
+            document.body.style.backgroundPosition = 'center center';
+            document.body.style.backgroundRepeat = 'no-repeat';
+            
+            // キャンバスの枠線と背景を消す
+            mainCanvas.style.border = 'none';
+            mainCanvas.style.backgroundColor = 'transparent';
+            mainCanvas.style.boxShadow = 'none';
+        } else {
+            // 背景がない場合はデフォルトに戻す（念のため）
+            document.body.style.backgroundImage = '';
+            mainCanvas.style.border = ''; // CSSの定義に戻す
+            mainCanvas.style.backgroundColor = ''; // CSSの定義に戻す
+            mainCanvas.style.boxShadow = '';
+        }
+        // ---------------------------
+
         gameState = 'PLAYING'; 
         document.getElementById('editor-container').style.display = 'none'; 
         document.getElementById('game-container').style.display = 'block';
@@ -5288,8 +7457,16 @@ document.getElementById('backToEditorBtn').addEventListener('click', () => {
             });
         }
         
-        players = [];
+                players = [];
         loadGameSettings();
+
+        // --- 追加: 背景とキャンバススタイルのリセット ---
+        document.body.style.backgroundImage = '';
+        mainCanvas.style.border = ''; // CSSの定義(枠線あり)に戻す
+        mainCanvas.style.backgroundColor = ''; // CSSの定義(背景色あり)に戻す
+        mainCanvas.style.boxShadow = '';
+        // -----------------------------------------
+
         document.getElementById('game-container').style.display = 'none';
         document.getElementById('game-controls').style.display = 'none';
         document.getElementById('editor-container').style.display = 'flex';
