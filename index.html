@@ -4771,11 +4771,10 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
         if (this.customUIText !== null) {
             ctx.font = `bold ${bSize * 1.6}px "Orbitron"`;
             ctx.fillStyle = '#FFFFFF';
-            // 盤面中央付近などに表示
             ctx.fillText(this.customUIText, layout.board.x + (BOARD_WIDTH * bSize)/2, layout.board.y + 150);
         }
 
-                // Timer
+        // Timer
         if (gameSettings.showTimer && !useCustomBG) {
             ctx.fillStyle = '#FFFFFF';
             ctx.font = `bold ${bSize * 0.8}px "Orbitron"`;
@@ -4787,13 +4786,14 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
 
             for (let i = 0; i < this.elapsedTimeText.length - 1; i++) {
                 const char = this.elapsedTimeText[i];
-                const charX = startX + (i * charSpacing);
+                                const charX = startX + (i * charSpacing);
                 ctx.fillText(char, charX, timerY);
             }
         }
 
         // NEXT
         ctx.fillStyle = '#FFF';
+        ctx.font = `bold ${bSize * 0.8}px "Orbitron"`;
         if (!useCustomBG) ctx.fillText('NEXT', layout.next[0].x, layout.next[0].y - bSize);
         
         for (let i = 0; i < Math.min(gameSettings.maxNext, layout.next.length); i++) {
