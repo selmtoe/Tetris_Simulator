@@ -312,9 +312,10 @@
                         <button class="button" id="p1-field-shift-up">↑ Up</button>
                         <button class="button" id="p1-field-shift-down">↓ Down</button>
                         <button class="button" id="p1-field-clear">Clear</button>
-                        <label for="imageLoader-p1" class="button">Load Img</label>
+                        <button class="button" id="p1-field-line-clear">Line Clear</button>
+                        <label for="imageLoader-p1" class="button">Img</label>
                         <input type="file" id="imageLoader-p1" data-player="p1" accept="image/*">
-                        <label for="pptLoader-p1" class="button">Load PPT</label>
+                        <label for="pptLoader-p1" class="button">PPT</label>
                         <input type="file" id="pptLoader-p1" data-player="p1" accept="image/*">
                     </div>
 <div class="key-config-controls" style="margin-top: 15px; text-align: center; display: flex; justify-content: center; align-items: center; gap: 10px;">
@@ -339,15 +340,15 @@
                 <div class="edit-section field-editor">
                     <h2>PLAYER 2 - FIELD</h2>
                     <div class="color-palette" id="p2-palette"></div>
-
 <canvas id="field-editor-canvas-p2"></canvas>
                     <div class="field-controls">
                         <button class="button" id="p2-field-shift-up">↑ Up</button>
                         <button class="button" id="p2-field-shift-down">↓ Down</button>
                         <button class="button" id="p2-field-clear">Clear</button>
-                        <label for="imageLoader-p2" class="button">Load Img</label>
+                        <button class="button" id="p2-field-line-clear">Line Clear</button>
+                        <label for="imageLoader-p2" class="button">Img</label>
                         <input type="file" id="imageLoader-p2" data-player="p2" accept="image/*">
-                        <label for="pptLoader-p2" class="button">Load PPT</label>
+                        <label for="pptLoader-p2" class="button">PPT</label>
                         <input type="file" id="pptLoader-p2" data-player="p2" accept="image/*">
                     </div>
 <div class="key-config-controls" style="margin-top: 15px; text-align: center; display: flex; justify-content: center; align-items: center; gap: 10px;">
@@ -5773,6 +5774,30 @@ isEraserMode = false;
     document.getElementById(`${playerId}-field-shift-up`).addEventListener('click', () => shiftField(playerId, 'up'));
     document.getElementById(`${playerId}-field-shift-down`).addEventListener('click', () => shiftField(playerId, 'down'));
     document.getElementById(`${playerId}-field-clear`).addEventListener('click', () => { editorData[playerId].board.forEach(row => row.fill(null)); drawEditorField(playerId); });
+    document.getElementById(`${playerId}-field-line-clear`).addEventListener('click', () => lineClearField(playerId));
+    drawEditorField(playerId);
+}
+
+function lineClearField(playerId) {
+    const data = editorData[playerId];
+    const oldBoard = data.board;
+    
+    // 完全に空(nullのみ)でもなく、完全に埋まって(nullなし)もいない行だけを残す
+    const keptRows = oldBoard.filter(row => {
+        const isFull = row.every(cell => cell !== null);
+        const isEmpty = row.every(cell => cell === null);
+        return !isFull && !isEmpty;
+    });
+
+    // 新しいボードを作成（上部をnullで埋め、下部に残った行を詰める）
+    const newBoard = Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
+    const fillStartIndex = BOARD_HEIGHT - keptRows.length;
+    
+    for (let i = 0; i < keptRows.length; i++) {
+        newBoard[fillStartIndex + i] = keptRows[i];
+    }
+    
+    data.board = newBoard;
     drawEditorField(playerId);
 }
 
