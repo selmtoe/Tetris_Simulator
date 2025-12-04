@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tetris AI Scanner (Hybrid ONNX)</title>
+    <title>Tetris PPT Scanner</title>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
         body { font-family: sans-serif; background: #202020; color: #fff; padding: 20px; }
@@ -36,18 +36,18 @@
 <body>
 
 <div class="container">
-    <h1>Tetris AI Scanner (ONNX + Classic Hybrid)</h1>
+    <h1>Tetris PPT Scanner</h1>
     
     <div class="control-panel">
         <div style="display:none;">
-            <label>1. モデルファイル (tetris.onnx): </label>
+            <label>モデルファイル:</label>
             <input type="file" id="modelInput" accept=".onnx">
-            <label>2. 解析する画像: </label>
+            <label>解析する画像: </label>
             <input type="file" id="imageInput" accept="image/*">
             <button id="runBtn" class="btn" disabled>解析実行</button>
         </div>
         <div id="statusMessage" style="font-size: 1.2em; font-weight: bold; color: #00ff00;">
-            拡張機能からの待機中... (tetris.onnxを自動ロードします)
+            拡張機能からの待機中...
         </div>
     </div>
 
@@ -55,11 +55,11 @@
     <div id="logArea"></div>
 
     <div id="resultArea" class="result-box hidden">
-        <h3>解析結果 (シミュレータURL)</h3>
+        <h3>解析結果</h3>
         <p><a id="simLink" class="sim-link" target="_blank" href="#">生成中...</a></p>
     </div>
 
-    <h3>Debug Preview (1920x1080 Processed)</h3>
+    <h3>Debug Preview</h3>
     <div class="preview-area">
         <canvas id="debugCanvas"></canvas>
     </div>
@@ -92,19 +92,18 @@ window.onerror = function(message, source, lineno, colno, error) {
 // 自動でモデルをロードする
 async function initModel() {
     try {
-        log("モデル(tetris.onnx)を自動読み込み中...", 'info');
-        // HTMLと同じ階層にあると仮定
+        log("モデルを読み込み中...", 'info');
         session = await ort.InferenceSession.create('./tetris.onnx', { executionProviders: ['wasm'] });
-        log("モデルロード完了。拡張機能からの画像待機中...", 'info');
-        document.getElementById('statusMessage').textContent = "準備完了: 画像を受信次第、解析を開始します。";
+        log("モデルロード完了　拡張機能からの画像待機中...", 'info');
+        document.getElementById('statusMessage').textContent = "準備完了";
         
         // 待機していた画像があれば処理
         if (pendingImageData) {
-            log("待機していた画像を処理します。", 'info');
+            log("画像を処理します。", 'info');
             processExtensionImage(pendingImageData);
         }
     } catch (err) {
-        log(`モデル自動ロード失敗: ${err.message}`, 'error');
+        log(`モデルロード失敗: ${err.message}`, 'error');
         document.getElementById('statusMessage').textContent = "エラー: tetris.onnx が見つかりません。";
     }
 }
@@ -112,9 +111,9 @@ async function initModel() {
 // 拡張機能から呼ばれるグローバル関数
 let pendingImageData = null;
 window.receiveExtensionImage = async (base64Data) => {
-    log("拡張機能から画像データを受信しました。", 'info');
+    log("拡張機能から画像データを受信しました", 'info');
     if (!session) {
-        log("モデルがまだロードされていません。ロード後に処理します。", 'warn');
+        log("モデルがまだロードされていません　ロード後に処理します。", 'warn');
         pendingImageData = base64Data;
         return;
     }
@@ -122,7 +121,7 @@ window.receiveExtensionImage = async (base64Data) => {
 };
 
 async function processExtensionImage(base64Data) {
-    document.getElementById('statusMessage').textContent = "解析中... シミュレータへ転送準備中";
+    document.getElementById('statusMessage').textContent = "解析中... 転送準備中";
     const img = new Image();
     img.onload = async () => {
         const imgBitmap = await createImageBitmap(img);
@@ -205,7 +204,7 @@ async function runAnalysis(imgBitmap) {
         linkEl.textContent = simulatorUrl;
         document.getElementById('resultArea').classList.remove('hidden');
 
-        log("解析完了！シミュレーターへ移動します...", 'info');
+        log("解析完了！転送中...", 'info');
         
         // 自動リダイレクト
         window.location.href = simulatorUrl;
