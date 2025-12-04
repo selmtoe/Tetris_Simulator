@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tetris AI Scanner (Hybrid ONNX)</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #202020; color: #fff; padding: 20px; }
+        h1 { border-bottom: 2px solid #444; padding-bottom: 10px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .control-panel { background: #333; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: grid; gap: 15px; }
+        .btn { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        .btn:disabled { background: #555; cursor: not-allowed; }
+        .btn:hover:not(:disabled) { background: #0056b3; }
+        
+        #logArea { 
+            background: #000; border: 1px solid #555; padding: 10px; 
+            height: 200px; overflow-y: scroll; font-family: monospace; 
+            white-space: pre-wrap; margin-top: 10px; font-size: 12px;
+        }
+        .log-error { color: #ff4444; font-weight: bold; }
+        .log-info { color: #00ff00; }
+        .log-warn { color: #ffff00; }
+
+        .preview-area { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+        canvas { border: 1px solid #555; max-width: 100%; height: auto; }
+        
+        .result-box { background: #444; padding: 15px; margin-top: 20px; border-radius: 5px; }
+        a.sim-link { color: #4db8ff; text-decoration: none; font-size: 18px; word-break: break-all; }
+        a.sim-link:hover { text-decoration: underline; }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Tetris AI Scanner (ONNX + Classic Hybrid)</h1>
+    
+    <div class="control-panel">
+        <div style="display:none;">
+            <label>1. モデルファイル (tetris.onnx): </label>
+            <input type="file" id="modelInput" accept=".onnx">
+            <label>2. 解析する画像: </label>
+            <input type="file" id="imageInput" accept="image/*">
+            <button id="runBtn" class="btn" disabled>解析実行</button>
+        </div>
+        <div id="statusMessage" style="font-size: 1.2em; font-weight: bold; color: #00ff00;">
+            拡張機能からの待機中... (tetris.onnxを自動ロードします)
+        </div>
+    </div>
+
+    <h3>System Logs</h3>
+    <div id="logArea"></div>
+
+    <div id="resultArea" class="result-box hidden">
+        <h3>解析結果 (シミュレータURL)</h3>
+        <p><a id="simLink" class="sim-link" target="_blank" href="#">生成中...</a></p>
+    </div>
+
+    <h3>Debug Preview (1920x1080 Processed)</h3>
+    <div class="preview-area">
+        <canvas id="debugCanvas"></canvas>
+    </div>
+</div>
+
+<script>
+// --- グローバル変数 & 定数 ---
+const CLASS_NAMES = ['null', 'G', 'S', 'Z', 'L', 'J', 'O', 'I', 'T'];
+// ONNXセッション
+let session = null;
+
+// ログ機能
+function log(msg, type = 'info') {
+    const logArea = document.getElementById('logArea');
+    const div = document.createElement('div');
+    div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    if (type === 'error') div.className = 'log-error';
+    else if (type === 'warn') div.className = 'log-warn';
+    else div.className = 'log-info';
+    logArea.appendChild(div);
+    logArea.scrollTop = logArea.scrollHeight;
+    console.log(msg);
+}
+
+window.onerror = function(message, source, lineno, colno, error) {
+    log(`FATAL ERROR: ${message} at ${lineno}:${colno}`, 'error');
+};
+
+// --- 初期化処理 ---
+// 自動でモデルをロードする
+async function initModel() {
+    try {
+        log("モデル(tetris.onnx)を自動読み込み中...", 'info');
+        // HTMLと同じ階層にあると仮定
+        session = await ort.InferenceSession.create('./tetris.onnx', { executionProviders: ['wasm'] });
+        log("モデルロード完了。拡張機能からの画像待機中...", 'info');
+        document.getElementById('statusMessage').textContent = "準備完了: 画像を受信次第、解析を開始します。";
+        
+        // 待機していた画像があれば処理
+        if (pendingImageData) {
+            log("待機していた画像を処理します。", 'info');
+            processExtensionImage(pendingImageData);
+        }
+    } catch (err) {
+        log(`モデル自動ロード失敗: ${err.message}`, 'error');
+        document.getElementById('statusMessage').textContent = "エラー: tetris.onnx が見つかりません。";
+    }
+}
+
+// 拡張機能から呼ばれるグローバル関数
+let pendingImageData = null;
+window.receiveExtensionImage = async (base64Data) => {
+    log("拡張機能から画像データを受信しました。", 'info');
+    if (!session) {
+        log("モデルがまだロードされていません。ロード後に処理します。", 'warn');
+        pendingImageData = base64Data;
+        return;
+    }
+    await processExtensionImage(base64Data);
+};
+
+async function processExtensionImage(base64Data) {
+    document.getElementById('statusMessage').textContent = "解析中... シミュレータへ転送準備中";
+    const img = new Image();
+    img.onload = async () => {
+        const imgBitmap = await createImageBitmap(img);
+        runAnalysis(imgBitmap); // 解析実行
+    };
+    img.src = base64Data;
+}
+
+// ページ読み込み時に初期化
+initModel();
+document.getElementById('imageInput').addEventListener('change', () => checkReady());
+
+function checkReady() {
+    const modelLoaded = !!session;
+    const imgSelected = document.getElementById('imageInput').files.length > 0;
+    document.getElementById('runBtn').disabled = !(modelLoaded && imgSelected);
+}
+
+// --- メイン処理 ---
+// 既存のイベントリスナーは残すが、メインロジックを関数化して再利用可能にする
+document.getElementById('runBtn').addEventListener('click', async () => {
+    const imgFile = document.getElementById('imageInput').files[0];
+    if(imgFile) {
+        const imgBitmap = await createImageBitmap(imgFile);
+        runAnalysis(imgBitmap);
+    }
+});
+
+async function runAnalysis(imgBitmap) {
+    try {
+        log("処理を開始します...", 'info');
+        
+        // 1. 画像の前処理 (16:9 クロップ & 1920x1080 リサイズ)
+        // クロップ情報(cropData)も受け取る
+        const { canvas: processedCanvas, cropData } = processImageTo1080p(imgBitmap);
+        
+        // デバッグ表示
+        const debugCanvas = document.getElementById('debugCanvas');
+        debugCanvas.width = processedCanvas.width;
+        debugCanvas.height = processedCanvas.height;
+        debugCanvas.getContext('2d').drawImage(processedCanvas, 0, 0);
+
+        // 2. プレイヤー情報の抽出と解析
+        // 座標定義
+        // Board: 1920x1080基準 (ONNX用)
+        // Next/Hold: 1280基準 (content.jsオリジナルの座標、後でcrop幅に合わせてスケール計算)
+        
+        const p1Config = {
+            boardRect: { x: 304, y: 157, w: 670 - 304, h: 882 - 157 },
+            nextCoords: [ {x:160, y:155}, {x:500, y:122}, {x:500, y:175}, {x:500, y:225}, {x:500, y:275}, {x:500, y:325} ]
+        };
+        const p2Config = {
+            boardRect: { x: 1257, y: 157, w: 1620 - 1257, h: 882 - 157 },
+            nextCoords: [ {x:790, y:155}, {x:1130, y:122}, {x:1130, y:175}, {x:1130, y:225}, {x:1130, y:275}, {x:1130, y:325} ]
+        };
+
+        log("Player 1 解析中...", 'info');
+        // オリジナルの画素データ(imgBitmap)とクロップ情報を渡す
+        const p1Data = await analyzePlayer(processedCanvas, imgBitmap, cropData, p1Config);
+        
+        log("Player 2 解析中...", 'info');
+        const p2Data = await analyzePlayer(processedCanvas, imgBitmap, cropData, p2Config);
+
+        // 3. 結果URL生成
+        const stateData = {
+            v: 2,
+            m: "2P",
+            p1: { b: boardToString(p1Data.board), n: p1Data.nextQueue.join(''), h: p1Data.holdMino || '' },
+            p2: { b: boardToString(p2Data.board), n: p2Data.nextQueue.join(''), h: p2Data.holdMino || '' }
+        };
+
+        const jsonString = JSON.stringify(stateData);
+        const uint8Array = new TextEncoder().encode(jsonString);
+        // Base64エンコード (バイナリ対応)
+        const base64Data = btoa(String.fromCharCode.apply(null, uint8Array));
+        const simulatorUrl = `https://selmtoe.github.io/Tetris_Simulator/#${base64Data}`;
+        
+        const linkEl = document.getElementById('simLink');
+        linkEl.href = simulatorUrl;
+        linkEl.textContent = simulatorUrl;
+        document.getElementById('resultArea').classList.remove('hidden');
+
+        log("解析完了！シミュレーターへ移動します...", 'info');
+        
+        // 自動リダイレクト
+        window.location.href = simulatorUrl;
+        
+    } catch (err) {
+        log(`実行時エラー: ${err.stack}`, 'error');
+    }
+}
+
+// --- 画像処理ロジック ---
+
+function processImageTo1080p(imgBitmap) {
+    // 中央から16:9で最大クロップ -> 1920x1080にリサイズ
+    const srcW = imgBitmap.width;
+    const srcH = imgBitmap.height;
+    const targetAspect = 16 / 9;
+    const srcAspect = srcW / srcH;
+    let cropW, cropH, cropX, cropY;
+
+    if (srcAspect > targetAspect) {
+        // 横長すぎる -> 高さに合わせる
+        cropH = srcH;
+        cropW = srcH * targetAspect;
+        cropX = (srcW - cropW) / 2;
+        cropY = 0;
+    } else {
+        // 縦長すぎる -> 幅に合わせる
+        cropW = srcW;
+        cropH = srcW / targetAspect;
+        cropX = 0;
+        cropY = (srcH - cropH) / 2;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 1920;
+    canvas.height = 1080;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    // クロップして描画
+    ctx.drawImage(imgBitmap, cropX, cropY, cropW, cropH, 0, 0, 1920, 1080);
+    // クロップ情報も合わせて返す
+    return { canvas, cropData: { cropX, cropY, cropW, cropH } };
+}
+
+async function analyzePlayer(canvas, originalBitmap, cropData, config) {
+    const ctx = canvas.getContext('2d');
+    // 1. 盤面スキャン (ONNXモデル使用 + 旧ロジックによる補正)
+    // ※ 盤面解析は1080pリサイズ済みの画像で行う (ONNXモデルがその解像度で精度が出ているため)
+    const boardRect = config.boardRect;
+    const boardImgData = ctx.getImageData(boardRect.x, boardRect.y, boardRect.w, boardRect.h);
+    const cellW = boardRect.w / 10;
+    const cellH = boardRect.h / 20;
+    const recognizedBoard = []; // 20x10 array (ONNX Result)
+
+    // --- (A) 旧ロジックによる盤面スキャン (content.jsベース) ---
+    const classicBoard = [];
+    const blockWidthPx = cellW;
+    const blockHeightPx = cellH;
+    
+    for (let r = 0; r < 20; r++) {
+        const row = [];
+        for (let c = 0; c < 10; c++) {
+            const sampleX = boardRect.x + (c + 0.5) * blockWidthPx;
+            const sampleY = boardRect.y + (r + 0.5) * blockHeightPx;
+            const sampleSize = Math.max(1, Math.floor(blockWidthPx * 0.25));
+            // ピクセル取得 (content.jsと同等の処理)
+            const imageData = ctx.getImageData(sampleX - sampleSize / 2, sampleY - sampleSize / 2, sampleSize, sampleSize).data;
+            let avgR = 0, avgG = 0, avgB = 0;
+            for (let i = 0; i < imageData.length; i += 4) {
+                avgR += imageData[i];
+                avgG += imageData[i+1]; avgB += imageData[i+2];
+            }
+            const pixelCount = imageData.length / 4;
+            avgR /= pixelCount; avgG /= pixelCount; avgB /= pixelCount;
+            
+            row.push(findClosestColor(avgR, avgG, avgB));
+        }
+        classicBoard.push(row);
+    }
+
+    // --- (B) ONNX 特徴量抽出と推論 ---
+    const batchFeatures = [];
+    for (let r = 0; r < 20; r++) {
+        const row = [];
+        for (let c = 0; c < 10; c++) {
+            const x = c * cellW;
+            const y = r * cellH;
+            const cellPixels = extractCellPixels(boardImgData, x, y, cellW, cellH);
+            const feats = extractFeaturesJS(cellPixels, Math.floor(cellW), Math.floor(cellH));
+            batchFeatures.push(feats);
+            row.push(null);
+        }
+        recognizedBoard.push(row);
+    }
+
+    const flatInput = new Float32Array(batchFeatures.length * 63);
+    for (let i = 0; i < batchFeatures.length; i++) {
+        flatInput.set(batchFeatures[i], i * 63);
+    }
+    
+    const tensor = new ort.Tensor('float32', flatInput, [200, 63]);
+    const inputName = session.inputNames[0];
+    const feeds = { [inputName]: tensor };
+    const labelOutputName = session.outputNames[0]; 
+    const fetches = [labelOutputName];
+    const results = await session.run(feeds, fetches);
+    const outputLabel = results[labelOutputName];
+    const labelData = outputLabel.data;
+
+    // 結果を盤面にマッピング
+    for (let i = 0; i < 200; i++) {
+        const r = Math.floor(i / 10);
+        const c = i % 10;
+        const classIdx = Number(labelData[i]);
+        const label = CLASS_NAMES[classIdx];
+        recognizedBoard[r][c] = (label === 'null') ? null : label;
+    }
+
+    // --- (C) 結果のマージ (補正処理) ---
+    // 条件: ONNXの行が(null or G)のみ、かつGが10個ではない(穴あきG列など)
+    // かつ、旧ロジックが「Gが9個、nullが1個」と判定している場合 -> 旧ロジックを採用
+    for (let r = 0; r < 20; r++) {
+        const onnxRow = recognizedBoard[r];
+        const isOnlyNullOrG = onnxRow.every(cell => cell === null || cell === 'G');
+        if (isOnlyNullOrG) {
+            const gCountOnnx = onnxRow.filter(cell => cell === 'G').length;
+            if (gCountOnnx !== 10) {
+                // 補正候補
+                const classicRow = classicBoard[r];
+                const gCountClassic = classicRow.filter(cell => cell === 'G').length;
+                const nullCountClassic = classicRow.filter(cell => cell === null).length;
+                if (gCountClassic === 9 && nullCountClassic === 1) {
+                    // 旧ロジックの結果で上書き
+                    recognizedBoard[r] = [...classicRow];
+                }
+            }
+        }
+    }
+
+    // --- 既存ロジックの適用 (フルボード化、ガベージ、削除列) ---
+    const fullBoard = Array.from({ length: 40 }, () => Array(10).fill(null));
+    for(let r=0; r<20; r++) {
+        fullBoard[20+r] = recognizedBoard[r];
+    }
+
+    let firstNonGarbageRowFromBottom = -1;
+    for (let y = 39; y >= 0; y--) { if (!fullBoard[y].includes('G')) { firstNonGarbageRowFromBottom = y; break; } }
+    if (firstNonGarbageRowFromBottom !== -1) { 
+        for (let y = firstNonGarbageRowFromBottom - 1; y >= 0; y--) { 
+            for (let x = 0; x < 10; x++) { if (fullBoard[y][x] === 'G') { fullBoard[y][x] = null; } } 
+        } 
+    }
+
+    let firstEmptyRowFromBottom = -1;
+    for (let y = 39; y >= 0; y--) { if (fullBoard[y].every(cell => cell === null)) { firstEmptyRowFromBottom = y; break; } }
+    
+    const deletedMinoColors = [];
+    const pendingDeletions = []; // 削除候補の座標リスト
+
+    if (firstEmptyRowFromBottom !== -1) {
+        const limitY = 40 - 18;
+        for (let y = firstEmptyRowFromBottom - 1; y >= 0; y--) {
+            if (y <= limitY) {
+                for (let x = 0; x < 10; x++) {
+                    const piece = fullBoard[y][x];
+                    if (piece && piece !== 'G') { deletedMinoColors.push(piece); }
+                    // 即座に消さず、候補として記録する
+                    if (piece) pendingDeletions.push({y, x});
+                }
+            }
+        }
+    }
+
+    // 2. Next/Hold スキャン (content.js完全準拠・元画像使用)
+    const nextQueue = [];
+    let holdMino = null;
+    
+    // 元画像のクロップ領域からCanvasを作成 (リサイズなし)
+    const rawCropCanvas = document.createElement('canvas');
+    rawCropCanvas.width = cropData.cropW;
+    rawCropCanvas.height = cropData.cropH;
+    const rawCtx = rawCropCanvas.getContext('2d', { willReadFrequently: true });
+    // 元画像をクロップ領域に従って描画
+    rawCtx.drawImage(originalBitmap, cropData.cropX, cropData.cropY, cropData.cropW, cropData.cropH, 0, 0, cropData.cropW, cropData.cropH);
+
+    // 実際のスケール倍率 (1280pxに対する現在のクロップ幅の比率)
+    const currentScale = cropData.cropW / 1280;
+    const radius = 5 * currentScale;
+
+    for (let i = 0; i < config.nextCoords.length; i++) {
+        const coord = config.nextCoords[i];
+        // 座標(1280基準)に現在のスケールを適用して色取得
+        const avgColor = getAverageColorNonBlack(rawCtx, coord.x * currentScale, coord.y * currentScale, radius);
+        if (i === 0) {
+            holdMino = findClosestColor(avgColor.r, avgColor.g, avgColor.b);
+        } else {
+            const isBlack = avgColor.r < 50 && avgColor.g < 50 && avgColor.b < 50;
+            if (i === 1 && isBlack) break;
+            const foundMino = findClosestMinoOnly(avgColor.r, avgColor.g, avgColor.b);
+            if (foundMino) nextQueue.push(foundMino);
+        }
+    }
+
+    // 浮いているミノの処理: 削除色が全て同一の場合のみNextに追加し、ボードから削除を実行
+    if (deletedMinoColors.length > 0 && deletedMinoColors.every(color => color === deletedMinoColors[0])) {
+        nextQueue.unshift(deletedMinoColors[0]);
+        // 確定した削除をボードに適用
+        pendingDeletions.forEach(p => fullBoard[p.y][p.x] = null);
+    }
+    // else: 色が混ざっている、または存在しない場合は削除をキャンセル (fullBoardは変更されない)
+
+    return { board: fullBoard, holdMino, nextQueue };
+}
+
+// --- 特徴量抽出 (Python互換実装) ---
+// 画像データ(RGBA)を受け取り、63次元の特徴量ベクトルを返す
+function extractFeaturesJS(pixelsRGBA, w, h) {
+    const numPixels = w * h;
+    const feats = [];
+
+    // バッファ用意
+    // BGR順にする必要がある (Python cv2.imread is BGR)
+    // RGBA -> BGR 変換 & HSV 計算
+    const bCh = new Float32Array(numPixels);
+    const gCh = new Float32Array(numPixels);
+    const rCh = new Float32Array(numPixels);
+    
+    const hCh = new Float32Array(numPixels);
+    const sCh = new Float32Array(numPixels);
+    const vCh = new Float32Array(numPixels);
+
+    for (let i = 0; i < numPixels; i++) {
+        const r = pixelsRGBA[i * 4];
+        const g = pixelsRGBA[i * 4 + 1];
+        const b = pixelsRGBA[i * 4 + 2];
+        // 1. BGR Store
+        bCh[i] = b;
+        gCh[i] = g;
+        rCh[i] = r;
+        // 2. HSV Calculation (OpenCV formula)
+        // V: 0-255, S: 0-255, H: 0-179
+        const maxVal = Math.max(r, g, b);
+        const minVal = Math.min(r, g, b);
+        const diff = maxVal - minVal;
+        // V
+        const v = maxVal;
+        // S
+        let s = 0;
+        if (maxVal !== 0) {
+            s = (diff / maxVal) * 255;
+        }
+
+        // H
+        let h_val = 0;
+        if (maxVal === minVal) {
+            h_val = 0;
+        } else if (maxVal === r) {
+            h_val = (60 * (g - b) / diff + 360) % 360;
+        } else if (maxVal === g) {
+            h_val = (60 * (b - r) / diff + 120) % 360;
+        } else if (maxVal === b) {
+            h_val = (60 * (r - g) / diff + 240) % 360;
+        }
+        // OpenCV uses 0-179 for H
+        h_val = h_val / 2;
+        vCh[i] = v;
+        sCh[i] = s;
+        hCh[i] = h_val;
+    }
+
+    // Helper: Mean & Std
+    const getStats = (arr) => {
+        let sum = 0;
+        for(let v of arr) sum += v;
+        const mean = sum / arr.length;
+        let sqDiffSum = 0;
+        for(let v of arr) sqDiffSum += (v - mean) ** 2;
+        const std = Math.sqrt(sqDiffSum / arr.length);
+        return [mean, std];
+    };
+
+    // 1. RGB Stats (6 dims) -> Note: Order in Python was Mean(B,G,R), Std(B,G,R)
+    // Python code: features.append(np.mean(img[:, :, channel])) where channel is 0(B),1(G),2(R)
+    // So order is: MeanB, StdB, MeanG, StdG, MeanR, StdR
+    const statsB = getStats(bCh);
+    const statsG = getStats(gCh);
+    const statsR = getStats(rCh);
+    
+    feats.push(statsB[0], statsB[1]);
+    feats.push(statsG[0], statsG[1]);
+    feats.push(statsR[0], statsR[1]);
+    // 2. HSV Stats (6 dims)
+    const statsH = getStats(hCh);
+    const statsS = getStats(sCh);
+    const statsV = getStats(vCh);
+    
+    feats.push(statsH[0], statsH[1]);
+    feats.push(statsS[0], statsS[1]);
+    feats.push(statsV[0], statsV[1]);
+    // 3. 4x4 Tiny Image (48 dims)
+    // 単純なダウンサンプリング (Nearest Neighbor的な間引き) or 平均画素
+    // ここでは簡易的にブロック平均をとる
+    const tinyFeats = [];
+    const stepX = w / 4;
+    const stepY = h / 4;
+    
+    for (let ty = 0; ty < 4; ty++) {
+        for (let tx = 0; tx < 4; tx++) {
+            // この領域の平均BGRを計算
+            const sx = Math.floor(tx * stepX);
+            const sy = Math.floor(ty * stepY);
+            const ex = Math.floor((tx + 1) * stepX);
+            const ey = Math.floor((ty + 1) * stepY);
+            
+            let sumB=0, sumG=0, sumR=0, count=0;
+            for(let py=sy; py<ey; py++){
+                for(let px=sx; px<ex; px++){
+                    const idx = py * w + px;
+                    if(idx < numPixels) {
+                        sumB += bCh[idx];
+                        sumG += gCh[idx];
+                        sumR += rCh[idx];
+                        count++;
+                    }
+                }
+            }
+            if(count===0) { tinyFeats.push(0,0,0); }
+            else { tinyFeats.push(sumB/count, sumG/count, sumR/count); }
+        }
+    }
+    feats.push(...tinyFeats);
+    // 48個追加
+
+    // 4. Center Crop Mean (3 dims)
+    // Center 20% width/height ?
+    // Python code said: w//4, h//4 radius around center.
+    // So it's half width, half height crop essentially.
+    const cx = Math.floor(w/2), cy = Math.floor(h/2);
+    const cw = Math.floor(w/4), ch = Math.floor(h/4);
+    const startX = cx - cw, endX = cx + cw;
+    const startY = cy - ch, endY = cy + ch;
+    
+    let cSumB=0, cSumG=0, cSumR=0, cCount=0;
+    for(let py=startY; py<endY; py++){
+        for(let px=startX; px<endX; px++){
+            if(px>=0 && px<w && py>=0 && py<h){
+                const idx = py * w + px;
+                cSumB += bCh[idx];
+                cSumG += gCh[idx];
+                cSumR += rCh[idx];
+                cCount++;
+            }
+        }
+    }
+    if(cCount===0) feats.push(0,0,0);
+    else feats.push(cSumB/cCount, cSumG/cCount, cSumR/cCount);
+
+    return new Float32Array(feats); // Total 63
+}
+
+// ImageDataの部分取得ヘルパー
+function extractCellPixels(sourceImgData, x, y, w, h) {
+    const sw = sourceImgData.width;
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const iw = Math.floor(w), ih = Math.floor(h);
+    const data = new Uint8ClampedArray(iw * ih * 4);
+    
+    for (let row = 0; row < ih; row++) {
+        const srcRowStart = ((iy + row) * sw + ix) * 4;
+        const destRowStart = (row * iw) * 4;
+        // 行ごとにコピー
+        const rowPixels = sourceImgData.data.subarray(srcRowStart, srcRowStart + iw * 4);
+        data.set(rowPixels, destRowStart);
+    }
+    return data; // RGBA array
+}
+
+
+// --- 既存のユーティリティ関数 (content.jsより移植・調整) ---
+
+const SCAN_COLOR_PALETTE = { 'NULL': ['#000000', '#302838'], 'G': ['#999999', '#D8D8D8'], 'I': ['#019899', '#0199D5'], 'O': ['#999A02', '#F9B900'], 'T': ['#980099', '#871E88'], 'L': ['#996700', '#F56100'], 'J': ['#0000BB', '#004BA5'], 'S': ['#10971F', '#5CB523'], 'Z': ['#990000', '#DA1822'] };
+const hexToRgb = (hex) => { const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+return { r, g, b }; };
+const PARSED_SCAN_COLORS = {};
+for (const key in SCAN_COLOR_PALETTE) { PARSED_SCAN_COLORS[key] = SCAN_COLOR_PALETTE[key].map(hexToRgb);
+}
+    const colorDistanceSq = (c1, c2) => (Math.pow(c1.r - c2.r, 2) + Math.pow(c1.g - c2.g, 2) + Math.pow(c1.b - c2.b, 2));
+    function findClosestColor(r, g, b) { 
+    const inputColor = { r, g, b };
+    for (const nullColor of PARSED_SCAN_COLORS.NULL) { 
+        if (colorDistanceSq(inputColor, nullColor) < 6000) return null;
+    } 
+    for (const gColor of PARSED_SCAN_COLORS.G) { 
+        if (colorDistanceSq(inputColor, gColor) < 10000) return 'G';
+    } 
+    let minDistance = Infinity, closestKey = null;
+    const minoKeys = Object.keys(PARSED_SCAN_COLORS).filter(k => k !== 'NULL' && k !== 'G');
+    for (const key of minoKeys) { 
+        for (const targetColor of PARSED_SCAN_COLORS[key]) { 
+            const distance = colorDistanceSq(inputColor, targetColor);
+            if (distance < minDistance) { minDistance = distance; closestKey = key;
+            } 
+        } 
+    } 
+    return (minDistance > 25000) ? null : closestKey; 
+}
+
+function findClosestMinoOnly(r, g, b) { 
+    const inputColor = { r, g, b };
+    let minDistance = Infinity, closestKey = 'I'; 
+    const minoKeys = Object.keys(PARSED_SCAN_COLORS).filter(k => k !== 'NULL' && k !== 'G');
+    for (const key of minoKeys) { 
+        for (const targetColor of PARSED_SCAN_COLORS[key]) { 
+            const distance = colorDistanceSq(inputColor, targetColor);
+            if (distance < minDistance) { minDistance = distance; closestKey = key;
+            } 
+        } 
+    } 
+    return closestKey;
+}
+
+function getAverageColorNonBlack(ctx, cx, cy, radius) {
+    const startX = Math.max(0, Math.floor(cx - radius)), startY = Math.max(0, Math.floor(cy - radius)), diameter = Math.ceil(radius * 2), endX = Math.min(ctx.canvas.width, startX + diameter), endY = Math.min(ctx.canvas.height, startY + diameter), width = endX - startX, height = endY - startY;
+    if (width <= 0 || height <= 0) return { r: 0, g: 0, b: 0 };
+    const imageData = ctx.getImageData(startX, startY, width, height).data;
+    let totalR = 0, totalG = 0, totalB = 0, count = 0;
+    const radiusSq = radius * radius;
+    const blackThreshold = 50;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const dx = (startX + x) - cx;
+        const dy = (startY + y) - cy;
+        if (dx * dx + dy * dy <= radiusSq) {
+          const i = (y * width + x) * 4;
+          const r = imageData[i], g = imageData[i + 1], b = imageData[i + 2];
+          if (r > blackThreshold || g > blackThreshold || b > blackThreshold) {
+            totalR += r;
+            totalG += g; totalB += b; count++;
+          }
+        }
+      }
+    }
+    return count === 0 ? { r: 0, g: 0, b: 0 } : { r: totalR / count, g: totalG / count, b: totalB / count };
+}
+
+const boardToString = (board) => board.map(row => row.map(cell => cell === null ? '_' : cell).join('')).join('');
+
+</script>
+</body>
+</html>
