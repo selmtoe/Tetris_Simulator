@@ -6628,6 +6628,17 @@ function processPptImage(file) {
     reader.readAsDataURL(file);
 }
 
+window.receiveExtensionImage = async (base64Data) => {
+    try {
+        const res = await fetch(base64Data);
+        const blob = await res.blob();
+        const file = new File([blob], "capture.jpg", { type: "image/jpeg" });
+        processPptImage(file);
+    } catch(e) {
+        console.error("Extension image process failed", e);
+    }
+};
+
 async function runHighPrecisionAnalysis(imgBitmap) {
     try {
         // 1. 前処理 (16:9 クロップ & 1920x1080 リサイズ)
@@ -6830,7 +6841,8 @@ async function analyzePlayerHighPrecision(canvas, originalBitmap, cropData, conf
         const coord = config.nextCoords[i];
         const avgColor = getAverageColorNonBlack(rawCtx, coord.x * currentScale, coord.y * currentScale, radius);
         if (i === 0) {
-            holdMino = findClosestColor(avgColor.r, avgColor.g, avgColor.b);
+            const detected = findClosestColor(avgColor.r, avgColor.g, avgColor.b);
+            holdMino = (detected === 'G') ? null : detected;
         } else {
             const isBlack = avgColor.r < 50 && avgColor.g < 50 && avgColor.b < 50;
             if (i === 1 && isBlack) break;
