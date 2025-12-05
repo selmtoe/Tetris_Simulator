@@ -6626,9 +6626,7 @@ async function processPptImage(file) {
     const modeSelect = document.getElementById('gameModeSelect');
     if (modeSelect) {
         modeSelect.value = '2P';
-        if (typeof updateGameMode === 'function') {
-            updateGameMode();
-        }
+        modeSelect.dispatchEvent(new Event('change'));
     }
     // High Precision Logic
     const reader = new FileReader();
