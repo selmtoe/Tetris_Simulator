@@ -6622,6 +6622,14 @@ async function processPptImage(file) {
             return;
         }
     }
+    gameMode = '2P';
+    const modeSelect = document.getElementById('gameModeSelect');
+    if (modeSelect) {
+        modeSelect.value = '2P';
+        if (typeof updateGameMode === 'function') {
+            updateGameMode();
+        }
+    }
     // High Precision Logic
     const reader = new FileReader();
     reader.onload = async (e) => {
