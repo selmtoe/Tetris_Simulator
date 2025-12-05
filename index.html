@@ -6599,21 +6599,28 @@ function findClosestMinoOnly(r, g, b) {
 // --- ONNX High Precision PPT Load ---
 let onnxSession = null;
 const ONNX_CLASS_NAMES = ['null', 'G', 'S', 'Z', 'L', 'J', 'O', 'I', 'T'];
+let modelReadyResolver;
+const modelReadyPromise = new Promise(resolve => modelReadyResolver = resolve);
 
 async function initOnnxModel() {
     try {
-        onnxSession = await ort.InferenceSession.create('./Load PPT/tetris.onnx', { executionProviders: ['wasm'] });
+        onnxSession = await ort.InferenceSession.create('./Load%20PPT/tetris.onnx', { executionProviders: ['wasm'] });
         console.log("ONNX Model loaded.");
+        if (modelReadyResolver) modelReadyResolver(true);
     } catch (e) {
         console.error("Failed to load ONNX model:", e);
+        if (modelReadyResolver) modelReadyResolver(false);
     }
 }
 initOnnxModel();
 
-function processPptImage(file) {
+async function processPptImage(file) {
     if (!onnxSession) {
-        alert("AIモデルを読み込み中です。しばらくお待ちください。");
-        return;
+        await modelReadyPromise;
+        if (!onnxSession) {
+            alert("AIモデルの読み込みに失敗しました。");
+            return;
+        }
     }
     // High Precision Logic
     const reader = new FileReader();
