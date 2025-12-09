@@ -9,6 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
 <style>
     :root {
         --bg-color: #1a1a2e;
@@ -370,7 +371,6 @@ background-color: #30a070;">View</button>
     </div>
 </div>
 </div>
-
 <div id="viewer-container">
     <canvas id="viewerCanvas"></canvas>
     <div id="viewer-controls"> 
@@ -378,6 +378,8 @@ background-color: #30a070;">View</button>
             <span id="viewer-page-indicator">Page 1 / 1</span>
             <button id="viewer-simulator-btn" class="button">Simulator</button>
             <button id="back-to-editor-btn" class="button">Editor</button>
+            <button id="viewer-img-btn" class="button">Img</button>
+            <button id="viewer-gif-btn" class="button">GIF</button>
         </div>
         <div class="viewer-slider-container">
             <input type="range" id="viewer-page-slider" min="0" max="0" value="0">
@@ -393,7 +395,8 @@ background-color: #30a070;">View</button>
             <button class="button" data-type="ghost">Draw Ghost</button>
             <button class="button" data-type="place">Place Blocks</button>
             <button class="button" data-type="export">Export P1 Data</button>
-        </div>
+            <button class="button" data-type="analyze">Analyze</button>
+     </div>
         <textarea id="code-gen-output" readonly></textarea>
         <div id="code-gen-controls">
                     <button id="copy-code-button" class="button">Copy to Clipboard</button>
@@ -461,7 +464,27 @@ const TETROMINOS = {
     'J': { shape: [[0, 0], [-1, 0], [1, 0], [-1, -1]], center: [0, 0] }, 'S': { shape: [[1, -1], [-1, 0], [0, 0], [0, -1]], center: [0, 0] },
     'Z': { shape: [[0, 0], [1, 0], [0, -1], [-1, -1]], center: [0, 0] }
 };
-
+const DRAW_SHAPE_MAP = {
+    "1,0;2,0;3,0": { type: "I", rot: 0, offset: [0, 0] },
+    "0,1;0,2;0,3": { type: "I", rot: 1, offset: [2, -1] },
+    "0,1;1,0;1,1": { type: "O", rot: 0, offset: [0, -1] },
+    "-1,1;0,1;1,1": { type: "T", rot: 0, offset: [0, -1] },
+    "0,1;0,2;1,1": { type: "T", rot: 1, offset: [0, -1] },
+    "1,0;1,1;2,0": { type: "T", rot: 2, offset: [-1, 0] },
+    "-1,1;0,1;0,2": { type: "T", rot: 3, offset: [0, -1] },
+    "-1,1;-2,1;0,1": { type: "L", rot: 0, offset: [1, -1] },
+    "0,1;0,2;1,2": { type: "L", rot: 1, offset: [0, -1] },
+    "0,1;1,0;2,0": { type: "L", rot: 2, offset: [-1, 0] },
+    "1,0;1,1;1,2": { type: "L", rot: 3, offset: [-1, -1] },
+    "0,1;1,1;2,1": { type: "J", rot: 0, offset: [-1, -1] },
+    "0,1;0,2;1,0": { type: "J", rot: 1, offset: [0, -1] },
+    "1,0;2,0;2,1": { type: "J", rot: 2, offset: [-1, 0] },
+    "-1,2;0,1;0,2": { type: "J", rot: 3, offset: [0, -1] },
+    "-1,1;0,1;1,0": { type: "S", rot: 0, offset: [0, -1] },
+    "0,1;1,1;1,2": { type: "S", rot: 1, offset: [0, -1] },
+    "1,0;1,1;2,1": { type: "Z", rot: 0, offset: [-1, -1] },
+    "-1,1;-1,2;0,1": { type: "Z", rot: 1, offset: [1, -1] },
+};
 const createEmptyBoard = () => Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
 
 const createBlankPage = () => ({
@@ -1341,6 +1364,64 @@ viewerCanvas = document.getElementById('viewerCanvas');
 
     document.getElementById('viewer-simulator-btn').addEventListener('click', sendToSimulator);
 
+    document.getElementById('viewer-img-btn').addEventListener('click', () => {
+        const link = document.createElement('a');
+        link.download = `tetofu_page_${currentPageIndex + 1}.png`;
+        link.href = viewerCanvas.toDataURL();
+        link.click();
+    });
+
+    document.getElementById('viewer-gif-btn').addEventListener('click', async () => {
+        try {
+
+            const btn = document.getElementById('viewer-gif-btn');
+            const originalText = btn.textContent;
+            btn.textContent = 'Generating...';
+            btn.disabled = true;
+
+            const response = await fetch('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js');
+            if (!response.ok) throw new Error('Worker fetch failed');
+            const workerBlob = await response.blob();
+            const workerUrl = URL.createObjectURL(workerBlob);
+
+            const gif = new GIF({
+                workers: 2,
+                quality: 10,
+                workerScript: workerUrl
+            });
+
+            const originalIndex = currentPageIndex;
+
+            for (let i = 0; i < fumenPages.length; i++) {
+                currentPageIndex = i;
+                drawViewer();
+                gif.addFrame(viewerCanvas, {copy: true, delay: 500});
+            }
+
+            currentPageIndex = originalIndex;
+            drawViewer();
+
+            gif.on('finished', function(blob) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'tetofu_anim.gif';
+                link.click();
+                
+                btn.textContent = originalText;
+                btn.disabled = false;
+                URL.revokeObjectURL(workerUrl);
+            });
+
+            gif.render();
+
+        } catch (e) {
+            console.error(e);
+            alert('GIF生成に失敗しました。');
+            document.getElementById('viewer-gif-btn').textContent = 'GIF';
+            document.getElementById('viewer-gif-btn').disabled = false;
+        }
+    });
+
     document.getElementById('viewer-page-slider').addEventListener('input', (e) => {
         const newIndex = parseInt(e.target.value, 10);
         if (newIndex !== currentPageIndex) {
@@ -1408,10 +1489,59 @@ viewerCanvas = document.getElementById('viewerCanvas');
             });
         } else if (type === 'export') {
             const board = page.p1.board;
-            code = JSON.stringify(board, null, 2);
+code = JSON.stringify(board, null, 2);
+        } else if (type === 'analyze') {
+            const visited = new Set();
+            const board = page.p1.board;
+            const detectedMinos = [];
+
+            for (let y = 0; y < BOARD_HEIGHT; y++) {
+                for (let x = 0; x < BOARD_WIDTH; x++) {
+                    const cell = board[y][x];
+                    const key = `${x},${y}`;
+                    if (cell && cell !== 'G' && cell !== 'X' && !visited.has(key)) {
+                        const group = [];
+                        const queue = [{x, y}];
+                        visited.add(key);
+                        group.push({x, y});
+                        
+                        while (queue.length > 0) {
+                             const current = queue.shift();
+                             const dirs = [[0,1], [0,-1], [1,0], [-1,0]];
+                             for (const [dx, dy] of dirs) {
+                                 const nx = current.x + dx;
+                                 const ny = current.y + dy;
+                                 if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                     const nKey = `${nx},${ny}`;
+                                     if (!visited.has(nKey) && board[ny][nx] === cell) {
+                                         visited.add(nKey);
+                                         group.push({x: nx, y: ny});
+                                         queue.push({x: nx, y: ny});
+                                     }
+                                 }
+                             }
+                        }
+
+                        if (group.length === 4) {
+                            group.sort((a, b) => a.y - b.y || a.x - b.x);
+                            const pivot = group[0];
+                            const relStr = group.slice(1).map(b => `${b.x - pivot.x},${b.y - pivot.y}`).sort().join(';');
+                            
+                            const match = DRAW_SHAPE_MAP[relStr];
+                            if (match) {
+                                const finalX = pivot.x - match.offset[0];
+                                const finalY = pivot.y - match.offset[1];
+                                detectedMinos.push(`${match.type}:x${finalX},y${finalY},r${match.rot}`);
+                            }
+                        }
+                    }
+                }
+            }
+            code = detectedMinos.join('\n');
         }
 
         codeOutput.value = code.trim();
+
         currentGenType = type;
 
         codeGenTabs.querySelectorAll('.button').forEach(tab => {
