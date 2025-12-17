@@ -5408,9 +5408,9 @@ this.isAiThinking = false;
         this.customGhosts = [];
     }
     
-setPiece(type, piece, index = 0) {
+    setPiece(type, piece, index = 0) {
         const isValidPiece = Object.keys(TETROMINOS).includes(piece) ||
-piece === null;
+            piece === null || piece === 'E';
         if (!isValidPiece) return;
 
         if (type === 'hold') {
