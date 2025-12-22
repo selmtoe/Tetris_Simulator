@@ -6859,8 +6859,10 @@ async function analyzePlayerHighPrecision(canvas, originalBitmap, cropData, conf
         const coord = config.nextCoords[i];
         const avgColor = getAverageColorNonBlack(rawCtx, coord.x * currentScale, coord.y * currentScale, radius);
         if (i === 0) {
-            const detected = findClosestColor(avgColor.r, avgColor.g, avgColor.b);
-            holdMino = (detected === 'G') ? null : detected;
+            const isBlack = avgColor.r < 50 && avgColor.g < 50 && avgColor.b < 50;
+            if (!isBlack) {
+                holdMino = findClosestMinoOnly(avgColor.r, avgColor.g, avgColor.b);
+            }
         } else {
             const isBlack = avgColor.r < 50 && avgColor.g < 50 && avgColor.b < 50;
             if (i === 1 && isBlack) break;
