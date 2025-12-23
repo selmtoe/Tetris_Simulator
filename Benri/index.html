@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>テトリス テンプレ確率計算機 v2</title>
+    <title>テトリス テンプレ確率計算機 v3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -13,43 +13,48 @@
 <body class="bg-gray-100 min-h-screen p-4 md:p-8">
 
     <div class="max-w-5xl mx-auto bg-white shadow-lg rounded-xl overflow-hidden">
-        <!-- Header -->
         <div class="bg-slate-800 p-6 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
-                <h1 class="text-2xl font-bold">テトリス セットアップ確率計算機 v2</h1>
-                <p class="text-sm text-gray-300 mt-1">7種一巡・ホールドあり・順位付け対応</p>
+                <h1 class="text-2xl font-bold">テトリス セットアップ確率計算機 v3</h1>
+                <p class="text-sm text-gray-300 mt-1">7種一巡・ホールドあり・順位付け対応・ワイルドカード(*)対応</p>
             </div>
         </div>
 
-        <!-- Main Content -->
         <div class="p-6 space-y-6">
             
-            <!-- Instructions -->
             <div class="bg-blue-50 border-l-4 border-blue-500 p-4 text-sm text-blue-700 rounded-r">
                 <p class="font-bold mb-1">書き方ガイド:</p>
                 <ul class="list-disc list-inside space-y-1">
                     <li>ミノ: <b>I, O, T, S, Z, J, L</b> (大文字小文字区別なし)</li>
                     <li>順序: <b>A &gt; B</b> (AをBより先に置く)</li>
+                    <li>ワイルドカード: <b>* &gt; Z</b> (Z以外の全ミノをZより先に置く)</li>
                     <li>論理式: <b>(Z &gt; O) or (S &gt; O)</b>, <b>and</b> も使用可</li>
                     <li>優先順位: 小さい数字が優先。上位で成立した場合、下位ではカウントされません。</li>
                 </ul>
             </div>
 
-            <!-- Input Section -->
             <div>
-                <div class="flex justify-between items-center mb-4 sticky top-0 bg-white py-2 z-10 border-b">
+                <div class="flex flex-wrap justify-between items-center mb-4 sticky top-0 bg-white py-2 z-10 border-b gap-2">
                     <h2 class="text-lg font-bold text-gray-800">テンプレート定義</h2>
-                    <button onclick="addTemplateRow()" class="flex items-center gap-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-bold transition shadow-sm">
-                        <span>+ 新規追加</span>
-                    </button>
+                    <div class="flex gap-2">
+                        <div class="flex items-center gap-1">
+                            <select id="preset-select" class="border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                                <option value="">-- 既存テンプレを選択 --</option>
+                            </select>
+                            <button onclick="addSelectedPreset()" class="px-3 py-1.5 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm font-bold transition shadow-sm whitespace-nowrap">
+                                追加
+                            </button>
+                        </div>
+                        <button onclick="addTemplateRow()" class="flex items-center gap-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-bold transition shadow-sm whitespace-nowrap">
+                            <span>+ 新規追加</span>
+                        </button>
+                    </div>
                 </div>
 
                 <div id="template-list" class="space-y-3 pb-4">
-                    <!-- Template Rows will be injected here -->
-                </div>
+                    </div>
             </div>
 
-            <!-- Actions -->
             <div class="flex justify-center pt-2 border-t">
                 <button onclick="calculateProbability()" class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-12 rounded-lg shadow-lg transition transform active:scale-95 flex items-center justify-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -59,7 +64,6 @@
                 </button>
             </div>
 
-            <!-- Results Section -->
             <div id="result-section" class="hidden animate-fade-in">
                 <h2 class="text-lg font-bold text-gray-800 mb-4 pb-2 border-b-2 border-gray-100">計算結果</h2>
                 <div class="overflow-x-auto rounded-lg border border-gray-200">
@@ -74,8 +78,7 @@
                             </tr>
                         </thead>
                         <tbody id="result-body" class="bg-white divide-y divide-gray-200">
-                            <!-- Results injected here -->
-                        </tbody>
+                            </tbody>
                         <tfoot class="bg-gray-50 font-semibold text-gray-700">
                             <tr>
                                 <td colspan="2" class="px-4 py-3 text-right">合計 (設置可能)</td>
@@ -92,34 +95,34 @@
                         </tfoot>
                     </table>
                 </div>
+
+                <div class="mt-6">
+                    <h3 class="text-sm font-bold text-gray-700 mb-2">設置不可能だったツモ順 (CSV形式)</h3>
+                    <textarea id="failed-sequences" class="w-full h-32 p-3 border border-gray-300 rounded-lg text-xs font-mono bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none" readonly placeholder="計算後にここに表示されます..."></textarea>
+                </div>
             </div>
 
         </div>
     </div>
 
-    <!-- Template for a row -->
     <template id="row-template">
         <div class="group flex flex-col md:flex-row gap-2 items-start md:items-center p-3 bg-gray-50 rounded-lg border border-gray-200 transition hover:shadow-md hover:border-blue-200 template-row relative">
             
-            <!-- Priority -->
             <div class="w-full md:w-16 flex-shrink-0">
                 <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1 md:hidden">優先度</label>
                 <input type="number" class="p-input w-full border border-gray-300 rounded px-2 py-1.5 text-center focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" value="1" min="1">
             </div>
 
-            <!-- Name -->
             <div class="w-full md:w-1/4 flex-shrink-0">
                 <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1 md:hidden">テンプレ名</label>
                 <input type="text" class="t-name w-full border border-gray-300 rounded px-3 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder="テンプレ名">
             </div>
 
-            <!-- Condition -->
             <div class="w-full flex-grow min-w-0">
                 <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1 md:hidden">条件式</label>
                 <input type="text" class="t-condition w-full border border-gray-300 rounded px-3 py-1.5 font-mono text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder="(Z>O) and (O>I)">
             </div>
 
-            <!-- Actions -->
             <div class="w-full md:w-auto flex flex-row gap-1 pt-2 md:pt-0 justify-end">
                 <button onclick="duplicateRow(this)" class="px-2 py-1.5 text-xs bg-white border border-gray-300 text-gray-600 rounded hover:bg-gray-100 hover:text-gray-800 transition shadow-sm" title="この行を複製">
                     複製
@@ -138,7 +141,6 @@
         // --- Core Logic ---
 
         const MINOS = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
-
         // 1. 全順列生成 (Heap's Algorithm)
         function getPermutations(arr) {
             let result = [];
@@ -190,6 +192,19 @@
                 let s = conditionStr.toUpperCase().replace(/\s+/g, '');
                 if (!s) return () => true; 
 
+                // ワイルドカード展開 (*>Z => I>Z and O>Z ...)
+                // パターン1: *>X (X以外のすべてがXより先)
+                s = s.replace(/\*>([IOTJLSZ])/g, (_, target) => {
+                    const others = MINOS.filter(m => m !== target);
+                    return '(' + others.map(m => `${m}>${target}`).join('&&') + ')';
+                });
+
+                // パターン2: X>* (XがX以外のすべてより先)
+                s = s.replace(/([IOTJLSZ])>\*/g, (_, target) => {
+                    const others = MINOS.filter(m => m !== target);
+                    return '(' + others.map(m => `${target}>${m}`).join('&&') + ')';
+                });
+
                 s = s.replace(/AND/g, '&&').replace(/OR/g, '||');
 
                 const regexChain = /([IOTJLSZ](?:>[IOTJLSZ])+)/g;
@@ -201,7 +216,6 @@
                     }
                     return `(${checks.join(' && ')})`;
                 });
-
                 return new Function('order', `
                     const idx = (m) => {
                         const i = order.indexOf(m);
@@ -209,7 +223,6 @@
                     };
                     try { return ${parsedScript}; } catch(e) { return false; }
                 `);
-
             } catch (e) {
                 console.error("Parse Error", e);
                 return () => false;
@@ -218,6 +231,25 @@
 
         // --- UI Logic & Features ---
 
+        const PRESETS = [
+            { name: "はちみつ砲", cond: "I>L>S and O>J" },
+            { name: "はちみつ砲(HD)", cond: "I>L>S and O>J and Z>T" },
+            { name: "迷走砲", cond: "(L>S or L>I) and *>Z" },
+            { name: "迷走砲(HD)", cond: "L>S and *>Z" },
+            { name: "くろみつ砲", cond: "L>Z and (J>S>O or (S>O and S>J>T))" },
+            { name: "くろみつ砲(HD)", cond: "L>Z and J>S>O" },
+            { name: "山岳積み2号", cond: "J>S and *>L" },
+            { name: "山岳積み2号(HD)", cond: "J>S and *>L and Z>T" }
+        ];
+
+        function addSelectedPreset() {
+            const select = document.getElementById('preset-select');
+            const idx = select.value;
+            if (idx === "") return;
+            const p = PRESETS[idx];
+            addTemplateRow(p.name, p.cond);
+        }
+
         function addTemplateRow(name="", condition="", priority="") {
             const container = document.getElementById('template-list');
             const template = document.getElementById('row-template');
@@ -225,7 +257,6 @@
             
             if(name) clone.querySelector('.t-name').value = name;
             if(condition) clone.querySelector('.t-condition').value = condition;
-            
             if(priority) {
                 clone.querySelector('.p-input').value = priority;
             } else {
@@ -264,7 +295,6 @@
             const priority = row.querySelector('.p-input').value;
             const name = row.querySelector('.t-name').value;
             const condition = row.querySelector('.t-condition').value;
-
             // 名前変更
             const newName = name ? name + " (左右反転)" : "左右反転";
 
@@ -276,15 +306,22 @@
                 's': 'z', 'z': 's',
                 'l': 'j', 'j': 'l'
             };
-
             // 正規表現で SZJLszjl のいずれかにマッチさせ、マップで変換
             const newCondition = condition.replace(/[SZJLszjl]/g, (match) => map[match]);
-
             addTemplateRow(newName, newCondition, priority);
         }
 
         // 初期データ
         window.addEventListener('DOMContentLoaded', () => {
+            // プリセットセレクトボックスの初期化
+            const select = document.getElementById('preset-select');
+            PRESETS.forEach((p, i) => {
+                const opt = document.createElement('option');
+                opt.value = i;
+                opt.text = p.name;
+                select.appendChild(opt);
+            });
+
             // 例: DT砲とそのミラー
             addTemplateRow('DT砲', 'L>S and S>Z', 1);
             // addMirroredRow の動作デモのためにコメントアウトしてますが、手動でも追加できます
@@ -300,7 +337,6 @@
             btnText.innerText = "計算中...";
             btn.classList.add('opacity-75', 'cursor-wait');
             btn.disabled = true;
-
             await new Promise(r => setTimeout(r, 50));
 
             try {
@@ -312,14 +348,13 @@
                     checkFunc: createEvaluator(row.querySelector('.t-condition').value),
                     count: 0
                 }));
-
                 // 優先度順にソート (小さい順)
                 // 優先度が同じ場合は、画面上の並び順(追加順)を維持するためにソートアルゴリズムの安定性に頼る
                 templates.sort((a, b) => a.priority - b.priority);
-
                 const permutations = getPermutations(MINOS);
                 let totalSuccess = 0;
                 let failCount = 0;
+                let failedBags = []; // 失敗したツモ順を記録
 
                 for (const bag of permutations) {
                     const possibleOrders = getAchievableOrders(bag);
@@ -342,7 +377,10 @@
                         }
                     }
 
-                    if (!matched) failCount++;
+                    if (!matched) {
+                        failCount++;
+                        failedBags.push(bag.join(''));
+                    }
                 }
 
                 const tbody = document.getElementById('result-body');
@@ -368,8 +406,9 @@
                 document.getElementById('fail-count').innerText = failCount;
                 document.getElementById('fail-percent').innerText = ((failCount / 5040) * 100).toFixed(2) + '%';
 
-                document.getElementById('result-section').classList.remove('hidden');
+                document.getElementById('failed-sequences').value = failedBags.join('\n');
 
+                document.getElementById('result-section').classList.remove('hidden');
             } catch (e) {
                 alert("エラーが発生しました: " + e.message);
                 console.error(e);
