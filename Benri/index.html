@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>テトリス テンプレ確率計算機 v2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4 md:p-8">
+
+    <div class="max-w-5xl mx-auto bg-white shadow-lg rounded-xl overflow-hidden">
+        <!-- Header -->
+        <div class="bg-slate-800 p-6 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+                <h1 class="text-2xl font-bold">テトリス セットアップ確率計算機 v2</h1>
+                <p class="text-sm text-gray-300 mt-1">7種一巡・ホールドあり・順位付け対応</p>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="p-6 space-y-6">
+            
+            <!-- Instructions -->
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 text-sm text-blue-700 rounded-r">
+                <p class="font-bold mb-1">書き方ガイド:</p>
+                <ul class="list-disc list-inside space-y-1">
+                    <li>ミノ: <b>I, O, T, S, Z, J, L</b> (大文字小文字区別なし)</li>
+                    <li>順序: <b>A &gt; B</b> (AをBより先に置く)</li>
+                    <li>論理式: <b>(Z &gt; O) or (S &gt; O)</b>, <b>and</b> も使用可</li>
+                    <li>優先順位: 小さい数字が優先。上位で成立した場合、下位ではカウントされません。</li>
+                </ul>
+            </div>
+
+            <!-- Input Section -->
+            <div>
+                <div class="flex justify-between items-center mb-4 sticky top-0 bg-white py-2 z-10 border-b">
+                    <h2 class="text-lg font-bold text-gray-800">テンプレート定義</h2>
+                    <button onclick="addTemplateRow()" class="flex items-center gap-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-bold transition shadow-sm">
+                        <span>+ 新規追加</span>
+                    </button>
+                </div>
+
+                <div id="template-list" class="space-y-3 pb-4">
+                    <!-- Template Rows will be injected here -->
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex justify-center pt-2 border-t">
+                <button onclick="calculateProbability()" class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-12 rounded-lg shadow-lg transition transform active:scale-95 flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                    <span id="btn-text">確率を計算する (全5040通り)</span>
+                </button>
+            </div>
+
+            <!-- Results Section -->
+            <div id="result-section" class="hidden animate-fade-in">
+                <h2 class="text-lg font-bold text-gray-800 mb-4 pb-2 border-b-2 border-gray-100">計算結果</h2>
+                <div class="overflow-x-auto rounded-lg border border-gray-200">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-16">優先度</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">テンプレ名</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">条件式</th>
+                                <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">成功数</th>
+                                <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">確率</th>
+                            </tr>
+                        </thead>
+                        <tbody id="result-body" class="bg-white divide-y divide-gray-200">
+                            <!-- Results injected here -->
+                        </tbody>
+                        <tfoot class="bg-gray-50 font-semibold text-gray-700">
+                            <tr>
+                                <td colspan="2" class="px-4 py-3 text-right">合計 (設置可能)</td>
+                                <td class="hidden md:table-cell"></td>
+                                <td id="total-count" class="px-4 py-3 text-right">-</td>
+                                <td id="total-percent" class="px-4 py-3 text-right text-blue-600">-</td>
+                            </tr>
+                            <tr>
+                                <td colspan="2" class="px-4 py-3 text-right text-red-500">設置不可</td>
+                                <td class="hidden md:table-cell"></td>
+                                <td id="fail-count" class="px-4 py-3 text-right">-</td>
+                                <td id="fail-percent" class="px-4 py-3 text-right text-red-600">-</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Template for a row -->
+    <template id="row-template">
+        <div class="group flex flex-col md:flex-row gap-2 items-start md:items-center p-3 bg-gray-50 rounded-lg border border-gray-200 transition hover:shadow-md hover:border-blue-200 template-row relative">
+            
+            <!-- Priority -->
+            <div class="w-full md:w-16 flex-shrink-0">
+                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1 md:hidden">優先度</label>
+                <input type="number" class="p-input w-full border border-gray-300 rounded px-2 py-1.5 text-center focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" value="1" min="1">
+            </div>
+
+            <!-- Name -->
+            <div class="w-full md:w-1/4 flex-shrink-0">
+                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1 md:hidden">テンプレ名</label>
+                <input type="text" class="t-name w-full border border-gray-300 rounded px-3 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder="テンプレ名">
+            </div>
+
+            <!-- Condition -->
+            <div class="w-full flex-grow min-w-0">
+                <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1 md:hidden">条件式</label>
+                <input type="text" class="t-condition w-full border border-gray-300 rounded px-3 py-1.5 font-mono text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder="(Z>O) and (O>I)">
+            </div>
+
+            <!-- Actions -->
+            <div class="w-full md:w-auto flex flex-row gap-1 pt-2 md:pt-0 justify-end">
+                <button onclick="duplicateRow(this)" class="px-2 py-1.5 text-xs bg-white border border-gray-300 text-gray-600 rounded hover:bg-gray-100 hover:text-gray-800 transition shadow-sm" title="この行を複製">
+                    複製
+                </button>
+                <button onclick="addMirroredRow(this)" class="px-2 py-1.5 text-xs bg-indigo-50 border border-indigo-200 text-indigo-600 rounded hover:bg-indigo-100 hover:text-indigo-800 transition shadow-sm whitespace-nowrap" title="左右反転して追加 (S⇔Z, L⇔J)">
+                    左右反転を追加
+                </button>
+                <button onclick="removeRow(this)" class="ml-1 px-2 py-1.5 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition" title="削除">
+                    ✕
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <script>
+        // --- Core Logic ---
+
+        const MINOS = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
+
+        // 1. 全順列生成 (Heap's Algorithm)
+        function getPermutations(arr) {
+            let result = [];
+            const swap = (a, i, j) => { [a[i], a[j]] = [a[j], a[i]]; };
+            const generate = (n, heapArr) => {
+                if (n === 1) {
+                    result.push([...heapArr]);
+                    return;
+                }
+                generate(n - 1, heapArr);
+                for (let i = 0; i < n - 1; i++) {
+                    swap(heapArr, (n % 2 === 0) ? i : 0, n - 1);
+                    generate(n - 1, heapArr);
+                }
+            };
+            generate(arr.length, [...arr]);
+            return result;
+        }
+
+        // 2. ホールドを考慮した「可能な設置順序」の生成 (DFS)
+        function getAchievableOrders(queue) {
+            const results = new Set();
+            function solve(queueIdx, hold, placed) {
+                if (placed.length === 7) {
+                    results.add(placed);
+                    return;
+                }
+                if (queueIdx >= queue.length) {
+                    if (hold) solve(queueIdx, null, placed + hold);
+                    return;
+                }
+                const current = queue[queueIdx];
+                // Action A: そのまま置く
+                solve(queueIdx + 1, hold, placed + current);
+                // Action B: ホールド操作
+                if (hold === null) {
+                    solve(queueIdx + 1, current, placed);
+                } else {
+                    solve(queueIdx + 1, current, placed + hold);
+                }
+            }
+            solve(0, null, "");
+            return results;
+        }
+
+        // 3. 条件式のパースと評価
+        function createEvaluator(conditionStr) {
+            try {
+                let s = conditionStr.toUpperCase().replace(/\s+/g, '');
+                if (!s) return () => true; 
+
+                s = s.replace(/AND/g, '&&').replace(/OR/g, '||');
+
+                const regexChain = /([IOTJLSZ](?:>[IOTJLSZ])+)/g;
+                const parsedScript = s.replace(regexChain, (match) => {
+                    const parts = match.split('>');
+                    let checks = [];
+                    for(let i=0; i<parts.length-1; i++) {
+                        checks.push(`idx('${parts[i]}') < idx('${parts[i+1]}')`);
+                    }
+                    return `(${checks.join(' && ')})`;
+                });
+
+                return new Function('order', `
+                    const idx = (m) => {
+                        const i = order.indexOf(m);
+                        return i === -1 ? 999 : i;
+                    };
+                    try { return ${parsedScript}; } catch(e) { return false; }
+                `);
+
+            } catch (e) {
+                console.error("Parse Error", e);
+                return () => false;
+            }
+        }
+
+        // --- UI Logic & Features ---
+
+        function addTemplateRow(name="", condition="", priority="") {
+            const container = document.getElementById('template-list');
+            const template = document.getElementById('row-template');
+            const clone = template.content.cloneNode(true);
+            
+            if(name) clone.querySelector('.t-name').value = name;
+            if(condition) clone.querySelector('.t-condition').value = condition;
+            
+            if(priority) {
+                clone.querySelector('.p-input').value = priority;
+            } else {
+                // デフォルト: 最後の行の優先度 + 1 or 1
+                const rows = container.querySelectorAll('.template-row');
+                const lastRow = rows[rows.length - 1];
+                let nextPrio = 1;
+                if(lastRow) {
+                    const val = parseInt(lastRow.querySelector('.p-input').value);
+                    if(!isNaN(val)) nextPrio = val + 1;
+                }
+                clone.querySelector('.p-input').value = nextPrio;
+            }
+
+            container.appendChild(clone);
+        }
+
+        function removeRow(btn) {
+            btn.closest('.template-row').remove();
+        }
+
+        // 機能: 複製
+        function duplicateRow(btn) {
+            const row = btn.closest('.template-row');
+            const priority = row.querySelector('.p-input').value;
+            const name = row.querySelector('.t-name').value;
+            const condition = row.querySelector('.t-condition').value;
+
+            addTemplateRow(name, condition, priority);
+        }
+
+        // 機能: 左右反転を追加
+        // S⇔Z, L⇔J を入れ替える
+        function addMirroredRow(btn) {
+            const row = btn.closest('.template-row');
+            const priority = row.querySelector('.p-input').value;
+            const name = row.querySelector('.t-name').value;
+            const condition = row.querySelector('.t-condition').value;
+
+            // 名前変更
+            const newName = name ? name + " (左右反転)" : "左右反転";
+
+            // 条件式の文字置換 (S<->Z, L<->J)
+            // 大文字小文字両対応
+            const map = {
+                'S': 'Z', 'Z': 'S',
+                'L': 'J', 'J': 'L',
+                's': 'z', 'z': 's',
+                'l': 'j', 'j': 'l'
+            };
+
+            // 正規表現で SZJLszjl のいずれかにマッチさせ、マップで変換
+            const newCondition = condition.replace(/[SZJLszjl]/g, (match) => map[match]);
+
+            addTemplateRow(newName, newCondition, priority);
+        }
+
+        // 初期データ
+        window.addEventListener('DOMContentLoaded', () => {
+            // 例: DT砲とそのミラー
+            addTemplateRow('DT砲', 'L>S and S>Z', 1);
+            // addMirroredRow の動作デモのためにコメントアウトしてますが、手動でも追加できます
+            // 例: 開幕TSD
+            addTemplateRow('開幕TSD', '(I>J) or (Z>L>O)', 2);
+        });
+
+        async function calculateProbability() {
+            const btn = document.querySelector('button[onclick="calculateProbability()"]');
+            const btnText = document.getElementById('btn-text');
+            const originalText = btnText.innerText;
+            
+            btnText.innerText = "計算中...";
+            btn.classList.add('opacity-75', 'cursor-wait');
+            btn.disabled = true;
+
+            await new Promise(r => setTimeout(r, 50));
+
+            try {
+                const rows = Array.from(document.querySelectorAll('.template-row'));
+                let templates = rows.map(row => ({
+                    priority: parseInt(row.querySelector('.p-input').value) || 999,
+                    name: row.querySelector('.t-name').value || "名無し",
+                    conditionStr: row.querySelector('.t-condition').value,
+                    checkFunc: createEvaluator(row.querySelector('.t-condition').value),
+                    count: 0
+                }));
+
+                // 優先度順にソート (小さい順)
+                // 優先度が同じ場合は、画面上の並び順(追加順)を維持するためにソートアルゴリズムの安定性に頼る
+                templates.sort((a, b) => a.priority - b.priority);
+
+                const permutations = getPermutations(MINOS);
+                let totalSuccess = 0;
+                let failCount = 0;
+
+                for (const bag of permutations) {
+                    const possibleOrders = getAchievableOrders(bag);
+                    let matched = false;
+
+                    for (const tmpl of templates) {
+                        let canBuild = false;
+                        for (const order of possibleOrders) {
+                            if (tmpl.checkFunc(order)) {
+                                canBuild = true;
+                                break;
+                            }
+                        }
+
+                        if (canBuild) {
+                            tmpl.count++;
+                            totalSuccess++;
+                            matched = true;
+                            break; 
+                        }
+                    }
+
+                    if (!matched) failCount++;
+                }
+
+                const tbody = document.getElementById('result-body');
+                tbody.innerHTML = '';
+                
+                templates.forEach(tmpl => {
+                    const percent = ((tmpl.count / 5040) * 100).toFixed(2);
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-gray-50 transition";
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center border-r">${tmpl.priority}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">${escapeHtml(tmpl.name)}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500 font-mono hidden md:table-cell">${escapeHtml(tmpl.conditionStr)}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-500">${tmpl.count}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm text-right font-bold text-gray-800">${percent}%</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                document.getElementById('total-count').innerText = totalSuccess;
+                document.getElementById('total-percent').innerText = ((totalSuccess / 5040) * 100).toFixed(2) + '%';
+                
+                document.getElementById('fail-count').innerText = failCount;
+                document.getElementById('fail-percent').innerText = ((failCount / 5040) * 100).toFixed(2) + '%';
+
+                document.getElementById('result-section').classList.remove('hidden');
+
+            } catch (e) {
+                alert("エラーが発生しました: " + e.message);
+                console.error(e);
+            } finally {
+                btn.disabled = false;
+                btn.classList.remove('opacity-75', 'cursor-wait');
+                btnText.innerText = originalText;
+            }
+        }
+
+        function escapeHtml(text) {
+            if(!text) return "";
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html>
