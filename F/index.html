@@ -301,6 +301,44 @@ flex-wrap: wrap;
         font-family: monospace;
         text-transform: uppercase;
     }
+    #debug-console {
+        display: none;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 40vh;
+        background-color: rgba(0, 0, 0, 0.95);
+        color: #0f0;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 11px;
+        z-index: 100000;
+        overflow-y: auto;
+        border-top: 2px solid #f00;
+        padding: 0;
+        box-sizing: border-box;
+        text-align: left;
+        white-space: pre-wrap;
+        word-break: break-all;
+        box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
+    }
+    #debug-console-header {
+        position: sticky;
+        top: 0;
+        background: #220000;
+        padding: 5px 10px;
+        border-bottom: 1px solid #555;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #fff;
+    }
+    #debug-console-content {
+        padding: 10px;
+    }
+    .log-entry { margin-bottom: 4px; border-bottom: 1px solid #333; padding: 2px 0; }
+    .log-entry.error { color: #ff6b6b; background: rgba(80, 0, 0, 0.3); }
+    .log-entry.warn { color: #f0a000; }
 </style>
 </head>
 <body>
@@ -436,6 +474,62 @@ background-color: #30a070;">View</button>
 </div>
 
 <script>
+(function() {
+    const consoleDiv = document.createElement('div');
+    consoleDiv.id = 'debug-console';
+    consoleDiv.innerHTML = `
+        <div id="debug-console-header">
+            <strong>DEBUG / ERROR LOG</strong>
+            <div>
+                <button onclick="document.getElementById('debug-console-content').innerHTML=''" style="padding:2px 5px;margin-right:5px;cursor:pointer;">Clear</button>
+                <button onclick="document.getElementById('debug-console').style.display='none'" style="padding:2px 5px;cursor:pointer;">Close</button>
+            </div>
+        </div>
+        <div id="debug-console-content"></div>
+    `;
+    document.body.appendChild(consoleDiv);
+
+    const contentDiv = document.getElementById('debug-console-content');
+    
+    function showConsole() {
+        consoleDiv.style.display = 'block';
+    }
+
+    function logToScreen(msg, type = 'info') {
+        const entry = document.createElement('div');
+        entry.className = `log-entry ${type}`;
+        const time = new Date().toLocaleTimeString();
+        entry.textContent = `[${time}] ${msg}`;
+        contentDiv.appendChild(entry);
+        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        if (type === 'error') showConsole();
+    }
+
+    const originalError = console.error;
+    console.error = function(...args) {
+        originalError.apply(console, args);
+        try {
+            const msg = args.map(a => {
+                if (a instanceof Error) return `${a.message}\n${a.stack}`;
+                if (typeof a === 'object') return JSON.stringify(a, null, 2);
+                return String(a);
+            }).join(' ');
+            logToScreen(msg, 'error');
+        } catch(e) { logToScreen('Error logging error: ' + e, 'error'); }
+    };
+    
+    window.onerror = function(message, source, lineno, colno, error) {
+        const stack = error ? error.stack : 'No stack trace';
+        const msg = `Global Error: ${message}\nLocation: ${source}:${lineno}:${colno}\nStack: ${stack}`;
+        logToScreen(msg, 'error');
+        return false;
+    };
+
+    window.addEventListener('unhandledrejection', function(event) {
+        logToScreen(`Unhandled Promise Rejection: ${event.reason}`, 'error');
+    });
+})();
+
 const EDITOR_BLOCK_SIZE = 50;
 const BOARD_WIDTH = 10;
 const BOARD_VISIBLE_HEIGHT = 20;
