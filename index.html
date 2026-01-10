@@ -2786,7 +2786,15 @@ class AIAgent {
                         const templateY = y + offset;
                         const row = currentBoard.rows[y];
 
-                        if (templateY >= BOARD_HEIGHT) continue;
+                        if (templateY >= BOARD_HEIGHT) {
+                            let filledCount = 0;
+                            for (let x = 0; x < WIDTH; x++) {
+                                if ((row & (1 << x)) !== 0) filledCount++;
+                            }
+                            if (filledCount < 9) valid = false;
+                            if (!valid) break;
+                            continue;
+                        }
 
                         for (let x = 0; x < WIDTH; x++) {
                             const isFilled = (row & (1 << x)) !== 0;
