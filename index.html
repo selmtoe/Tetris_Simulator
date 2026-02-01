@@ -1749,7 +1749,54 @@ for (let i = 0; i < ZOBRIST_TABLE.length; i++) {
 }
 
 const TEMPLATES = [
-    {
+        {
+        name: 'intai_1st',
+        type: 'intai',
+        board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,"G",null,null,null,null],["G",null,null,null,null,"G","G","G",null,null],["G","G",null,null,"G","G","G","G","G",null],["G","G",null,null,null,"G","G","G","G","G"],["G","G","G",null,"G","G","G","G","G","G"]],
+        moves: [
+            {t:'Z', x:7, y:39, r:0},
+            {t:'I', x:0, y:37, r:3},
+            {t:'T', x:5, y:39, r:0},
+            {t:'O', x:6, y:37, r:0},
+            {t:'S', x:8, y:38, r:1},
+            {t:'L', x:1, y:38, r:1},
+            {t:'J', x:5, y:36, r:3}
+        ],
+        trigger: (board, queue, hold) => {
+            // 1. 直近の7ミノを取得 (Holdがある場合はHold+Queue先頭6個)
+            const minos = [];
+            if (hold) minos.push(hold);
+            for (const p of queue) {
+                if (minos.length >= 7) break;
+                minos.push(p);
+            }
+
+            // 【条件1】7種1巡チェック (7個のミノに重複がないか)
+            // ミノの種類をカウント
+            const counts = {};
+            for (const m of minos) {
+                counts[m] = (counts[m] || 0) + 1;
+            }
+            // 重複があれば false (どれか一つでも2個以上あればNG)
+            // 7種1巡であれば、長さ7で重複なし＝すべてのミノが1個ずつ存在するはずです
+            const uniqueMinos = Object.keys(counts);
+            if (minos.length < 7 || uniqueMinos.length < 7) return false;
+
+
+            // 【条件2】(TがJよりも早い) または (ZがOよりも早い)
+            const tIndex = minos.indexOf('T');
+            const jIndex = minos.indexOf('J');
+            const zIndex = minos.indexOf('Z');
+            const oIndex = minos.indexOf('O');
+            const sIndex = minos.indexOf('S');
+            if (tIndex === -1 || jIndex === -1 || zIndex === -1 || oIndex === -1) return false;
+
+            const conditionA = tIndex < jIndex;
+            const conditionB = zIndex < oIndex && zIndex < sIndex;
+            return conditionA && conditionB;
+        }
+    },
+        {
         name: 'meisou_1st',
         type: 'meisou',
         board: [[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null],["G",null,null,null,null,null,null,null,null,null],["G","G","G",null,"G",null,null,"G",null,null],["G","G","G","G","G","G",null,"G","G","G"],["G","G","G","G","G",null,"G","G","G","G"]],
@@ -2256,7 +2303,7 @@ let evaluationCache = new Map();
 
 // --- Classes ---
 class StandardWeights {
-    constructor() {
+    constructor(overrides = null) {
         this.back_to_back = 52;
         this.bumpiness = -24;
         this.bumpiness_sq = -7;
@@ -2290,9 +2337,11 @@ class StandardWeights {
         this.wasted_t = -152;
         this.soft_drop = -100;
         this.COMBO_GARBAGE = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 5];
+        if (overrides) {
+            Object.assign(this, overrides);
+        }
     }
 }
-
 
 class TetrisBoard {
     constructor(baseBoard = null) {
@@ -2754,25 +2803,30 @@ class AIAgent {
         this.rootID = -1;
         this.totalNodesInSearch = 0;
         this.bestNodeIDAtDepth1 = -1;
-        
         this.activeTemplate = null;
         this.activeTemplateOffset = 0;
-        // 現在有効なテンプレート
+        this.detectedShift = 0;
     }
 
     // makeID: Simple integer increment
+
     makeID() { return this.nodeIdCounter++; }
     
     clearCaches() {
         lfgCache.clear();
         evaluationCache.clear();
     }
-
-            // ★引数 enabledTemplates を追加★
-            initSearch(currentBoard, pieceQueue, currentHoldPiece, isB2B, combo, enabledTemplates) {
+           
+    initSearch(currentBoard, pieceQueue, currentHoldPiece, isB2B, combo, enabledTemplates, weightOverrides) {
+        this.detectedShift = 0;
         const wasTemplateActive = this.activeTemplate !== null;
+        if (weightOverrides) {
+            this.weights = new StandardWeights(weightOverrides);
+
+        }
         if (this.activeTemplate) {
             let foundValidOffset = -1;
+
             let isCompleted = false;
 
             for (let offset = 0; offset <= 12; offset++) {
@@ -2879,9 +2933,9 @@ class AIAgent {
             }
         }
         
-        // ----------------------
+                let reuseTree = false;
+        this.searchHintMove = null; // 前回の探索結果に基づくヒントをリセット
 
-        let reuseTree = false;
         // 探索木の再利用チェック
         // テンプレートが「現在アクティブ」または「直前までアクティブだった」場合はリセットする
         if (!this.activeTemplate && !wasTemplateActive && this.rootID !== -1 && this.nodeMap[this.rootID]) {
@@ -2894,6 +2948,22 @@ class AIAgent {
                 reuseTree = true;
                 rootNode.b2b = isB2B;
                 rootNode.comboCount = combo;
+            } else {
+                // ハッシュが合わない場合、おじゃまによる「せり上がり」かどうかを判定
+                const shift = this.detectGarbageShift(currentBoard, rootNode.board);
+                if (shift > 0) {
+                    if (this.bestNodeIDAtDepth1 !== -1 && this.nodeMap[this.bestNodeIDAtDepth1]) {
+                        const oldPlace = this.nodeMap[this.bestNodeIDAtDepth1].place;
+                        if (oldPlace) {
+                            // 座標を上にずらす (y - shift)
+                            this.searchHintMove = { ...oldPlace, y: oldPlace.y - shift };
+                            this.detectedShift = shift;
+                        }
+                    }
+                } else {
+
+                    self.postMessage({ type: 'debug', message: 'Board mismatch (No simple shift).' });
+                }
             }
         }
 
@@ -2901,6 +2971,7 @@ class AIAgent {
             // Reset Vector
             this.nodeIdCounter = 0;
             this.rootID = this.makeID();
+
             
             const rootNode = new Node(this.rootID, currentBoard, null, -1, 0, combo, isB2B, currentHoldPiece, false);
             this.nodeMap[this.rootID] = rootNode;
@@ -2926,11 +2997,48 @@ class AIAgent {
             this.expand(this.rootID, pieceQueue[0], pieceQueue[1]);
         }
         
-        // 配列なのでlengthではなくCounterを使う
+                // 配列なのでlengthではなくCounterを使う
         this.totalNodesInSearch = this.nodeIdCounter;
     }
 
+    // 盤面が oldBoard から n段せり上がった状態か判定する
+    detectGarbageShift(currentB, oldB) {
+        // n=1 (1段せり上がり) から n=12 (12段) までチェック
+        for (let n = 1; n <= 12; n++) {
+            let match = true;
+            // 1. 共通部分の完全一致チェック
+            // currentの y 行目は、old の y + n 行目と一致するはず
+            for (let y = 0; y < BOARD_HEIGHT - n; y++) {
+                if (currentB.rows[y] !== oldB.rows[y + n]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (!match) continue;
+
+            // 2. せり上がった下部 (currentのBottom n行) がおじゃま (9マス以上埋まっている) かチェック
+            for (let y = BOARD_HEIGHT - n; y < BOARD_HEIGHT; y++) {
+                let count = 0;
+                let val = currentB.rows[y];
+                // ビットカウント
+                while (val > 0) {
+                    val &= (val - 1);
+                    count++;
+                }
+                // 通常のおじゃまラインは穴1つなので9ブロックあるはず
+                if (count < 9) {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match) return n;
+        }
+        return 0;
+    }
+
     searchStep(iterations, pieceQueue) {
+
         if (this.rootID === -1 || !this.nodeMap[this.rootID]) return;
         let count = 0;
         while (count < iterations && this.totalNodesInSearch < SEARCH_ITERATION_LIMIT) {
@@ -3067,7 +3175,7 @@ class AIAgent {
                 if (placementResult.wastedT) acc_eval += weights.wasted_t;
         if (node.place && node.place.isSoftDrop) acc_eval += weights.soft_drop;
 
-        // --- Template Bonus ---
+                // --- Template Bonus ---
         if (this.activeTemplate && node.place) {
             const p = node.place;
             // リスト内のいずれかの手と一致するかチェック (上から優先)
@@ -3083,9 +3191,22 @@ class AIAgent {
                 }
             }
         }
+        
+        // --- Shift Hint Bonus ---
+        // ガベージ等で盤面がずれた際、補正された前回最善手を優先する
+        if (this.searchHintMove && node.place) {
+            const p = node.place;
+            const h = this.searchHintMove;
+            if (p.pieceType === h.pieceType && p.rotation === h.rotation && p.x === h.x && p.y === h.y) {
+                // 評価値は加算せず、優先探索フラグのみ立てる
+                node.isHint = true;
+            }
+        }
         // ----------------------
 
         // Cache Check (Zobrist Hash = Integer)
+
+
         const boardHash = board.getHash();
         if (evaluationCache.has(boardHash)) {
             const transient_eval = evaluationCache.get(boardHash);
@@ -3191,15 +3312,24 @@ class AIAgent {
 
             let totalWeight = 0;
             const weights = children.map((child, i) => {
+                // ヒントノードなら、評価値に関係なく選択確率を極端に上げる
+                if (child.isHint) {
+                    const weight = 1e12;
+                    totalWeight += weight;
+                    return weight;
+                }
+
                 const E_I = evals[i];
                 const rank_I = ranks[i];
                 const eval_part = Math.pow(E_I - Emin + 1.0, 2) + 10.0;
                 const rank_part = Math.pow(rank_I - 1.0, 2) + 1.0;
+      
                 const weight = eval_part / rank_part;
                 totalWeight += weight;
                 return weight;
             });
             let rand = Math.random() * totalWeight;
+
             let selectedChild = null;
             for (let i = 0; i < weights.length; i++) {
                 rand -= weights[i];
@@ -3356,7 +3486,8 @@ function thinkingLoop() {
         self.postMessage({ 
             type: 'nodeCount', 
             count: aiAgent.totalNodesInSearch,
-            template: aiAgent.activeTemplate ? aiAgent.activeTemplate.name : null
+            template: aiAgent.activeTemplate ? aiAgent.activeTemplate.name : null,
+            shift: aiAgent.detectedShift
         });
         lastUpdateTime = now;
     }
@@ -3366,8 +3497,8 @@ function thinkingLoop() {
 
 self.onmessage = (e) => {
     // ★activeTemplates を受け取る★
-    const { type, boardString, nextString, holdPiece, canHold, isB2B, ren, activeTemplates } = e.data;
-    if (type === 'start') {
+    const { type, boardString, nextString, holdPiece, canHold, isB2B, ren, activeTemplates, weights } = e.data;
+if (type === 'start') {
         try {
             const layout = JSON.parse(boardString);
             const board = TetrisBoard.fromSimulatorBoard(layout);
@@ -3381,10 +3512,11 @@ self.onmessage = (e) => {
             }
 
             // ★activeTemplates を渡す★
-            aiAgent.initSearch(board, currentQueue, hold, isB2B, ren, activeTemplates);
-            if (canHold !== undefined && aiAgent.rootID !== -1 && aiAgent.nodeMap[aiAgent.rootID]) {
+            aiAgent.initSearch(board, currentQueue, hold, isB2B, ren, activeTemplates, weights);
+if (canHold !== undefined && aiAgent.rootID !== -1 && aiAgent.nodeMap[aiAgent.rootID]) {
                 aiAgent.nodeMap[aiAgent.rootID].holdUsedThisTurn = !canHold;
             }
+
 
             if (!isThinking) {
                 isThinking = true;
@@ -3795,9 +3927,47 @@ const PLAYFIELD_X_OFFSET = HOLD_AREA_WIDTH + PADDING;
 const AXIS_THRESHOLD = 0.8;
 
 const AI_TEMPLATE_CONFIG = [
+    { id: 'intai', label: 'いんたい砲' },
     { id: 'meisou', label: '迷走砲' },
     { id: 'sangaku_2', label: '山岳積み2号' }
 ];
+
+const DEFAULT_AI_WEIGHTS = {
+    back_to_back: 52,
+    bumpiness: -24,
+    bumpiness_sq: -7,
+    row_transitions: -5,
+    height: -39,
+    top_half: -150,
+    top_quarter: -511,
+    jeopardy: -11,
+    cavity_cells: -173,
+    cavity_cells_sq: -3,
+    overhang_cells: -34,
+    overhang_cells_sq: -1,
+    covered_cells: -17,
+    covered_cells_sq: -1,
+    tslot: [8, 148, 192, 407],
+    well_depth: 57,
+    max_well_depth: 17,
+    well_column: [20, 23, 20, 50, 59, 21, 59, 10, -10, 24],
+    b2b_clear: 104,
+    clear1: -320,
+    clear2: -200,
+    clear3: -178,
+    clear4: 270,
+    tspin1: 1,
+    tspin2: 290,
+    tspin3: 482,
+    mini_tspin1: -158,
+    mini_tspin2: -93,
+    perfect_clear: 999,
+    combo_garbage: 150,
+    wasted_t: -152,
+    soft_drop: -100,
+    COMBO_GARBAGE: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 5]
+};
+
 // デフォルトのレイアウト生成関数
 function generateDefaultLayout() {
     const blockSize = 28;
@@ -3841,13 +4011,16 @@ let gameSettings = {
     aiMoveDelay: 30,
     aiSdfDelay: 30,
     drawMoveDelay: 30,
-        aiTemplates: { meisou: true, sangaku_2: true },
-   
+    aiTemplates: { meisou: true, sangaku_2: 
+true },
+    aiWeights: JSON.parse(JSON.stringify(DEFAULT_AI_WEIGHTS)),
     debugEnabled: false,
     pieceForPieceMode: false,
+    banPC: false,
    
  layout: generateDefaultLayout() 
 };
+
 const DRAW_SHAPE_MAP = {
     "1,0;2,0;3,0": { type: "I", rot: 0, offset: [0, 0] },
     "0,1;0,2;0,3": { type: "I", rot: 1, offset: [2, -1] },
@@ -4045,11 +4218,14 @@ if (debugDisplay && gameSettings.debugEnabled) {
 const status = debugDisplay.dataset.status || 'Waiting...';
                         
                         debugDisplay.style.display = 'block';
-                        const color = status.includes('RESET') ? '#ff4444' : (status.includes('REUSED') ? '#44ff44' : 'white');
+                        const color = status.includes('RESET') ?
+                            '#ff4444' : (status.includes('REUSED') ? '#44ff44' : 'white');
                         const templateInfo = e.data.template ? `<br>Template: <span style="color: #00ffff">${e.data.template}</span>` : '';
-                        debugDisplay.innerHTML = `Status: <span style="color: ${color}">${status}</span><br>Nodes: ${e.data.count}${templateInfo}`;
+                        const shiftInfo = e.data.shift ? `<br>Shift: <span style="color: #ff8800">+${e.data.shift}</span>` : '';
+                        debugDisplay.innerHTML = `Status: <span style="color: ${color}">${status}</span><br>Nodes: ${e.data.count}${templateInfo}${shiftInfo}`;
                     }
                 } else if (gameState === 'PLAYING' && this.isAiThinking) {
+
                     this.executeAiMove(e.data);
                 }
             };
@@ -4972,21 +5148,30 @@ requestAiMove() {
                 nextString = this.nextQueue.join('');
             } else {
                 const nextPiecesForWorker = [this.player.pieceType, ...this.nextQueue];
-                nextString = nextPiecesForWorker.join('');
+nextString = nextPiecesForWorker.join('');
             }
 
-                        aiWorkerStartPayload = {
+            const currentWeights = { ...gameSettings.aiWeights };
+            if (gameSettings.banPC) {
+                currentWeights.perfect_clear = -999;
+            }
+
+            aiWorkerStartPayload = {
                 type: 'start',
                 boardString: boardString,
                 nextString: nextString,
                 holdPiece: holdPieceToSend,
-                canHold: this.canHold,
+   
+            
+ canHold: this.canHold,
                 isB2B: this.isB2B,
                 ren: this.ren + 1,
-                activeTemplates: gameSettings.aiTemplates
+                activeTemplates: gameSettings.aiTemplates,
+                weights: currentWeights
             };
-        }
+}
         if (this.aiWorker) {
+
             this.aiWorker.postMessage(aiWorkerStartPayload);
             this.aiWorker.postMessage({ type: 'stop' });
         }
@@ -6219,12 +6404,112 @@ function populateAiSettingsTab() {
         gameSettings.pieceForPieceMode = e.target.checked;
     };
     
-    const pfpSpan = document.createElement('span');
-    pfpSpan.textContent = 'Piece For Piece';
-    
-    pfpLabel.append(pfpCheckbox, pfpSpan);
-    pfpItem.appendChild(pfpLabel);
-    list.appendChild(pfpItem);
+const pfpSpan = document.createElement('span');
+pfpSpan.textContent = 'Piece For Piece';
+pfpLabel.append(pfpCheckbox, pfpSpan);
+pfpItem.appendChild(pfpLabel);
+list.appendChild(pfpItem);
+
+const banPcItem = document.createElement('div');
+banPcItem.className = 'setting-item';
+
+const banPcLabel = document.createElement('label');
+const banPcCheckbox = document.createElement('input');
+banPcCheckbox.type = 'checkbox';
+banPcCheckbox.checked = !!gameSettings.banPC;
+banPcCheckbox.onchange = e => {
+    gameSettings.banPC = e.target.checked;
+};
+const banPcSpan = document.createElement('span');
+banPcSpan.textContent = 'PC禁止';
+banPcLabel.append(banPcCheckbox, banPcSpan);
+banPcItem.appendChild(banPcLabel);
+
+list.appendChild(banPcItem);
+if (gameSettings.debugEnabled) {
+
+        const weightHeader = document.createElement('div');
+        weightHeader.className = 'setting-item';
+        weightHeader.style.cssText = 'margin-top:20px; border-top:1px solid var(--primary-color); padding-top:15px; font-weight:bold; flex-direction: column; gap: 10px;';
+        weightHeader.innerHTML = '<span>AI重み設定 (Debug)</span>';
+        
+        const controlsDiv = document.createElement('div');
+        controlsDiv.style.display = 'flex';
+        controlsDiv.style.gap = '10px';
+        
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'button';
+        copyBtn.textContent = '設定をコピー';
+        copyBtn.onclick = () => {
+            navigator.clipboard.writeText(JSON.stringify(gameSettings.aiWeights, null, 2));
+            alert('AI設定をクリップボードにコピーしました');
+        };
+        
+        const pasteBtn = document.createElement('button');
+        pasteBtn.className = 'button';
+        pasteBtn.textContent = '設定をペースト';
+        pasteBtn.onclick = async () => {
+            try {
+                const text = await navigator.clipboard.readText();
+                const json = JSON.parse(text);
+                Object.assign(gameSettings.aiWeights, json);
+                populateAiSettingsTab();
+                alert('AI設定を読み込みました');
+            } catch(e) {
+                alert('読み込み失敗: ' + e);
+            }
+        };
+
+        const resetBtn = document.createElement('button');
+        resetBtn.className = 'button';
+        resetBtn.textContent = '初期値に戻す';
+        resetBtn.onclick = () => {
+            if(confirm('AI設定を初期値に戻しますか？')) {
+                gameSettings.aiWeights = JSON.parse(JSON.stringify(DEFAULT_AI_WEIGHTS));
+                populateAiSettingsTab();
+            }
+        };
+
+        controlsDiv.append(copyBtn, pasteBtn, resetBtn);
+        weightHeader.appendChild(controlsDiv);
+        list.appendChild(weightHeader);
+
+        Object.keys(gameSettings.aiWeights).forEach(key => {
+            const val = gameSettings.aiWeights[key];
+            const isArray = Array.isArray(val);
+            
+            const item = document.createElement('div');
+            item.className = 'setting-item';
+            
+            const label = document.createElement('span');
+            label.textContent = key;
+            
+            const input = document.createElement('input');
+            if (isArray) {
+                input.type = 'text';
+                input.value = JSON.stringify(val);
+                input.style.width = '200px';
+                input.onchange = (e) => {
+                    try {
+                        gameSettings.aiWeights[key] = JSON.parse(e.target.value);
+                    } catch(err) {
+                        alert('配列の形式が不正です');
+                        e.target.value = JSON.stringify(gameSettings.aiWeights[key]);
+                    }
+                };
+            } else {
+                input.type = 'number';
+                input.value = val;
+                input.onchange = (e) => {
+                    gameSettings.aiWeights[key] = parseFloat(e.target.value);
+                };
+            }
+            
+            item.append(label, input);
+            list.appendChild(item);
+        });
+    }
+
     const tempHeader = document.createElement('div');
     tempHeader.className = 'setting-item';
     tempHeader.style.cssText = 'margin-top:20px; border-top:1px solid var(--primary-color); padding-top:15px; font-weight:bold;';
@@ -6621,22 +6906,22 @@ const modelReadyPromise = new Promise(resolve => modelReadyResolver = resolve);
 async function initOnnxModel() {
     try {
         onnxSession = await ort.InferenceSession.create('./Load%20PPT/tetris.onnx', { executionProviders: ['wasm'] });
-        console.log("ONNX Model loaded.");
+console.log("ONNX Model loaded.");
         if (modelReadyResolver) modelReadyResolver(true);
     } catch (e) {
         console.error("Failed to load ONNX model:", e);
-        if (modelReadyResolver) modelReadyResolver(false);
+if (modelReadyResolver) modelReadyResolver(false);
     }
 }
-initOnnxModel();
 
 async function processPptImage(file) {
+
     if (!onnxSession) {
-        await modelReadyPromise;
-        if (!onnxSession) {
+        await initOnnxModel();
+if (!onnxSession) {
             alert("AIモデルの読み込みに失敗しました。");
             return;
-        }
+}
     }
     
     document.getElementById('mode-2p').click();
@@ -7226,13 +7511,26 @@ function pollGamepads() {
 
 let lastAnalysisSample = 0;
 function gameLoop(currentTime) {
+    if (gameSettings.debugEnabled) {
+        const memMon = document.getElementById('memory-monitor');
+        if (memMon) {
+            if (performance && performance.memory) {
+                const used = Math.round(performance.memory.usedJSHeapSize / 1024 / 1024);
+                const total = Math.round(performance.memory.totalJSHeapSize / 1024 / 1024);
+                memMon.textContent = `Mem: ${used}MB / ${total}MB`;
+            } else {
+                memMon.textContent = `Mem: N/A`;
+            }
+        }
+    }
+
     if (!ctx) return;
     pollGamepads();
     const dt = currentTime - lastTime;
-    lastTime = currentTime;
+lastTime = currentTime;
     ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
     if (gameState === 'PLAYING') {
-        // ここにあった画像描画処理を削除しました
+
         
         players.forEach(p => p.update(dt || 0));
         players.forEach(p => p.draw());
@@ -7306,14 +7604,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 gameSettings.debugEnabled = !gameSettings.debugEnabled;
                 alert(`デバッグモード: ${gameSettings.debugEnabled ? "ON" : "OFF"}`);
                 debugClickCount = 0;
-                
-                const aiDebugDisplay = document.getElementById('ai-tree-debug-display');
-                if (aiDebugDisplay) {
-                    aiDebugDisplay.style.display = gameSettings.debugEnabled ? 'block' : 'none';
+    
+                let memMon = document.getElementById('memory-monitor');
+                if (!memMon) {
+                    memMon = document.createElement('div');
+                    memMon.id = 'memory-monitor';
+                    memMon.style.position = 'fixed';
+                    memMon.style.top = '0';
+                    memMon.style.right = '0';
+                    memMon.style.background = 'rgba(0,0,0,0.8)';
+                    memMon.style.color = '#00ff00';
+                    memMon.style.padding = '5px 10px';
+                    memMon.style.fontFamily = 'monospace';
+                    memMon.style.fontSize = '12px';
+                    memMon.style.zIndex = '10000';
+                    memMon.style.pointerEvents = 'none';
+                    document.body.appendChild(memMon);
                 }
-            }
+                memMon.style.display = gameSettings.debugEnabled ? 'block' : 'none';
+
+                // AI関連のデバッグ要素をまとめて表示/非表示切り替え
+                const debugIds = ['ai-tree-debug-display', 'ai-debug-display', 'ai-debug-controls'];
+                debugIds.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) {
+                        el.style.display = gameSettings.debugEnabled ? 'block' : 'none';
+                    }
+                });
+             }
         });
     }
+
 
     mainCanvas = document.getElementById('mainCanvas'); ctx = mainCanvas.getContext('2d');
     
