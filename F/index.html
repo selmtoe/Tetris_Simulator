@@ -10,8 +10,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 <style>
     :root {
+
         --bg-color: #1a1a2e;
         --primary-color: #4b4b7c;
         --primary-hover-color: #6a6aff;
@@ -28,6 +30,7 @@
         height: 100vh;
         overflow: hidden;
         -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
     }
     body {
         background-color: var(--bg-color);
@@ -77,6 +80,7 @@
         transition: background-color 0.2s;
         text-align: center;
         display: inline-block;
+        white-space: nowrap;
     }
     .button:hover, button:hover {
         background-color: var(--primary-hover-color);
@@ -87,7 +91,59 @@
         cursor: not-allowed;
     }
 
+    .undo-redo-btn {
+        padding: 6px 12px !important;
+        line-height: 0 !important;
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+    }
+    .undo-redo-btn svg {
+        width: 20px;
+        height: 20px;
+        fill: currentColor;
+    }
+
+    #scanner-container {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; width: 100vw; height: 100vh;
+        background-color: var(--bg-color);
+        z-index: 500;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+    #scanner-canvas {
+        max-width: 90vw;
+        max-height: 80vh;
+        border: 2px solid var(--primary-color);
+        cursor: crosshair;
+    }
+    #scan-controls {
+        position: fixed;
+        bottom: 50px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 15px;
+        z-index: 510;
+    }
+    #scan-instructions {
+        position: absolute;
+        top: 20px;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 10px;
+        font-size: 18px;
+        z-index: 510;
+        pointer-events: none;
+    }
+
     .edit-section {
+
+
         background-color: rgba(255,255,255,0.05);
         padding: 15px;
         border-radius: 8px;
@@ -112,7 +168,37 @@
         font-family: var(--font-display);
         font-size: 16px;
         padding: 0 10px;
-        min-width: 100px;
+        width: 140px;
+        text-align: center;
+        font-feature-settings: "tnum";
+        font-variant-numeric: tabular-nums;
+        display: inline-block;
+    }
+    /* エクスポートモーダル用追加スタイル */
+    .export-option-group {
+        margin-bottom: 15px;
+        border-bottom: 1px solid #444;
+        padding-bottom: 15px;
+    }
+    .export-option-group h4 {
+        margin: 0 0 10px 0;
+        color: #aaa;
+    }
+    .radio-label {
+        margin-right: 15px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+    }
+    .number-input {
+        background-color: var(--canvas-bg-color);
+        color: var(--font-color);
+        border: 1px solid var(--border-color);
+        padding: 5px;
+        border-radius: 4px;
+        width: 60px;
+        margin-left: 5px;
     }
     .player-editors {
         display: flex;
@@ -301,7 +387,49 @@ flex-wrap: wrap;
         font-family: monospace;
         text-transform: uppercase;
     }
+
+    .next-editor {
+        background-color: rgba(255,255,255,0.05);
+        padding: 15px;
+        border-radius: 8px;
+    }
+    .mino-icons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+    }
+    .mino-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 4px;
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: all 0.2s;
+        box-sizing: border-box;
+    }
+    .mino-icon:hover {
+        transform: scale(1.1);
+    }
+    .next-queue-display {
+        background-color: rgba(0,0,0,0.3);
+        padding: 8px;
+        border-radius: 5px;
+        min-height: 38px;
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+        border: 1px solid var(--primary-color);
+    }
+
+    .button-group {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+    }
+
     #debug-console {
+
         display: none;
         position: fixed;
         bottom: 0;
@@ -339,6 +467,21 @@ flex-wrap: wrap;
     .log-entry { margin-bottom: 4px; border-bottom: 1px solid #333; padding: 2px 0; }
     .log-entry.error { color: #ff6b6b; background: rgba(80, 0, 0, 0.3); }
     .log-entry.warn { color: #f0a000; }
+    .edit-menu-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+    .edit-menu-item {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+    .edit-menu-item label {
+        font-size: 12px;
+        color: #aaa;
+    }
 </style>
 </head>
 <body>
@@ -347,63 +490,80 @@ flex-wrap: wrap;
     <div id="editor-container">
         <div class="edit-section top-controls">
             <div class="mode-selection">
-                <h2>MODE</h2>
+                <h2 id="mode-header" style="cursor: pointer; user-select: none;">MODE</h2>
                 <div class="button active" id="mode-1p">1P</div>
                 <div class="button" id="mode-2p">2P</div>
-                      </div>
+                <button id="share-btn" style="margin-left: 15px;">共有</button>
+                <button id="send-to-simulator" style="margin-left: 5px; background-color: #00a000;">Simulator</button>
+                <button id="view-mode-btn" style="margin-left: 5px; background-color: #30a070;">View</button>
+                <button id="gen-code" style="margin-left: 5px; background-color: #00a0f0; display: none;">Gen Code</button>
+            </div>
             <div class="page-controls">
                 <button id="prev-page">Prev ‹</button>
                 <span id="page-indicator">Page 1 / 1</span>
                 <button id="next-page">Next ›</button>
-                <button id="new-page" style="margin-left: 15px;">New Page</button>
-     
-           <button id="delete-page">Delete</button>
-                <button id="gen-code" style="margin-left: 15px; background-color: #00a0f0;">Gen Code</button>
-                <button id="share-btn" style="margin-left: 5px; background-color: #f0a000;">Share</button>
-                <button id="send-to-simulator" style="margin-left: 5px; background-color: #00a000;">Simulator</button>
-                <button id="view-mode-btn" style="margin-left: 5px;
-background-color: #30a070;">View</button>
+                
+                <button id="new-page" style="margin-left: 15px;">新規追加</button>
+                <button id="delete-page">削除</button>
+
+                <button id="undo-btn" class="button undo-redo-btn" style="margin-left: 15px;" title="Undo">
+                    <svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.17 8 12.5 8z"/></svg>
+                </button>
+                <button id="redo-btn" class="button undo-redo-btn" title="Redo">
+                    <svg viewBox="0 0 24 24"><path d="M18.4 10.6C16.55 9 14.15 8 11.5 8c-4.67 0-8.58 3.03-9.96 7.22l2.37.78c1.05-3.19 4.05-5.5 7.59-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
+                </button>
+                
+                <button id="open-edit-menu-btn" style="margin-left: 15px;">編集</button>
             </div>
         </div>
+
         <div class="player-editors">
             <div class="editor-column" id="p1-editor-col">
+                <div class="edit-section next-editor">
+                    <h2>PLAYER 1 - NEXT</h2>
+                    <div class="mino-icons" id="p1-next-icons"></div>
+                    <div class="next-queue-display" id="p1-next-queue"></div>
+                    <div class="button-group" style="margin-top: 10px;">
+                        <button class="button" id="p1-next-delete-left">Delete</button>
+                        <button class="button" id="p1-next-clear">Clear</button>
+                    </div>
+                </div>
                 <div class="edit-section field-editor">
                     <h2>PLAYER 1 - FIELD</h2>
                     <div class="color-palette" id="p1-palette"></div>
-                                    <canvas id="field-editor-canvas-p1"></canvas>
+                    <canvas id="field-editor-canvas-p1"></canvas>
                     <div class="field-controls">
                         <button class="button" id="p1-field-shift-up">↑ Up</button>
                         <button class="button" id="p1-field-shift-down">↓ Down</button>
-        
-                <button class="button" id="p1-field-shift-left">← Left</button>
+                        <button class="button" id="p1-field-shift-left">← Left</button>
                         <button class="button" id="p1-field-shift-right">→ Right</button>
                         <button class="button" id="p1-field-clear">Clear</button>
                     </div>
-                    <div class="sequence-controls">
-                        <label>Hold: <input type="text" id="p1-hold-input" maxlength="1" placeholder="例: T"></label>
-                        <label>Next: <input type="text" id="p1-next-input" placeholder="例: SZJLO"></label>
-                    </div>
-               </div>
+                </div>
             </div>
             <div class="editor-column" id="p2-editor-col" style="display: none;">
+                <div class="edit-section next-editor">
+                    <h2>PLAYER 2 - NEXT</h2>
+                    <div class="mino-icons" id="p2-next-icons"></div>
+                    <div class="next-queue-display" id="p2-next-queue"></div>
+                    <div class="button-group" style="margin-top: 10px;">
+                        <button class="button" id="p2-next-delete-left">Delete</button>
+                        <button class="button" id="p2-next-clear">Clear</button>
+                    </div>
+                </div>
                 <div class="edit-section field-editor">
                     <h2>PLAYER 2 - FIELD</h2>
-                                  <div class="color-palette" id="p2-palette"></div>
+                    <div class="color-palette" id="p2-palette"></div>
                     <canvas id="field-editor-canvas-p2"></canvas>
                     <div class="field-controls">
                         <button class="button" id="p2-field-shift-up">↑ Up</button>
-               
-         <button class="button" id="p2-field-shift-down">↓ Down</button>
+                        <button class="button" id="p2-field-shift-down">↓ Down</button>
                         <button class="button" id="p2-field-shift-left">← Left</button>
                         <button class="button" id="p2-field-shift-right">→ Right</button>
                         <button class="button" id="p2-field-clear">Clear</button>
                     </div>
-                    <div class="sequence-controls">
-                        <label>Hold: <input type="text" id="p2-hold-input" maxlength="1" placeholder="例: T"></label>
-                        <label>Next: <input type="text" id="p2-next-input" placeholder="例: SZJLO"></label>
-                    </div>
-                  </div>
-              </div>
+                </div>
+            </div>
             </div>
         </div>
     </div>
@@ -416,8 +576,8 @@ background-color: #30a070;">View</button>
             <span id="viewer-page-indicator">Page 1 / 1</span>
             <button id="viewer-simulator-btn" class="button">Simulator</button>
             <button id="back-to-editor-btn" class="button">Editor</button>
-            <button id="viewer-img-btn" class="button">Img</button>
-            <button id="viewer-gif-btn" class="button">GIF</button>
+            <button id="viewer-share-btn" class="button"> 共有 </button>
+            <button id="viewer-export-btn" class="button"> 出力 </button>
         </div>
         <div class="viewer-slider-container">
             <input type="range" id="viewer-page-slider" min="0" max="0" value="0">
@@ -443,21 +603,63 @@ background-color: #30a070;">View</button>
     </div>
 </div>
 
-<div id="share-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center; z-index: 200;">
+<div id="export-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center; z-index: 200;">
     <div class="modal-content" style="background-color: var(--bg-color); padding: 25px; border-radius: 10px; border: 2px solid var(--primary-color); width: 90%; max-width: 500px; font-family: var(--font-ui);">
+        <h2 style="margin-top:0;">画像/GIF出力</h2>
+        
+        <div class="export-option-group">
+            <h4>形式</h4>
+            <label class="radio-label"><input type="radio" name="export-format" value="png" checked> PNG画像</label>
+            <label class="radio-label"><input type="radio" name="export-format" value="gif"> GIFアニメ</label>
+        </div>
+
+        <div class="export-option-group">
+            <h4>範囲</h4>
+            <label class="radio-label"><input type="radio" name="export-range" value="all" checked> 全体 (Hold/Next含む)</label>
+            <label class="radio-label"><input type="radio" name="export-range" value="field"> 盤面のみ</label>
+        </div>
+
+        <div class="export-option-group" id="export-field-settings" style="display:none;">
+            <h4>盤面設定</h4>
+            <label>高さ: <input type="number" id="export-height" class="number-input" value="20" min="1" max="40"> ブロック</label>
+        </div>
+
+        <div class="export-option-group" id="export-gif-settings" style="display:none;">
+            <h4>GIF設定</h4>
+            <label>フレーム遅延: <input type="number" id="export-delay" class="number-input" value="500" min="50" step="50"> ms</label>
+        </div>
+
+        <div class="modal-controls" style="text-align: center; margin-top: 15px;">
+            <button id="do-export-btn" class="button" style="margin-right: 10px;">出力</button>
+            <button id="export-close-btn" class="button">キャンセル</button>
+        </div>
+    </div>
+</div>
+
+<div id="share-modal" style="position: fixed;
+top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center;
+z-index: 200;">
+
+    <div class="modal-content" style="background-color: var(--bg-color); padding: 25px; border-radius: 10px; border: 2px solid var(--primary-color); width: 90%;
+max-width: 500px; font-family: var(--font-ui);">
         <h2>共有</h2>
         
         <div class="share-section">
+
             <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">エクスポート</h3>
             <p></p>
             <div class="share-item" style="display: flex; flex-direction: column; align-items: flex-start;">
                  <span>共有リンク</span>
                 <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box; background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; font-family: var(--font-ui);">
-                <div style="display: flex; gap: 10px; margin-top: 5px;">
+                <div style="display: flex;
+gap: 10px; margin-top: 5px; flex-wrap: wrap;">
                     <button id="copy-link-btn" class="button">リンクをコピー</button>
+                    <button id="export-fumen-p1-btn" class="button" >1Pテト譜コピー</button>
+                    <button id="export-fumen-p2-btn" class="button" style="display: none;">2Pテト譜コピー</button>
                 </div>
             </div>
         </div>
+
         
         <hr style="border-color: var(--primary-color); margin: 20px 0;">
         
@@ -467,9 +669,54 @@ background-color: #30a070;">View</button>
             <button id="import-from-data-btn" class="button">クリップボードからインポート</button>
         </div>
 
-        <div class="modal-controls" style="text-align: center; margin-top: 15px;">
+        <div class="modal-controls" style="text-align: center;
+margin-top: 15px;">
             <button id="share-close" class="button">閉じる</button>
         </div>
+    </div>
+</div>
+
+<div id="edit-menu-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center; z-index: 200;">
+    <div class="modal-content" style="background-color: var(--bg-color); padding: 25px; border-radius: 10px; border: 2px solid var(--primary-color); width: 90%; max-width: 400px; font-family: var(--font-ui);">
+        <h2 style="margin-top:0;">編集メニュー</h2>
+        
+        <div class="edit-menu-grid">
+            <div class="edit-menu-item">
+                <label>ページ操作</label>
+                <button id="copy-page-btn" class="button">コピー</button>
+                <button id="paste-page-btn" class="button">ペースト</button>
+       </div>
+            <div class="edit-menu-item">
+                <label>画像認識</label>
+                <div style="display: flex; gap: 5px;">
+                    <button id="load-img-p1-btn" class="button" style="flex: 1; padding: 8px 4px;">IMG (P1)</button>
+                    <button id="load-img-p2-btn" class="button" style="flex: 1; padding: 8px 4px;">IMG (P2)</button>
+                </div>
+                <button id="load-ppt-btn" class="button" style="margin-top: 5px;">Load PPT</button>
+            </div>
+            <div class="edit-menu-item">
+                <label>入替</label>
+                <button id="swap-p1p2-curr-btn" class="button">1P⇄2P (現ページ)</button>
+                <button id="swap-p1p2-all-btn" class="button">1P⇄2P (全ページ)</button>
+            </div>
+        </div>
+
+        <div class="modal-controls" style="text-align: center; margin-top: 15px;">
+            <button id="edit-menu-close" class="button">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<input type="file" id="hidden-img-loader" accept="image/*" style="display: none;">
+<input type="file" id="hidden-ppt-loader" accept="image/*" style="display: none;">
+
+<div id="scanner-container">
+    <div id="scan-instructions">左下をクリックしてください</div>
+    <canvas id="scanner-canvas"></canvas>
+    <div id="scan-controls">
+        <button id="scan-next-step-btn" class="button" style="display: none;">次へ</button>
+        <button id="scan-confirm-btn" class="button" style="display: none;">読込開始</button>
+        <button id="scan-cancel-btn" class="button">キャンセル</button>
     </div>
 </div>
 
@@ -505,11 +752,18 @@ background-color: #30a070;">View</button>
         if (type === 'error') showConsole();
     }
 
-    const originalError = console.error;
+        const originalError = console.error;
     console.error = function(...args) {
+        // 特定のONNX警告を無視するフィルタを追加
+        if (args.length > 0 && typeof args[0] === 'string' && 
+           (args[0].includes('VerifyOutputSizes') || args[0].includes('Unknown CPU vendor'))) {
+            return;
+        }
+
         originalError.apply(console, args);
         try {
             const msg = args.map(a => {
+
                 if (a instanceof Error) return `${a.message}\n${a.stack}`;
                 if (typeof a === 'object') return JSON.stringify(a, null, 2);
                 return String(a);
@@ -549,6 +803,9 @@ const EDITOR_COLORS = {...COLORS, 'EMPTY': '#000000'};
 let gameMode = '1P';
 let fumenPages = [];
 let currentPageIndex = 0;
+let historyStack = [];
+let historyIndex = -1;
+const MAX_HISTORY = 50;
 let currentDisplayMode = 'viewer';
 let viewerCanvas, viewerCtx;
 let viewerLoopHandle;
@@ -580,13 +837,13 @@ const DRAW_SHAPE_MAP = {
     "-1,1;-1,2;0,1": { type: "Z", rot: 1, offset: [1, -1] },
 };
 const createEmptyBoard = () => Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
-
 const createBlankPage = () => ({
-    p1: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '' },
-    p2: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '' }
+    // nextInsertionIndex を追加: 0なら先頭、-1なら末尾、'hold'ならホールド
+    p1: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '', nextInsertionIndex: -1 },
+    p2: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '', nextInsertionIndex: -1 }
 });
-
 function loadPage(index) {
+
     if (index < 0 || index >= fumenPages.length) return;
     currentPageIndex = index;
 
@@ -602,12 +859,15 @@ function loadPage(index) {
             }
         });
 
-        document.getElementById(`${playerId}-hold-input`).value = data.hold || '';
-        document.getElementById(`${playerId}-next-input`).value = data.next || '';
+        // 修正: テキスト入力への代入を削除し、UI更新関数を呼び出し
+        // データ読み込み時は末尾に追加するようにインデックスをリセット
+        if (data.nextInsertionIndex === undefined) data.nextInsertionIndex = -1;
+        updateNextQueueDisplay(playerId);
 
         drawEditorField(playerId);
     });
 updatePageControls();
+
     if (currentDisplayMode === 'viewer') {
         drawViewer();
     }}
@@ -617,8 +877,9 @@ function updatePageControls() {
     
     document.getElementById('page-indicator').textContent = pageText;
     document.getElementById('prev-page').disabled = (currentPageIndex === 0);
-    document.getElementById('next-page').disabled = (currentPageIndex === fumenPages.length - 1);
     document.getElementById('delete-page').disabled = (fumenPages.length <= 1);
+    
+    updateUndoRedoButtons();
 
     const viewerIndicator = document.getElementById('viewer-page-indicator');
     const viewerSlider = document.getElementById('viewer-page-slider');
@@ -678,12 +939,10 @@ function setupPlayerEditor(playerId) {
     
     const applyDraw = (x, y) => {
         if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_VISIBLE_HEIGHT) return;
-        
         const pageData = fumenPages[currentPageIndex][playerId];
         const boardY = y + pageData.viewY;
         
         const newColor = isEraserMode ? null : pageData.activeColor;
-
         if (pageData.board[boardY][x] !== newColor) {
             pageData.board[boardY][x] = newColor;
             drawEditorField(playerId);
@@ -693,6 +952,7 @@ function setupPlayerEditor(playerId) {
     const handleDrawStart = e => {
         e.preventDefault();
         isDrawing = true;
+
 
         const { x, y } = getCoordsFromEvent(e);
         const pageData = fumenPages[currentPageIndex][playerId];
@@ -715,7 +975,10 @@ function setupPlayerEditor(playerId) {
     };
     
     const handleDrawEnd = () => {
-        isDrawing = false;
+        if (isDrawing) {
+            isDrawing = false;
+            pushHistory(); // Save state AFTER drawing
+        }
     };
 
     canvas.addEventListener('mousedown', handleDrawStart);
@@ -727,31 +990,199 @@ function setupPlayerEditor(playerId) {
     canvas.addEventListener('touchcancel', handleDrawEnd, { passive: false });
     canvas.addEventListener('touchmove', handleDrawMove, { passive: false });
 
-    document.getElementById(`${playerId}-field-shift-up`).addEventListener('click', () => shiftField(playerId, 'up'));
-    document.getElementById(`${playerId}-field-shift-down`).addEventListener('click', () => shiftField(playerId, 'down'));
-    document.getElementById(`${playerId}-field-shift-left`).addEventListener('click', () => shiftField(playerId, 'left'));
-    document.getElementById(`${playerId}-field-shift-right`).addEventListener('click', () => shiftField(playerId, 'right'));
-document.getElementById(`${playerId}-field-clear`).addEventListener('click', () => {
+    document.getElementById(`${playerId}-field-shift-up`).addEventListener('click', () => { shiftField(playerId, 'up'); pushHistory(); });
+    document.getElementById(`${playerId}-field-shift-down`).addEventListener('click', () => { shiftField(playerId, 'down'); pushHistory(); });
+    document.getElementById(`${playerId}-field-shift-left`).addEventListener('click', () => { shiftField(playerId, 'left'); pushHistory(); });
+    document.getElementById(`${playerId}-field-shift-right`).addEventListener('click', () => { shiftField(playerId, 'right'); pushHistory(); });
+    document.getElementById(`${playerId}-field-clear`).addEventListener('click', () => {
         fumenPages[currentPageIndex][playerId].board.forEach(row => row.fill(null));
         drawEditorField(playerId);
+        pushHistory();
+    });
+// --- ここからNext/HoldエディタUIの構築 (シミュレータから移植・調整) ---
+    const nextIcons = document.getElementById(`${playerId}-next-icons`);
+    nextIcons.innerHTML = '';
+    const minoTypes = ['I', 'O', 'T', 'L', 'J', 'S', 'Z'];
+    // 各ミノアイコンの生成
+    minoTypes.forEach(key => {
+        const icon = document.createElement('div');
+        icon.className = 'mino-icon';
+        icon.style.backgroundColor = EDITOR_COLORS[key];
+        // テキスト削除
+        
+                icon.addEventListener('click', () => {
+            const data = fumenPages[currentPageIndex][playerId];
+
+            let nextArr = data.next ? data.next.split('') : [];
+            
+            if (data.nextInsertionIndex === 'hold') {
+                data.hold = key;
+                data.nextInsertionIndex = 0; 
+            } else {
+                if (data.nextInsertionIndex === -1 || data.nextInsertionIndex >= nextArr.length) {
+                    nextArr.push(key);
+                    data.nextInsertionIndex = nextArr.length;
+                } else {
+                    nextArr.splice(data.nextInsertionIndex, 0, key);
+                    data.nextInsertionIndex++;
+                }
+                data.next = nextArr.join('');
+            }
+            updateNextQueueDisplay(playerId);
+            pushHistory(); // Moved to end
+        });
+
+        nextIcons.appendChild(icon);
     });
 
-    const holdInput = document.getElementById(`${playerId}-hold-input`);
-    const nextInput = document.getElementById(`${playerId}-next-input`);
+    document.getElementById(`${playerId}-next-delete-left`).addEventListener('click', () => {
+        const data = fumenPages[currentPageIndex][playerId];
+        let nextArr = data.next ? data.next.split('') : [];
+        const index = data.nextInsertionIndex;
 
-    holdInput.addEventListener('input', (e) => {
-        const val = e.target.value.toUpperCase().trim();
-        e.target.value = val;
-        fumenPages[currentPageIndex][playerId].hold = val;
+        if (index === 'hold') {
+            data.hold = '';
+        } else if (index === -1) {
+            nextArr.pop();
+            data.nextInsertionIndex = nextArr.length;
+        } else if (index > 0) {
+            nextArr.splice(index - 1, 1);
+            data.nextInsertionIndex--;
+        }
+        data.next = nextArr.join('');
+        updateNextQueueDisplay(playerId);
+        pushHistory(); // Moved to end
     });
-    nextInput.addEventListener('input', (e) => {
-        const val = e.target.value.toUpperCase().trim();
-        e.target.value = val;
-        fumenPages[currentPageIndex][playerId].next = val;
+    document.getElementById(`${playerId}-next-clear`).addEventListener('click', () => {
+        const data = fumenPages[currentPageIndex][playerId];
+        data.next = '';
+        data.hold = '';
+        data.nextInsertionIndex = 0;
+        updateNextQueueDisplay(playerId);
+        pushHistory(); // Moved to end
     });
+
+}
+
+// 新規追加: Next/Hold表示の更新関数
+function updateNextQueueDisplay(playerId) {
+    const qd = document.getElementById(`${playerId}-next-queue`);
+    if (!qd) return;
+    qd.innerHTML = '';
+    const data = fumenPages[currentPageIndex][playerId];
+    const nextArr = data.next ? data.next.split('') : [];
+    
+    // カーソル位置の初期化確認
+    if (data.nextInsertionIndex === undefined) data.nextInsertionIndex = -1;
+
+// ギャップ(カーソル)生成ヘルパー
+    const createGap = (index) => {
+        const gap = document.createElement('div');
+        gap.style.width = '8px';
+        gap.style.height = '38px';
+        gap.style.cursor = 'pointer';
+        gap.style.display = 'flex';
+        gap.style.alignItems = 'center';
+        gap.style.justifyContent = 'center';
+        
+        gap.addEventListener('click', (e) => {
+            e.stopPropagation();
+            data.nextInsertionIndex = index;
+            updateNextQueueDisplay(playerId);
+        });
+
+        // アクティブなカーソル表示
+        if (data.nextInsertionIndex === index || (index === -1 && data.nextInsertionIndex === nextArr.length)) {
+            gap.style.backgroundColor = '#fff';
+            gap.style.boxShadow = '0 0 5px #fff';
+        } else {
+            gap.style.backgroundColor = 'rgba(255,255,255,0.1)';
+        }
+        return gap;
+    };
+
+    // Hold表示エリア
+    const holdContainer = document.createElement('div');
+    holdContainer.style.display = 'flex';
+    holdContainer.style.alignItems = 'center';
+    holdContainer.style.gap = '3px';
+    holdContainer.style.paddingRight = '8px';
+    holdContainer.style.borderRight = '1px solid #555';
+    holdContainer.style.marginRight = '5px';
+
+    const holdSlot = document.createElement('div');
+    holdSlot.className = 'mino-icon';
+    holdSlot.style.width = '38px';
+    holdSlot.style.height = '38px';
+    holdSlot.style.cursor = 'pointer';
+    if (data.hold) {
+        holdSlot.style.backgroundColor = EDITOR_COLORS[data.hold] || '#333';
+        holdSlot.style.border = 'none';
+    } else {
+        holdSlot.style.backgroundColor = 'transparent';
+        holdSlot.style.border = '2px dashed #555';
+    }
+
+    // Hold選択状態
+    if (data.nextInsertionIndex === 'hold') {
+        holdSlot.style.borderColor = '#FFF';
+        holdSlot.style.boxShadow = '0 0 8px #FFF';
+    }
+
+    holdSlot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        data.nextInsertionIndex = 'hold';
+        updateNextQueueDisplay(playerId);
+    });
+    const holdLabel = document.createElement('span');
+    holdLabel.textContent = "H";
+    holdLabel.style.fontFamily = 'var(--font-display)';
+    
+    holdContainer.appendChild(holdLabel);
+    holdContainer.appendChild(holdSlot);
+    qd.appendChild(holdContainer);
+    const nextContainer = document.createElement('div');
+    nextContainer.style.display = 'flex';
+    nextContainer.style.alignItems = 'center';
+    nextContainer.style.gap = '2px';
+    nextContainer.style.flexWrap = 'wrap';
+    nextContainer.style.flex = '1';
+
+    // 先頭のカーソル (インデックス0)
+    nextContainer.appendChild(createGap(0));
+
+    nextArr.forEach((key, i) => {
+        const icon = document.createElement('div');
+        icon.className = 'mino-icon';
+        icon.style.width = '38px';
+        icon.style.height = '38px';
+        icon.style.backgroundColor = EDITOR_COLORS[key] || '#333';
+        
+        // アイコンをクリックしたらその右側にカーソル移動
+        icon.addEventListener('click', (e) => {
+
+            e.stopPropagation();
+            data.nextInsertionIndex = i + 1;
+            updateNextQueueDisplay(playerId);
+        });
+
+        nextContainer.appendChild(icon);
+        nextContainer.appendChild(createGap(i + 1));
+    });
+
+    // 末尾クリックで末尾選択
+    nextContainer.addEventListener('click', (e) => {
+        if (e.target === nextContainer) {
+            data.nextInsertionIndex = nextArr.length; // -1と同義だが配列長で管理
+            updateNextQueueDisplay(playerId);
+        }
+    });
+
+    qd.appendChild(nextContainer);
 }
 
 function shiftField(playerId, direction) {
+
     const board = fumenPages[currentPageIndex][playerId].board;
     if (direction === 'up') {
         board.shift();
@@ -1042,8 +1473,18 @@ const parentPath = path.substring(0, path.lastIndexOf('/') + 1);
         simulatorURL = parentPath + '../index.html';
 } catch(e) { /* fallback to '../index.html' */ }
 
-    location.href = `${simulatorURL}#${base64Data}`;
+    // Hub検知: 親ウィンドウが存在し、自分自身でない場合
+    if (window.parent !== window) {
+        window.parent.postMessage({
+            target: 'sim',
+            type: 'loadState',
+            data: stateData // JSONオブジェクトをそのまま送信
+        }, '*');
+    } else {
+        location.href = `${simulatorURL}#${base64Data}`;
+    }
 }
+
 
 // --- 圧縮ロジック (RLE & 差分) ---
 
@@ -1138,7 +1579,624 @@ function applyDifference(prevBoard1D, diffData1D) {
     return currentBoard1D;
 }
 
-// --- 共有 (Share) / URL処理ロジック ---
+function pushHistory() {
+    if (historyIndex < historyStack.length - 1) {
+        historyStack = historyStack.slice(0, historyIndex + 1);
+    }
+    const state = {
+        pages: JSON.parse(JSON.stringify(fumenPages)),
+        idx: currentPageIndex,
+        mode: gameMode
+    };
+    historyStack.push(state);
+    if (historyStack.length > MAX_HISTORY) {
+        historyStack.shift();
+    } else {
+        historyIndex++;
+    }
+    updateUndoRedoButtons();
+}
+
+function undo() {
+    if (historyIndex > 0) {
+        historyIndex--;
+        restoreState(historyStack[historyIndex]);
+    }
+}
+
+function redo() {
+    if (historyIndex < historyStack.length - 1) {
+        historyIndex++;
+        restoreState(historyStack[historyIndex]);
+    }
+}
+
+function restoreState(state) {
+    fumenPages = JSON.parse(JSON.stringify(state.pages));
+    currentPageIndex = state.idx;
+    gameMode = state.mode;
+    
+    document.getElementById('mode-1p').classList.toggle('active', gameMode === '1P');
+    document.getElementById('mode-2p').classList.toggle('active', gameMode === '2P');
+    document.getElementById('p2-editor-col').style.display = (gameMode === '2P') ? 'flex' : 'none';
+    
+    loadPage(currentPageIndex);
+    updateUndoRedoButtons();
+    updateScale();
+}
+
+function updateUndoRedoButtons() {
+    document.getElementById('undo-btn').disabled = (historyIndex <= 0);
+    document.getElementById('redo-btn').disabled = (historyIndex >= historyStack.length - 1);
+}
+
+// --- ONNX & Image Recognition Logic ---
+let onnxSession = null;
+const ONNX_CLASS_NAMES = ['null', 'G', 'S', 'Z', 'L', 'J', 'O', 'I', 'T'];
+// シミュレータと同じパレット定義
+const SCAN_COLOR_PALETTE = {
+    'NULL': ['#000000', '#302838'],
+    'G':    ['#999999', '#D8D8D8'],
+    'I':    ['#019899', '#0199D5'],
+    'O':    ['#999A02', '#F9B900'],
+    'T':    ['#980099', '#871E88'],
+    'L':    ['#996700', '#F56100'],
+    'J':    ['#0000BB', '#004BA5'],
+    'S':    ['#10971F', '#5CB523'],
+    'Z':    ['#990000', '#DA1822']
+};
+const hexToRgb = (hex) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return { r, g, b };
+};
+const PARSED_SCAN_COLORS = {};
+for (const key in SCAN_COLOR_PALETTE) {
+    PARSED_SCAN_COLORS[key] = SCAN_COLOR_PALETTE[key].map(hexToRgb);
+}
+
+// Scanner State for manual selection
+let scanState = { image: null, bottomLeft: null, topRight: null, targetPlayerId: 'p1', step: 0 };
+let isScanning = false;
+
+async function initOnnxModel() {
+    try {
+        // Warningログを抑制
+        ort.env.logLevel = 'fatal';
+        onnxSession = await ort.InferenceSession.create('../Load%20PPT/tetris.onnx', { executionProviders: ['wasm'] });
+console.log("ONNX Model loaded.");
+    } catch (e) {
+        console.error("Failed to load ONNX model:", e);
+    }
+}
+
+
+async function processPptImage(file) {
+    if (!onnxSession) await initOnnxModel();
+    if (!onnxSession) { alert("AIモデルの読み込みに失敗しました。"); return; }
+
+    const btn = document.getElementById('load-ppt-btn');
+    const originalText = btn.textContent;
+    btn.textContent = "処理中...";
+    btn.disabled = true;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const img = new Image();
+        img.onload = async () => {
+            try {
+                pushHistory();
+                const imgBitmap = await createImageBitmap(img);
+                await runHighPrecisionAnalysis(imgBitmap);
+                
+                // 描画更新を確実にするため requestAnimationFrame でラップ
+                requestAnimationFrame(() => {
+                    drawEditorField('p1');
+                    if(gameMode === '2P') drawEditorField('p2');
+                    updateNextQueueDisplay('p1');
+                    updateNextQueueDisplay('p2');
+                    alert("読み込みが完了しました。");
+                });
+            } catch (err) {
+                console.error(err);
+                alert("処理中にエラーが発生しました。");
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+
+async function runHighPrecisionAnalysis(imgBitmap) {
+    try {
+        const { canvas: processedCanvas, cropData } = processImageTo1080p(imgBitmap);
+        const p1Config = { boardRect: { x: 304, y: 157, w: 670 - 304, h: 882 - 157 }, nextCoords: [ {x:160, y:155}, {x:500, y:122}, {x:500, y:175}, {x:500, y:225}, {x:500, y:275}, {x:500, y:325} ] };
+        const p2Config = { boardRect: { x: 1257, y: 157, w: 1620 - 1257, h: 882 - 157 }, nextCoords: [ {x:790, y:155}, {x:1130, y:122}, {x:1130, y:175}, {x:1130, y:225}, {x:1130, y:275}, {x:1130, y:325} ] };
+
+        const p1Data = await analyzePlayerHighPrecision(processedCanvas, imgBitmap, cropData, p1Config);
+        fumenPages[currentPageIndex].p1.board = p1Data.board;
+        fumenPages[currentPageIndex].p1.next = p1Data.nextQueue.join('');
+        fumenPages[currentPageIndex].p1.hold = p1Data.holdMino || '';
+        
+        // 常にP2も解析してデータを格納する（1Pモードでも内部データは保持）
+        const p2Data = await analyzePlayerHighPrecision(processedCanvas, imgBitmap, cropData, p2Config);
+        fumenPages[currentPageIndex].p2.board = p2Data.board;
+        fumenPages[currentPageIndex].p2.next = p2Data.nextQueue.join('');
+        fumenPages[currentPageIndex].p2.hold = p2Data.holdMino || '';
+
+    } catch (err) {
+        console.error("Analysis Error:", err);
+
+        alert("解析エラー: " + err.message);
+    }
+}
+
+function processImageTo1080p(imgBitmap) {
+    const srcW = imgBitmap.width, srcH = imgBitmap.height;
+    const targetAspect = 16 / 9;
+    const srcAspect = srcW / srcH;
+    let cropW, cropH, cropX, cropY;
+    if (srcAspect > targetAspect) { cropH = srcH; cropW = srcH * targetAspect; cropX = (srcW - cropW) / 2; cropY = 0; }
+    else { cropW = srcW; cropH = srcW / targetAspect; cropX = 0; cropY = (srcH - cropH) / 2; }
+    const canvas = document.createElement('canvas');
+    canvas.width = 1920; canvas.height = 1080;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(imgBitmap, cropX, cropY, cropW, cropH, 0, 0, 1920, 1080);
+    return { canvas, cropData: { cropX, cropY, cropW, cropH } };
+}
+
+async function analyzePlayerHighPrecision(canvas, originalBitmap, cropData, config) {
+    const ctx = canvas.getContext('2d');
+    const boardRect = config.boardRect;
+    const boardImgData = ctx.getImageData(boardRect.x, boardRect.y, boardRect.w, boardRect.h);
+    const cellW = boardRect.w / 10;
+    const cellH = boardRect.h / 20;
+    const recognizedBoard = []; 
+
+    // (A) Classic Scan (Correction)
+    const classicBoard = [];
+    for (let r = 0; r < 20; r++) {
+        const row = [];
+        for (let c = 0; c < 10; c++) {
+            const sampleX = boardRect.x + (c + 0.5) * cellW;
+            const sampleY = boardRect.y + (r + 0.5) * cellH;
+            const sampleSize = Math.max(1, Math.floor(cellW * 0.25));
+            const imageData = ctx.getImageData(sampleX - sampleSize / 2, sampleY - sampleSize / 2, sampleSize, sampleSize).data;
+            let avgR = 0, avgG = 0, avgB = 0;
+            for (let i = 0; i < imageData.length; i += 4) {
+                avgR += imageData[i];
+                avgG += imageData[i+1]; avgB += imageData[i+2];
+            }
+            const pixelCount = imageData.length / 4;
+            avgR /= pixelCount; avgG /= pixelCount; avgB /= pixelCount;
+            row.push(findClosestColor(avgR, avgG, avgB));
+        }
+        classicBoard.push(row);
+    }
+
+    // (B) ONNX Inference
+    const batchFeatures = [];
+    for (let r = 0; r < 20; r++) {
+        const row = [];
+        for (let c = 0; c < 10; c++) {
+            const x = c * cellW;
+            const y = r * cellH;
+            const cellPixels = extractCellPixels(boardImgData, x, y, cellW, cellH);
+            const feats = extractFeaturesJS(cellPixels, Math.floor(cellW), Math.floor(cellH));
+            batchFeatures.push(feats);
+            row.push(null);
+        }
+        recognizedBoard.push(row);
+    }
+
+    const flatInput = new Float32Array(batchFeatures.length * 63);
+    for (let i = 0; i < batchFeatures.length; i++) {
+        flatInput.set(batchFeatures[i], i * 63);
+    }
+    
+    const tensor = new ort.Tensor('float32', flatInput, [200, 63]);
+    const inputName = onnxSession.inputNames[0];
+    const feeds = { [inputName]: tensor };
+    const labelOutputName = onnxSession.outputNames[0]; 
+    const fetches = [labelOutputName];
+    const results = await onnxSession.run(feeds, fetches);
+    const outputLabel = results[labelOutputName];
+    const labelData = outputLabel.data;
+
+    for (let i = 0; i < 200; i++) {
+        const label = ONNX_CLASS_NAMES[Number(labelData[i])];
+        recognizedBoard[Math.floor(i / 10)][i % 10] = (label === 'null') ? null : label;
+    }
+
+    for (let r = 0; r < 20; r++) {
+        if (recognizedBoard[r].every(c => c === null || c === 'G')) {
+            const gCnt = recognizedBoard[r].filter(c => c === 'G').length;
+            if (gCnt !== 10) {
+                const classicRow = classicBoard[r];
+                if (classicRow.filter(c => c === 'G').length === 9 && classicRow.filter(c => c === null).length === 1) {
+                    recognizedBoard[r] = [...classicRow];
+                }
+            }
+        }
+    }
+
+    const fullBoard = Array.from({ length: 40 }, () => Array(10).fill(null));
+    for(let r=0; r<20; r++) fullBoard[20+r] = recognizedBoard[r];
+    
+    // Garbage cleanup
+    let firstNonG = -1;
+    for (let y = 39; y >= 0; y--) { if (!fullBoard[y].includes('G')) { firstNonG = y; break; } }
+    if (firstNonG !== -1) { for (let y = firstNonG - 1; y >= 0; y--) { for (let x = 0; x < 10; x++) { if (fullBoard[y][x] === 'G') fullBoard[y][x] = null; } } }
+
+    // Next/Hold
+    const nextQueue = [];
+    let holdMino = null;
+    const rawCropCanvas = document.createElement('canvas');
+    rawCropCanvas.width = cropData.cropW; rawCropCanvas.height = cropData.cropH;
+    const rawCtx = rawCropCanvas.getContext('2d', { willReadFrequently: true });
+    rawCtx.drawImage(originalBitmap, cropData.cropX, cropData.cropY, cropData.cropW, cropData.cropH, 0, 0, cropData.cropW, cropData.cropH);
+    const scale = cropData.cropW / 1280;
+    const radius = 5 * scale;
+    for (let i = 0; i < config.nextCoords.length; i++) {
+        const c = config.nextCoords[i];
+        const avg = getAverageColorNonBlack(rawCtx, c.x * scale, c.y * scale, radius);
+        if (i === 0) {
+            if (!(avg.r < 50 && avg.g < 50 && avg.b < 50)) holdMino = findClosestMinoOnly(avg.r, avg.g, avg.b);
+        } else {
+            if (i === 1 && (avg.r < 50 && avg.g < 50 && avg.b < 50)) break;
+            const fm = findClosestMinoOnly(avg.r, avg.g, avg.b);
+            if (fm) nextQueue.push(fm);
+        }
+    }
+    return { board: fullBoard, holdMino, nextQueue };
+}
+
+function extractCellPixels(imgD, x, y, w, h) {
+    const sw = imgD.width, ix = Math.floor(x), iy = Math.floor(y), iw = Math.floor(w), ih = Math.floor(h);
+    const d = new Uint8ClampedArray(iw * ih * 4);
+    for (let r = 0; r < ih; r++) {
+        const s = ((iy + r) * sw + ix) * 4;
+        d.set(imgD.data.subarray(s, s + iw * 4), r * iw * 4);
+    }
+    return d;
+}
+function extractFeaturesJS(pixelsRGBA, w, h) {
+    const numPixels = w * h;
+    const feats = [];
+    const bCh = new Float32Array(numPixels);
+    const gCh = new Float32Array(numPixels);
+    const rCh = new Float32Array(numPixels);
+    const hCh = new Float32Array(numPixels);
+    const sCh = new Float32Array(numPixels);
+    const vCh = new Float32Array(numPixels);
+    for (let i = 0; i < numPixels; i++) {
+        const r = pixelsRGBA[i * 4];
+        const g = pixelsRGBA[i * 4 + 1];
+        const b = pixelsRGBA[i * 4 + 2];
+        bCh[i] = b;
+        gCh[i] = g; rCh[i] = r;
+        
+        const maxVal = Math.max(r, g, b);
+        const minVal = Math.min(r, g, b);
+        const diff = maxVal - minVal;
+        const v = maxVal;
+        let s = (maxVal !== 0) ?
+        (diff / maxVal) * 255 : 0;
+        let h_val = 0;
+        if (maxVal === minVal) h_val = 0;
+        else if (maxVal === r) h_val = (60 * (g - b) / diff + 360) % 360;
+        else if (maxVal === g) h_val = (60 * (b - r) / diff + 120) % 360;
+        else if (maxVal === b) h_val = (60 * (r - g) / diff + 240) % 360;
+        h_val = h_val / 2;
+        vCh[i] = v; sCh[i] = s; hCh[i] = h_val;
+    }
+
+    const getStats = (arr) => {
+        let sum = 0;
+        for(let v of arr) sum += v;
+        const mean = sum / arr.length;
+        let sqDiffSum = 0;
+        for(let v of arr) sqDiffSum += (v - mean) ** 2;
+        const std = Math.sqrt(sqDiffSum / arr.length);
+        return [mean, std];
+    };
+
+    const statsB = getStats(bCh); const statsG = getStats(gCh); const statsR = getStats(rCh);
+    feats.push(statsB[0], statsB[1], statsG[0], statsG[1], statsR[0], statsR[1]);
+    const statsH = getStats(hCh); const statsS = getStats(sCh); const statsV = getStats(vCh);
+    feats.push(statsH[0], statsH[1], statsS[0], statsS[1], statsV[0], statsV[1]);
+    const tinyFeats = [];
+    const stepX = w / 4;
+    const stepY = h / 4;
+    for (let ty = 0; ty < 4; ty++) {
+        for (let tx = 0; tx < 4; tx++) {
+            const sx = Math.floor(tx * stepX), sy = Math.floor(ty * stepY);
+            const ex = Math.floor((tx + 1) * stepX), ey = Math.floor((ty + 1) * stepY);
+            let sumB=0, sumG=0, sumR=0, count=0;
+            for(let py=sy; py<ey; py++){
+                for(let px=sx; px<ex; px++){
+                    const idx = py * w + px;
+                    if(idx < numPixels) { sumB += bCh[idx]; sumG += gCh[idx]; sumR += rCh[idx]; count++;
+                    }
+                }
+            }
+            if(count===0) { tinyFeats.push(0,0,0);
+            } else { tinyFeats.push(sumB/count, sumG/count, sumR/count); }
+        }
+    }
+    feats.push(...tinyFeats);
+    const cx = Math.floor(w/2), cy = Math.floor(h/2);
+    const cw = Math.floor(w/4), ch = Math.floor(h/4);
+    const startX = cx - cw, endX = cx + cw;
+    const startY = cy - ch, endY = cy + ch;
+    let cSumB=0, cSumG=0, cSumR=0, cCount=0;
+    for(let py=startY; py<endY; py++){
+        for(let px=startX; px<endX; px++){
+            if(px>=0 && px<w && py>=0 && py<h){
+                const idx = py * w + px;
+                cSumB += bCh[idx]; cSumG += gCh[idx]; cSumR += rCh[idx]; cCount++;
+            }
+        }
+    }
+    if(cCount===0) feats.push(0,0,0);
+    else feats.push(cSumB/cCount, cSumG/cCount, cSumR/cCount);
+
+    return new Float32Array(feats);
+}
+
+function findClosestColor(r, g, b) {
+    const inputColor = { r, g, b };
+    const colorDistanceSq = (c1, c2) => {
+        return Math.pow(c1.r - c2.r, 2) + Math.pow(c1.g - c2.g, 2) + Math.pow(c1.b - c2.b, 2);
+    };
+    for (const nullColor of PARSED_SCAN_COLORS.NULL) {
+        if (colorDistanceSq(inputColor, nullColor) < 6000) {
+            return null;
+        }
+    }
+    for (const gColor of PARSED_SCAN_COLORS.G) {
+        if (colorDistanceSq(inputColor, gColor) < 10000) {
+            return 'G';
+        }
+    }
+    let minDistance = Infinity;
+    let closestKey = null;
+    const minoKeys = Object.keys(PARSED_SCAN_COLORS).filter(k => k !== 'NULL' && k !== 'G');
+    for (const key of minoKeys) {
+        for (const targetColor of PARSED_SCAN_COLORS[key]) {
+            const distance = colorDistanceSq(inputColor, targetColor);
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestKey = key;
+            }
+        }
+    }
+    return (minDistance > 25000) ? null : closestKey;
+}
+
+function getAverageColorNonBlack(ctx, cx, cy, rad) {
+    const d = Math.ceil(rad*2), sx=Math.floor(cx-rad), sy=Math.floor(cy-rad);
+    const id = ctx.getImageData(sx, sy, d, d).data;
+    let tr=0, tg=0, tb=0, c=0;
+    for(let y=0; y<d; y++) for(let x=0; x<d; x++) {
+        if((x-rad)**2+(y-rad)**2 <= rad*rad) {
+            const i=(y*d+x)*4; if(id[i]>50||id[i+1]>50||id[i+2]>50) { tr+=id[i]; tg+=id[i+1]; tb+=id[i+2]; c++; }
+        }
+    }
+    return c ? {r:tr/c, g:tg/c, b:tb/c} : {r:0,g:0,b:0};
+}
+function findClosestMinoOnly(r,g,b) {
+    const dist = (c1, c2) => (c1.r-c2.r)**2 + (c1.g-c2.g)**2 + (c1.b-c2.b)**2;
+    let minD = Infinity, best = 'I';
+    for(const key of Object.keys(PARSED_SCAN_COLORS)) {
+        if(key==='NULL'||key==='G') continue;
+        for(const tc of PARSED_SCAN_COLORS[key]) {
+            const d = dist({r,g,b}, tc);
+            if(d < minD) { minD = d; best = key; }
+        }
+    }
+    return best;
+}
+
+// --- Manual Scan Logic (Ported from Simulator) ---
+function startScanProcess(file, playerId = 'p1') {
+    scanState.targetPlayerId = playerId;
+    const reader = new FileReader();
+reader.onload = e => {
+        scanState.image = new Image();
+scanState.image.onload = () => {
+
+            // スキャナーUIを表示
+            document.getElementById('editor-container').style.display = 'none';
+            document.getElementById('scanner-container').style.display = 'flex';
+            
+            isScanning = true;
+            scanState.bottomLeft = null;
+            scanState.topRight = null;
+            scanState.step = 0; // 0: Wait BL, 1: Confirm BL, 2: Wait TR, 3: Confirm TR
+            updateScanUI();
+            
+            const canvas = document.getElementById('scanner-canvas');
+
+            const ar = scanState.image.naturalWidth / scanState.image.naturalHeight;
+            
+            // 画面に合わせて表示サイズ調整
+            const maxWidth = window.innerWidth * 0.9;
+            const maxHeight = window.innerHeight * 0.8;
+            let dW = maxWidth, dH = maxWidth / ar;
+            if (dH > maxHeight) { dH = maxHeight; dW = dH * ar; }
+            
+            // Canvasサイズは実際の画像サイズに合わせる（高解像度維持）か、
+            // Simに合わせて「表示サイズ」と「内部サイズ」を使い分けるが、
+            // Simは width=2048上限で描画している。
+            const canvasWidth = Math.min(2048, scanState.image.naturalWidth);
+            canvas.width = canvasWidth;
+            canvas.height = canvasWidth / ar;
+            
+            canvas.style.width = `${dW}px`;
+            canvas.style.height = `${dH}px`;
+            
+            drawScanner();
+        };
+        scanState.image.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function updateScanUI() {
+    const instr = document.getElementById('scan-instructions');
+    const nextBtn = document.getElementById('scan-next-step-btn');
+    const confirmBtn = document.getElementById('scan-confirm-btn');
+    
+    // Reset buttons
+    nextBtn.style.display = 'none';
+    confirmBtn.style.display = 'none';
+
+    if (scanState.step === 0) {
+        instr.textContent = '盤面の左下をクリックしてください';
+    } else if (scanState.step === 1) {
+        instr.textContent = 'よろしければ「次へ」を押してください';
+        nextBtn.style.display = 'inline-block';
+    } else if (scanState.step === 2) {
+        instr.textContent = '盤面の右上をクリックしてください';
+    } else if (scanState.step === 3) {
+        instr.textContent = '範囲が正しければ「読込開始」を押してください';
+        confirmBtn.style.display = 'inline-block';
+    }
+}
+
+function drawScanner() {
+    if (!scanState.image) return;
+
+    const canvas = document.getElementById('scanner-canvas');
+    const ctx = canvas.getContext('2d');
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(scanState.image, 0, 0, canvas.width, canvas.height);
+    
+    if (scanState.bottomLeft) {
+        ctx.fillStyle = 'lime';
+        ctx.beginPath();
+        ctx.arc(scanState.bottomLeft.x, scanState.bottomLeft.y, 10, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    if (scanState.topRight) {
+        const {x: blx, y: bly} = scanState.bottomLeft;
+        const {x: trx, y: try_} = scanState.topRight;
+        
+        ctx.fillStyle = 'fuchsia';
+        ctx.beginPath();
+        ctx.arc(scanState.topRight.x, scanState.topRight.y, 10, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = 'fuchsia';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(blx, try_, trx - blx, bly - try_);
+    }
+}
+
+function endScanProcess() {
+    isScanning = false;
+    document.getElementById('scanner-container').style.display = 'none';
+    document.getElementById('editor-container').style.display = 'flex';
+    updateScale();
+}
+
+function processAndLoadBoard() {
+    if (!scanState.image || !scanState.bottomLeft || !scanState.topRight) return;
+    
+    const canvas = document.getElementById('scanner-canvas');
+    
+    // 元画像からピクセルデータを取得するためのCanvas
+    const tempC = document.createElement('canvas');
+    tempC.width = scanState.image.naturalWidth;
+    tempC.height = scanState.image.naturalHeight;
+    const tempCtx = tempC.getContext('2d', { willReadFrequently: true });
+    tempCtx.drawImage(scanState.image, 0, 0);
+    
+    // 表示用Canvasと元画像のスケール比
+    const sX = scanState.image.naturalWidth / canvas.width;
+    const sY = scanState.image.naturalHeight / canvas.height;
+    
+    const iBL = { x: scanState.bottomLeft.x * sX, y: scanState.bottomLeft.y * sY };
+    const iTR = { x: scanState.topRight.x * sX, y: scanState.topRight.y * sY };
+    
+    const bW_px = iTR.x - iBL.x;
+    const bH_px = iBL.y - iTR.y; // Yは上が0なので BL.y > TR.y
+    const blW_px = bW_px / 10; // BOARD_WIDTH
+    const blH_px = bH_px / 20; // BOARD_VISIBLE_HEIGHT
+    // ターゲットのプレイヤー
+    const targetId = scanState.targetPlayerId || 'p1';
+    const targetBoard = fumenPages[currentPageIndex][targetId].board;
+// 盤面クリア
+    targetBoard.forEach(row => row.fill(null));
+    
+    for (let r = 0; r < 20; r++) {
+
+        for (let c = 0; c < 10; c++) {
+            // サンプリング座標
+            const cX = iBL.x + (c + 0.5) * blW_px;
+            const cY = iTR.y + (r + 0.5) * blH_px;
+            
+            const sampleSize = Math.max(1, Math.floor(blW_px * 0.25));
+            const iD = tempCtx.getImageData(cX - sampleSize/2, cY - sampleSize/2, sampleSize, sampleSize).data;
+            
+            let avgR=0, avgG=0, avgB=0;
+            for(let i=0; i<iD.length; i+=4){ avgR+=iD[i]; avgG+=iD[i+1]; avgB+=iD[i+2]; }
+            const pCount = iD.length / 4;
+            avgR /= pCount; avgG /= pCount; avgB /= pCount;
+            
+            // 下から埋めていく (r=0 is top visual row)
+            // targetBoardは [0..39]。表示領域は [20..39]
+            targetBoard[20 + r][c] = findClosestColor(avgR, avgG, avgB);
+        }
+    }
+    
+    drawEditorField(targetId);
+    pushHistory(); // 変更後に保存
+    endScanProcess();
+}
+
+// Event Listeners for Scanner
+document.getElementById('scanner-canvas').addEventListener('click', e => {
+
+    if (!isScanning) return;
+    const canvas = document.getElementById('scanner-canvas');
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const pos = { 
+        x: (e.clientX - rect.left) * scaleX, 
+        y: (e.clientY - rect.top) * scaleY 
+    };
+    
+    if (scanState.step === 0 || scanState.step === 1) {
+        scanState.bottomLeft = pos;
+        scanState.step = 1;
+    } else if (scanState.step === 2 || scanState.step === 3) {
+        scanState.topRight = pos;
+        scanState.step = 3;
+    }
+    updateScanUI();
+    drawScanner();
+});
+
+document.getElementById('scan-next-step-btn').addEventListener('click', () => {
+    if (scanState.step === 1) {
+        scanState.step = 2;
+        updateScanUI();
+    }
+});
+
+document.getElementById('scan-cancel-btn').addEventListener('click', endScanProcess);
+document.getElementById('scan-confirm-btn').addEventListener('click', processAndLoadBoard);
+
 
 function getFumenDataForExport() {
     const exportedData = {
@@ -1197,9 +2255,364 @@ function getFumenDataForExport() {
     return exportedData;
 }
 
+// --- テト譜 v115 変換ロジック ---
+const FumenCodec = {
+    TABLE: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    BLOCK_MAP: { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8 }, // Map indices to themselves
+    // Custom colors: I, L, O, Z, T, J, S, G(Gray), Empty
+    TYPE_TO_FUMEN: { null: 0, 'I': 1, 'L': 2, 'O': 3, 'Z': 4, 'T': 5, 'J': 6, 'S': 7, 'G': 8, 'X': 8 },
+    FUMEN_TO_TYPE: { 0: null, 1: 'I', 2: 'L', 3: 'O', 4: 'Z', 5: 'T', 6: 'J', 7: 'S', 8: 'G' },
+
+    toInt: function(char) {
+        return this.TABLE.indexOf(char);
+    },
+
+    toChar: function(int) {
+        return this.TABLE[int];
+    },
+
+    poll: function(str, index, numChars) {
+        let val = 0;
+        for (let i = 0; i < numChars; i++) {
+            val += this.toInt(str[index + i]) * Math.pow(64, i);
+        }
+        return val;
+    },
+
+    encodeInt: function(num, length) {
+        let str = '';
+        for (let i = 0; i < length; i++) {
+            str += this.toChar(num % 64);
+            num = Math.floor(num / 64);
+        }
+        return str;
+    },
+
+    // 1ページ分のエンコード
+    encodePage: function(prevField, currentField, hold, next) {
+        let data = '';
+
+        // 1. フィールド (Diff + RLE)
+        // テト譜フィールド: 240ブロック (24行x10列)。インデックス0が上、239が下。
+        // 230-239はせり上がり(ガベージ)行。今回は全て0(空)とする。
+        // Customフィールド(40行)の下から23行分を使用する。
+        // Custom[17] (Top of 23) -> Fumen[0]
+        // Custom[39] (Bottom) -> Fumen[229]
+        
+        let diffs = [];
+        for (let i = 0; i < 240; i++) {
+            let val = currentField[i] - prevField[i] + 8;
+            diffs.push(val);
+        }
+
+        let i = 0;
+        while (i < 240) {
+            let val = diffs[i];
+            let count = 0;
+            while (i + count < 240 && diffs[i + count] === val && count < 240) { // count max is technically limited but safe here
+                count++;
+            }
+            // テト譜の仕様: (diff * 240) + (count - 1)
+            let chunk = val * 240 + (count - 1);
+            data += this.encodeInt(chunk, 2);
+            i += count;
+        }
+
+        // 1ページ目が空白の場合など、フィールドデータが"vh"（全ブロック変更なし）の場合は
+        // Repeat(繰り返し数)を付与する必要がある。今回は毎回出力しているので0回(A)とする。
+        if (data === 'vh') {
+            data += this.encodeInt(0, 1);
+        }
+
+        // 2. ミノ・フラグ (3文字)
+
+        // 2. ミノ・フラグ (3文字)
+        // 今回はエディタ上のアクティブミノは再現せず、フラグ(コメント)のみ利用する
+        // piece=0, rot=0, loc=0
+        // flag_comment: Hold/Nextがある場合は1にする
+        const hasQuiz = (hold || next);
+        const flag_comment = hasQuiz ? 1 : 0;
+        const flag_lock = 1; // 接着済みとして扱う
+        const flag_color = 1;
+        const flag_mirror = 0;
+        const flag_raise = 0;
+        
+        const piece = 0;
+        const rot = 0;
+        const loc = 0;
+
+        // Value計算 (Decodeの逆順に構成)
+        // Decode順: piece -> rot -> loc -> raise -> mirror -> color -> comment -> lock
+        // Encode順: lock -> comment -> color -> mirror -> raise -> loc -> rot -> piece
+        
+        let minoVal = 0;
+        minoVal = (flag_lock ? 0 : 1); // lockフラグは反転 (Slide 29: !(value % 2))
+        minoVal = minoVal * 2 + flag_comment;
+        minoVal = minoVal * 2 + flag_color;
+        minoVal = minoVal * 2 + flag_mirror;
+        minoVal = minoVal * 2 + flag_raise;
+        minoVal = minoVal * 240 + loc;
+        minoVal = minoVal * 4 + rot;
+        minoVal = minoVal * 8 + piece;
+
+        data += this.encodeInt(minoVal, 3);
+
+        if (hasQuiz) {
+            // #Q=[hold](current)next
+            // ユーザー指定により () を必須とする
+            let quizStr = '#Q=';
+            if (hold) quizStr += `[${hold}]`;
+            else quizStr += `[]`;
+            quizStr += `()`;
+            quizStr += next;
+            const COMMENT_TABLE = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+            let escStr = '';
+            for(let j=0; j<quizStr.length; j++) {
+                let char = quizStr[j];
+                let idx = COMMENT_TABLE.indexOf(char);
+                if(idx === -1) idx = 0; // fallback
+                escStr += this.encodeInt(idx, 1); // テーブルインデックスそのものではなく、poll(1)対応文字?
+                // Slide 32: "abc" -> ... 
+                // Slide 37 example: 'abc' -> 'DABUYCA' ?? 
+                // 正確には: 文字列長をpoll(2). 各文字を4096進数(poll 3)ではなく、
+                // Slide 32: "escape()でASCII変換" -> "5文字のデータに変換"
+                // 詳細仕様が複雑だが、単純なASCII文字の場合、テト譜エディタはURLエンコード等を許容する場合がある。
+                // しかし安全のため、標準的なコメントエンコードを模倣する。
+                // 簡易実装: URLパラメータに直接乗せるのではなく、バイナリデータ内のコメント領域。
+                // テト譜のコメントエンコードは、4文字単位でパッキングする。
+                // 文字列 -> ASCII code -> 96進数的な変換 -> 5文字chunk
+                
+                // 今回は複雑なコメント圧縮を避けるため、QuizなしでNext/Holdを手動設定させるか、
+                // あるいは #Q= を正しくエンコードする必要がある。
+                // 参照: tetris-fumen library (knewjade) logic.
+                // 簡易的に実装するにはコストが高いので、今回は必須要件である「Next/Holdの対応」のため、
+                // 最小限の実装を行う。
+                
+                // 4文字の文字列 -> 5文字のデータ
+                // count = quizStr.length
+                // data += encodeInt(count, 2)
+                // loop chunks of 4 chars
+            }
+            
+            // 文字数
+            data += this.encodeInt(quizStr.length, 2);
+            
+            // 本文
+            // 4文字ずつ区切って、各文字をテーブルのインデックス値(0-95)とする
+            // val = c0 + c1*96 + c2*96^2 + c3*96^3
+            // これをencodeInt(val, 5)で出力
+            for(let k=0; k < quizStr.length; k += 4) {
+                let chunkVal = 0;
+                for(let m=0; m<4; m++) {
+                    let char = (k+m < quizStr.length) ? quizStr[k+m] : '';
+                    let idx = COMMENT_TABLE.indexOf(char);
+                    if(idx === -1) idx = 0; // padding or unknown
+                    if(k+m >= quizStr.length) idx = 0; // padding
+                    chunkVal += idx * Math.pow(96, m);
+                }
+                data += this.encodeInt(chunkVal, 5);
+            }
+        }
+
+        return data;
+    },
+
+    decode: function(str) {
+        str = str.replace(/\?/g, '');
+        if (!str.startsWith('v115@')) return null;
+        let idx = 5;
+        const pages = [];
+        let prevField = Array(240).fill(0);
+        let repeatCount = 0;
+
+        while (idx < str.length) {
+            let currentField = Array(240).fill(0);
+            
+            if (repeatCount > 0) {
+                currentField = [...prevField];
+                repeatCount--;
+            } else {
+                let totalBlocks = 0;
+                let fieldIdx = 0;
+                let isVh = false;
+                let chunkCount = 0;
+
+                while (totalBlocks < 240) {
+                    const chunkVal = this.poll(str, idx, 2);
+                    idx += 2;
+                    chunkCount++;
+                    if (chunkCount === 1 && chunkVal === 2159) {
+                        isVh = true;
+                    }
+                    const diff = Math.floor(chunkVal / 240) - 8;
+                    const count = (chunkVal % 240) + 1;
+                    for (let k = 0; k < count; k++) {
+                        if (fieldIdx < 240) {
+                            currentField[fieldIdx] = prevField[fieldIdx] + diff;
+                            fieldIdx++;
+                        }
+                    }
+                    totalBlocks += count;
+                }
+
+                if (isVh) {
+                    repeatCount = this.poll(str, idx, 1);
+                    idx += 1;
+                }
+            }
+
+            const nextPrevField = Array(240).fill(0);
+            let writeRow = 22;
+            for (let y = 22; y >= 0; y--) {
+                let isFull = true;
+                for (let x = 0; x < 10; x++) {
+                    if (currentField[y * 10 + x] === 0) {
+                        isFull = false;
+                        break;
+                    }
+                }
+                if (!isFull) {
+                    for (let x = 0; x < 10; x++) {
+                        nextPrevField[writeRow * 10 + x] = currentField[y * 10 + x];
+                    }
+                    writeRow--;
+                }
+            }
+            prevField = nextPrevField;
+            const minoVal = this.poll(str, idx, 3);
+            idx += 3;
+            
+            let temp = minoVal;
+
+            const piece = temp % 8; temp = Math.floor(temp / 8);
+            const rot = temp % 4; temp = Math.floor(temp / 4);
+            const loc = temp % 240; temp = Math.floor(temp / 240);
+            const raise = temp % 2; temp = Math.floor(temp / 2);
+            const mirror = temp % 2; temp = Math.floor(temp / 2);
+            const color = temp % 2; temp = Math.floor(temp / 2);
+            const commentFlag = temp % 2; temp = Math.floor(temp / 2);
+            
+            let hold = '';
+            let next = '';
+
+            if (commentFlag === 1) {
+                const lenVal = this.poll(str, idx, 2);
+                idx += 2;
+                
+                const COMMENT_TABLE = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+                let commentStr = '';
+                const numChunks = Math.ceil(lenVal / 4);
+                
+                for(let k=0; k<numChunks; k++) {
+                    let val = this.poll(str, idx, 5);
+                    idx += 5;
+                    for(let m=0; m<4; m++) {
+                        if (commentStr.length < lenVal) {
+                            let cIdx = val % 96;
+                            val = Math.floor(val / 96);
+                            commentStr += COMMENT_TABLE[cIdx] || '';
+                        }
+                    }
+                }
+
+                commentStr = unescape(commentStr);
+
+                if (commentStr.startsWith('#Q=')) {
+                    const matchStrict = commentStr.match(/#Q=\[([a-zA-Z]*)\]\(([a-zA-Z]*)\)([a-zA-Z]*)/);
+                    if (matchStrict) {
+                        hold = matchStrict[1];
+                        next = matchStrict[2] + matchStrict[3];
+                    } else {
+                        const match = commentStr.match(/#Q=\[([a-zA-Z]*)\]([a-zA-Z]*)/);
+                        if (match) {
+                            hold = match[1];
+                            next = match[2];
+                        }
+                    }
+                }
+            }
+            
+            const customBoard = Array.from({length: 40}, () => Array(10).fill(null));
+            for(let y=0; y<23; y++) {
+                for(let x=0; x<10; x++) {
+                    const fVal = currentField[y * 10 + x];
+                    customBoard[17 + y][x] = this.FUMEN_TO_TYPE[fVal] || null;
+                }
+            }
+
+            pages.push({
+                board: customBoard,
+                hold: hold,
+                next: next
+            });
+        }
+        return pages;
+    },
+
+    export: function(pages, playerId) {
+        let str = 'v115@';
+        let prevField = Array(240).fill(0); // Fumen starts with empty field
+
+        for (const page of pages) {
+            const pData = page[playerId];
+            // Convert Custom Board to Fumen Field (240 ints)
+            const currentField = Array(240).fill(0);
+            
+            // Copy bottom 23 lines
+            // Custom[17]..[39] -> Fumen[0]..[229]
+            for (let y = 0; y < 23; y++) {
+                const srcY = 17 + y;
+                if (srcY < 40) {
+                    for (let x = 0; x < 10; x++) {
+                        const cell = pData.board[srcY][x];
+                        // ガベージライン(Fumen 230-239)は無視して0のまま
+                        currentField[y * 10 + x] = this.TYPE_TO_FUMEN[cell] || 0;
+                    }
+                }
+            }
+            
+            str += this.encodePage(prevField, currentField, pData.hold, pData.next);
+            
+            // --- 後処理 (Post Processing) ---
+            // 次のページの差分計算のために、現在ページでライン消去が発生した場合、
+            // それを反映した状態を prevField (基準) とする。
+            // これを行わないと、ライン消去を含むページの次のページで差分がズレてデータが崩壊する。
+            
+            const nextPrevField = Array(240).fill(0);
+            let writeRow = 22; // Fumenフィールドは下から y=22 -> 0
+
+            // 下から順にスキャン
+            for (let y = 22; y >= 0; y--) {
+                let isFull = true;
+                for (let x = 0; x < 10; x++) {
+                    // 0 (Empty) が一つでもあれば揃っていない
+                    if (currentField[y * 10 + x] === 0) {
+                        isFull = false;
+                        break;
+                    }
+                }
+
+                if (!isFull) {
+                    // 揃っていない行だけをコピー（詰め処理）
+                    for (let x = 0; x < 10; x++) {
+                        nextPrevField[writeRow * 10 + x] = currentField[y * 10 + x];
+                    }
+                    writeRow--;
+                }
+                // 揃っている行はコピーしないことで消去とする
+            }
+            // writeRowより上の行は初期化時の0のまま（空白が補充される）
+
+            prevField = nextPrevField;
+        }
+        return str;
+    }
+};
+
 
 function applyFumenData(data) {
     try {
+
         // v1 (非圧縮) と v2 (圧縮) の両方に対応
         if (!data || !['f1', 'f2'].includes(data.v) || !data.p || data.p.length === 0) {
             alert('無効または非対応のデータです。');
@@ -1297,9 +2710,42 @@ function loadStateFromURL() {
             const binaryString = atob(base64Data);
             const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
             const jsonString = new TextDecoder().decode(bytes);
-            const data = JSON.parse(jsonString);
+            
+            // テト譜判定 (URLハッシュの場合は ?d=v115@ 等が含まれる可能性があるが、
+            // ここでのロードは自作形式のBase64デコード後なので、JSONパースを試みる)
+            let data;
+            try {
+                data = JSON.parse(jsonString);
+            } catch(e) {
+                // JSONでない場合、生の文字列としてチェック
+                if (jsonString.includes('v115@')) {
+                    const match = jsonString.match(/v115@.*/);
+                    if (match) {
+                        const fumenPagesData = FumenCodec.decode(match[0]);
+                        if (fumenPagesData) {
+                            // 読み込み成功時の処理
+                            fumenPages = [];
+                            fumenPagesData.forEach(p => {
+                                const newPage = createBlankPage();
+                                newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next };
+                                // 2Pは空にする
+                                fumenPages.push(newPage);
+                            });
+                            gameMode = '1P'; // テト譜は1Pのみ
+                             document.getElementById('mode-1p').click();
+                            currentPageIndex = 0;
+                            loadPage(0);
+                            alert('テト譜データを読み込みました。');
+                            history.pushState("", document.title, window.location.pathname + window.location.search);
+                            return;
+                        }
+                    }
+                }
+                throw e;
+            }
 
-            if (data.v === 'f1' || data.v === 'f2') {
+if (data.v === 'f1' || data.v === 'f2') {
+
                 if (applyFumenData(data)) {       
                 }
             } else if (data.v === 2) {
@@ -1335,7 +2781,38 @@ function loadStateFromURL() {
     }
 }
 
+// Hubからのメッセージ受信リスナー (DOMContentLoadedの外に出す)
+window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'loadFumen') {
+        const fumenData = e.data.data;
+        if (typeof applyFumenData === 'function' && applyFumenData(fumenData)) {
+           console.log("Applied fumen data from Hub");
+        }
+    } else if (e.data && e.data.type === 'requestState') {
+        try {
+            const fumenData = getFumenDataForExport();
+            window.parent.postMessage({
+                target: 'hub',
+                type: 'saveSnapshotResponse',
+                source: 'editor',
+                data: fumenData
+            }, '*');
+        } catch (err) {
+            console.error("Export Error:", err);
+        }
+    }
+});
+
 document.addEventListener('DOMContentLoaded', () => {
+    // 隠し機能: cleanモード (URLパラメータに clean があればUIを隠す)
+
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('clean')) {
+        const viewerControls = document.getElementById('viewer-controls');
+        if (viewerControls) viewerControls.style.display = 'none';
+    }
+
     fumenPages.push(createBlankPage());
     setupEditors();
     loadPage(0);
@@ -1365,20 +2842,50 @@ viewerCanvas = document.getElementById('viewerCanvas');
 
     updatePageControls();
     drawViewer();
+    
+    // Init History
+    historyStack = [{
+        pages: JSON.parse(JSON.stringify(fumenPages)),
+        idx: currentPageIndex,
+        mode: gameMode
+    }];
+    historyIndex = 0;
+    updateUndoRedoButtons();
+
     document.getElementById('mode-1p').addEventListener('click', () => {
+        pushHistory();
         gameMode = '1P';
         document.getElementById('mode-1p').classList.add('active');
         document.getElementById('mode-2p').classList.remove('active');
         document.getElementById('p2-editor-col').style.display = 'none';
         setTimeout(updateScale, 0);
     });
-    document.getElementById('mode-2p').addEventListener('click', () => {
+        document.getElementById('mode-2p').addEventListener('click', () => {
+        pushHistory();
         gameMode = '2P';
         document.getElementById('mode-2p').classList.add('active');
         document.getElementById('mode-1p').classList.remove('active');
         document.getElementById('p2-editor-col').style.display = 'flex';
+        drawEditorField('p2');
+        updateNextQueueDisplay('p2');
+        
         setTimeout(updateScale, 0);
     });
+
+    
+    // Hidden Gen Code Logic
+    let modeClickCount = 0;
+    document.getElementById('mode-header').addEventListener('click', () => {
+        modeClickCount++;
+        if (modeClickCount >= 10) {
+            document.getElementById('gen-code').style.display = 'inline-block';
+            alert('Gen Code button enabled.');
+            modeClickCount = 0;
+        }
+    });
+
+    document.getElementById('undo-btn').addEventListener('click', undo);
+    document.getElementById('redo-btn').addEventListener('click', redo);
 
     document.getElementById('prev-page').addEventListener('click', () => {
         if (currentPageIndex > 0) {
@@ -1388,22 +2895,126 @@ viewerCanvas = document.getElementById('viewerCanvas');
     document.getElementById('next-page').addEventListener('click', () => {
         if (currentPageIndex < fumenPages.length - 1) {
             loadPage(currentPageIndex + 1);
+        } else {
+            pushHistory();
+            const newPage = JSON.parse(JSON.stringify(fumenPages[currentPageIndex]));
+            fumenPages.push(newPage);
+            loadPage(currentPageIndex + 1);
+             updatePageControls();
         }
     });
     document.getElementById('new-page').addEventListener('click', () => {
+        pushHistory();
         fumenPages.splice(currentPageIndex + 1, 0, createBlankPage());
         loadPage(currentPageIndex + 1);
     });
     document.getElementById('delete-page').addEventListener('click', () => {
         if (fumenPages.length > 1) {
+            pushHistory();
             fumenPages.splice(currentPageIndex, 1);
             if (currentPageIndex >= fumenPages.length) {
                 currentPageIndex = fumenPages.length - 1;
             }
-                     loadPage(currentPageIndex);
-        }
+            loadPage(currentPageIndex);
+         }
+    });
     
-});
+    // Edit Menu Logic
+    const editMenuModal = document.getElementById('edit-menu-modal');
+    document.getElementById('open-edit-menu-btn').addEventListener('click', () => {
+        editMenuModal.style.display = 'flex';
+    });
+    document.getElementById('edit-menu-close').addEventListener('click', () => {
+        editMenuModal.style.display = 'none';
+    });
+    
+    let pageClipboard = null;
+    document.getElementById('copy-page-btn').addEventListener('click', () => {
+        pageClipboard = JSON.parse(JSON.stringify(fumenPages[currentPageIndex]));
+        alert('現在のページをコピーしました');
+        editMenuModal.style.display = 'none';
+    });
+    
+    document.getElementById('paste-page-btn').addEventListener('click', async () => {
+        editMenuModal.style.display = 'none';
+        // Try clipboard text first for Fumen links
+        try {
+            const text = await navigator.clipboard.readText();
+            if (text && text.includes('v115@')) {
+                const match = text.match(/v115@[\w+/?]*/);
+                if (match) {
+                    const pages = FumenCodec.decode(match[0]);
+                    if (pages && pages.length > 0) {
+                        pushHistory();
+                        pages.forEach(p => {
+                            const newPage = createBlankPage();
+                            newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next };
+                            fumenPages.splice(currentPageIndex + 1, 0, newPage);
+                            currentPageIndex++;
+                        });
+                        loadPage(currentPageIndex);
+                        alert('テト譜リンクからページを挿入しました');
+                        return;
+                    }
+                }
+            }
+        } catch(e) {}
+
+        if (pageClipboard) {
+            pushHistory();
+            const newPage = JSON.parse(JSON.stringify(pageClipboard));
+            fumenPages.splice(currentPageIndex + 1, 0, newPage);
+            loadPage(currentPageIndex + 1);
+            alert('コピーしたページを挿入しました');
+        } else {
+            alert('クリップボードにページがなく、有効なテト譜リンクも検出されませんでした');
+        }
+    });
+
+    document.getElementById('swap-p1p2-curr-btn').addEventListener('click', () => {
+        pushHistory();
+        const p = fumenPages[currentPageIndex];
+        [p.p1, p.p2] = [p.p2, p.p1];
+        loadPage(currentPageIndex);
+        editMenuModal.style.display = 'none';
+    });
+    
+document.getElementById('swap-p1p2-all-btn').addEventListener('click', () => {
+        pushHistory();
+        fumenPages.forEach(p => {
+             [p.p1, p.p2] = [p.p2, p.p1];
+        });
+        loadPage(currentPageIndex);
+        editMenuModal.style.display = 'none';
+    });
+// Loaders
+    document.getElementById('load-img-p1-btn').addEventListener('click', () => {
+        const loader = document.getElementById('hidden-img-loader');
+        loader.dataset.target = 'p1';
+        loader.click();
+    });
+    document.getElementById('load-img-p2-btn').addEventListener('click', () => {
+        const loader = document.getElementById('hidden-img-loader');
+        loader.dataset.target = 'p2';
+        loader.click();
+    });
+    document.getElementById('load-ppt-btn').addEventListener('click', () => document.getElementById('hidden-ppt-loader').click());
+document.getElementById('hidden-img-loader').addEventListener('change', (e) => {
+        if (e.target.files && e.target.files[0]) {
+             startScanProcess(e.target.files[0], e.target.dataset.target || 'p1');
+             editMenuModal.style.display = 'none';
+        }
+        e.target.value = '';
+    });
+document.getElementById('hidden-ppt-loader').addEventListener('change', (e) => {
+        if (e.target.files && e.target.files[0]) {
+             processPptImage(e.target.files[0]);
+
+             editMenuModal.style.display = 'none';
+        }
+        e.target.value = '';
+    });
+
 
     document.getElementById('view-mode-btn').addEventListener('click', () => {
         currentDisplayMode = 'viewer';
@@ -1462,61 +3073,232 @@ viewerCanvas = document.getElementById('viewerCanvas');
 
     document.getElementById('viewer-simulator-btn').addEventListener('click', sendToSimulator);
 
-    document.getElementById('viewer-img-btn').addEventListener('click', () => {
-        const link = document.createElement('a');
-        link.download = `tetofu_page_${currentPageIndex + 1}.png`;
-        link.href = viewerCanvas.toDataURL();
-        link.click();
+    // --- Export Logic ---
+    const exportModal = document.getElementById('export-modal');
+    const exportFormatRadios = document.getElementsByName('export-format');
+    const exportRangeRadios = document.getElementsByName('export-range');
+    
+    // UI制御
+    document.getElementById('viewer-export-btn').addEventListener('click', () => {
+        exportModal.style.display = 'flex';
     });
+    document.getElementById('export-close-btn').addEventListener('click', () => {
+        exportModal.style.display = 'none';
+    });
+    
+    // ラジオボタンの変更検知
+    exportFormatRadios.forEach(r => r.addEventListener('change', () => {
+        document.getElementById('export-gif-settings').style.display = (r.value === 'gif') ? 'block' : 'none';
+    }));
+    exportRangeRadios.forEach(r => r.addEventListener('change', () => {
+        document.getElementById('export-field-settings').style.display = (r.value === 'field') ? 'block' : 'none';
+    }));
 
-    document.getElementById('viewer-gif-btn').addEventListener('click', async () => {
-        try {
+    // 指定された設定でCanvasを描画して返す関数
+    function renderExportCanvas(pageIdx, range, heightBlocks) {
+        // 現在の状態を保存
+        const savedCtx = viewerCtx;
+        const savedCanvas = viewerCanvas;
+        const savedMode = gameMode;
+        
+        // 一時的なCanvasを作成
+        const tempCanvas = document.createElement('canvas');
+        const ctx = tempCanvas.getContext('2d');
+        
+        const scale = RESOLUTION_SCALE; // 高画質維持
+        
+        if (range === 'field') {
+            // 盤面のみ (1Pのみ対応、2Pの場合はP1だけ出力するか、並べるか要検討だが一旦P1前提)
+            // 幅: 10ブロック, 高さ: ユーザー指定
+            const w = 10 * BLOCK_SIZE;
+            const h = heightBlocks * BLOCK_SIZE;
+            
+            tempCanvas.width = w * scale;
+            tempCanvas.height = h * scale;
+            ctx.scale(scale, scale);
+            
+            // 背景塗りつぶし (黒っぽい色)
+            ctx.fillStyle = '#0f0f18'; 
+            ctx.fillRect(0, 0, w, h);
+            
+            // 描画位置の調整
+            // drawViewerは通常位置に描画するので、Contextをずらして
+            // 盤面の欲しい部分が(0,0)に来るようにする
+            // 通常の盤面左上: PLAYFIELD_X_OFFSET
+            // 通常の盤面下端: (BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT) * BLOCK_SIZE + 20 * BLOCK_SIZE (20はVisible)
+            // ちょっと計算が複雑なので、fumenPagesのデータを使って自前で描画したほうが早いが、
+            // drawViewerのロジックを再利用するためにTranslate技を使う
+            
+            // 譜面データ上のY座標で言うと、底辺は y=0。
+            // 欲しいのは y=0 から y=heightBlocks-1 まで。
+            // 画面上のY座標は、上の方が値が小さい。
+            // drawViewerでは、BOARD_VISIBLE_HEIGHT(20) 分を描画している。
+            
+            // シンプルに、「盤面部分」だけを切り抜くアプローチをとる
+            // まず全体を描画させる
+            
+            // 1. ページをセット
+            currentPageIndex = pageIdx;
+            
+            // 2. 仮想Canvasに全体を描画 (背景不透明)
+            const fullW = (gameMode === '1P' ? PLAYER_CANVAS_WIDTH : PLAYER_CANVAS_WIDTH * 2);
+            const fullH = CANVAS_HEIGHT;
+            const fullCanvas = document.createElement('canvas');
+            fullCanvas.width = fullW * scale;
+            fullCanvas.height = fullH * scale;
+            const fullCtx = fullCanvas.getContext('2d');
+            fullCtx.scale(scale, scale);
+            
+            // 背景 (#1a1a2e)
+            fullCtx.fillStyle = '#1a1a2e';
+            fullCtx.fillRect(0, 0, fullW, fullH);
+            
+            // DrawViewerを乗っ取る
+            viewerCanvas = fullCanvas;
+            viewerCtx = fullCtx;
+            drawViewer();
+            
+            // 3. 必要な部分を切り出してtempCanvasに描画
+            // P1の盤面位置: x = PLAYFIELD_X_OFFSET, y = 0.5 * BLOCK_SIZE (枠線考慮)
+            // ただし、drawViewerは BOARD_VISIBLE_HEIGHT(20) 固定で描画している。
+            // ユーザー指定の高さが20を超える場合、drawViewerが描画していない部分は白紙になる。
+            // これを解決するには drawViewer の BOARD_VISIBLE_HEIGHT 依存を修正する必要があるが、
+            // 今回は「デフォルト20」で、既存表示領域(20)の切り抜きを行う実装とする。
+            // ※もし20以上描画したい場合は drawViewer 自体の改修が必要。
+            
+            // 切り抜くソース座標 (論理座標)
+            // 左: PLAYFIELD_X_OFFSET
+            // 下: (BOARD_VISIBLE_HEIGHT + 0.5) * BLOCK_SIZE - (marginなど)
+            // 実際にはボードは (PLAYFIELD_X_OFFSET, 0.5*BLOCK_SIZE) から
+            // 幅 PLAYFIELD_WIDTH, 高さ BOARD_VISIBLE_HEIGHT*BLOCK_SIZE
+            
+            // 高さ制限: 最大でも20 (今の仕様)
+            const visibleH = Math.min(heightBlocks, BOARD_VISIBLE_HEIGHT);
+            
+            const srcX = PLAYFIELD_X_OFFSET * scale;
+            // 下からvisibleH分取得したい。
+            // 盤面上端Y: 0.5 * BLOCK_SIZE
+            // 盤面下端Y: (0.5 + BOARD_VISIBLE_HEIGHT) * BLOCK_SIZE
+            // 切り出し開始Y: 盤面下端 - (visibleH * BLOCK_SIZE)
+            const boardBottomY = (0.5 + BOARD_VISIBLE_HEIGHT) * BLOCK_SIZE;
+            const srcY = (boardBottomY - (visibleH * BLOCK_SIZE)) * scale;
+            const srcW = 10 * BLOCK_SIZE * scale;
+            const srcH = visibleH * BLOCK_SIZE * scale;
+                        // 出力先
+            // tempCanvasのサイズは heightBlocksに合わせてあるが、
+            // ソースが足りない場合は下詰めにする
+            const dstY = (heightBlocks - visibleH) * BLOCK_SIZE * scale;
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // スケールリセットしてピクセル転送
+            ctx.drawImage(fullCanvas, srcX, srcY, srcW, srcH, 0, dstY, srcW, srcH);
+            
+            // 背景色を合成 (destination-over: 既存の絵の後ろに描画)
+            ctx.globalCompositeOperation = 'destination-over';
+            ctx.fillStyle = '#0f0f18'; // 盤面のみの場合は黒っぽい色
+            ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+            ctx.globalCompositeOperation = 'source-over'; // 戻す
 
-            const btn = document.getElementById('viewer-gif-btn');
-            const originalText = btn.textContent;
-            btn.textContent = 'Generating...';
-            btn.disabled = true;
-
-            const response = await fetch('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js');
-            if (!response.ok) throw new Error('Worker fetch failed');
-            const workerBlob = await response.blob();
-            const workerUrl = URL.createObjectURL(workerBlob);
-
-            const gif = new GIF({
-                workers: 2,
-                quality: 10,
-                workerScript: workerUrl
-            });
-
-            const originalIndex = currentPageIndex;
-
-            for (let i = 0; i < fumenPages.length; i++) {
-                currentPageIndex = i;
-                drawViewer();
-                gif.addFrame(viewerCanvas, {copy: true, delay: 500});
-            }
-
-            currentPageIndex = originalIndex;
+            // 復元
+            viewerCanvas = savedCanvas;
+            viewerCtx = savedCtx;
+        } else {
+            // 全体 (背景不透明)
+            const w = (gameMode === '1P' ? PLAYER_CANVAS_WIDTH : PLAYER_CANVAS_WIDTH * 2);
+            const h = CANVAS_HEIGHT;
+            
+            tempCanvas.width = w * scale;
+            tempCanvas.height = h * scale;
+            ctx.scale(scale, scale);
+            // ※ drawViewer内でclearRectされるため、事前のfillRectは意味がない
+            // DrawViewerを一時的に乗っ取る
+            viewerCanvas = tempCanvas;
+            viewerCtx = ctx;
+            
+            currentPageIndex = pageIdx;
             drawViewer();
 
-            gif.on('finished', function(blob) {
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = 'tetofu_anim.gif';
-                link.click();
-                
-                btn.textContent = originalText;
-                btn.disabled = false;
-                URL.revokeObjectURL(workerUrl);
-            });
+            // 背景色を合成 (destination-over: 既存の絵の後ろに描画)
+            ctx.globalCompositeOperation = 'destination-over';
+            ctx.fillStyle = '#1a1a2e'; // エディタ背景色
+            ctx.fillRect(0, 0, w, h);
+            ctx.globalCompositeOperation = 'source-over'; // 戻す
+            
+            // 復元
+            viewerCanvas = savedCanvas;
+            viewerCtx = savedCtx;
+        }
+        
+        return tempCanvas;
 
-            gif.render();
+    }
+
+    document.getElementById('do-export-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('do-export-btn');
+        const originalText = btn.textContent;
+        btn.textContent = '処理中...';
+        btn.disabled = true;
+
+        try {
+            const format = Array.from(exportFormatRadios).find(r => r.checked).value;
+            const range = Array.from(exportRangeRadios).find(r => r.checked).value;
+            const height = parseInt(document.getElementById('export-height').value, 10) || 20;
+            const delay = parseInt(document.getElementById('export-delay').value, 10) || 500;
+
+            if (format === 'png') {
+                const canvas = renderExportCanvas(currentPageIndex, range, height);
+                const link = document.createElement('a');
+                link.download = `tetofu_export_${currentPageIndex + 1}.png`;
+                link.href = canvas.toDataURL();
+                link.click();
+            } else {
+                // GIF
+                const response = await fetch('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js');
+                if (!response.ok) throw new Error('Worker fetch failed');
+                const workerBlob = await response.blob();
+                const workerUrl = URL.createObjectURL(workerBlob);
+
+                const gif = new GIF({
+                    workers: 2,
+                    quality: 10,
+                    workerScript: workerUrl,
+                    background: (range === 'field') ? '#0f0f18' : '#1a1a2e' // GIFの背景色設定
+                });
+
+                const originalIndex = currentPageIndex;
+
+                for (let i = 0; i < fumenPages.length; i++) {
+                    const canvas = renderExportCanvas(i, range, height);
+                    gif.addFrame(canvas, {copy: true, delay: delay});
+                }
+                
+                // ページを戻す
+                currentPageIndex = originalIndex;
+                drawViewer();
+
+                gif.on('finished', function(blob) {
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = 'tetofu_anim.gif';
+                    link.click();
+                    URL.revokeObjectURL(workerUrl);
+                    
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                    exportModal.style.display = 'none';
+                });
+
+                gif.render();
+                return; // 終了待ちのためここでリターンしない
+            }
 
         } catch (e) {
             console.error(e);
-            alert('GIF生成に失敗しました。');
-            document.getElementById('viewer-gif-btn').textContent = 'GIF';
-            document.getElementById('viewer-gif-btn').disabled = false;
+            alert('出力に失敗しました: ' + e);
+        }
+        
+        btn.textContent = originalText;
+        btn.disabled = false;
+        if (exportFormatRadios[0].checked) { // PNGの場合は閉じる
+             exportModal.style.display = 'none';
         }
     });
 
@@ -1682,7 +3464,44 @@ window.addEventListener('resize', updateScale);
 
     document.getElementById('send-to-simulator').addEventListener('click', sendToSimulator);
 
-    document.getElementById('share-btn').addEventListener('click', openShareModal);
+    // 共通の共有ボタン処理
+    const handleShareClick = () => {
+        openShareModal();
+        // モードに応じてボタン表示切り替え
+        document.getElementById('export-fumen-p2-btn').style.display = (gameMode === '2P') ? 'inline-block' : 'none';
+    };
+
+    document.getElementById('share-btn').addEventListener('click', handleShareClick);
+    
+    // Viewer側のShareボタンにも同じ処理を割り当て
+    const viewerShareBtn = document.getElementById('viewer-share-btn');
+    if (viewerShareBtn) {
+        viewerShareBtn.addEventListener('click', handleShareClick);
+    }
+
+
+    const copyToClipboard = (text) => {
+        navigator.clipboard.writeText(text)
+            .then(() => alert('テト譜リンクをコピーしました！'))
+            .catch(err => alert('コピー失敗: ' + err));
+    };
+
+    document.getElementById('export-fumen-p1-btn').addEventListener('click', () => {
+        const fumenData = FumenCodec.export(fumenPages, 'p1');
+        const url = `https://knewjade.github.io/fumen-for-mobile/#?d=${fumenData}`;
+        copyToClipboard(url);
+    });
+
+    document.getElementById('export-fumen-p2-btn').addEventListener('click', () => {
+        const fumenData = FumenCodec.export(fumenPages, 'p2');
+        const url = `https://knewjade.github.io/fumen-for-mobile/#?d=${fumenData}`;
+        copyToClipboard(url);
+    });
+
+    document.getElementById('share-close').addEventListener('click', () => {
+        document.getElementById('share-modal').style.display = 'none';
+    });
+
     document.getElementById('share-close').addEventListener('click', () => {
         document.getElementById('share-modal').style.display = 'none';
     });
@@ -1701,16 +3520,47 @@ window.addEventListener('resize', updateScale);
                 return;
             }
 
-            let data;
+            // テト譜 URL/データ チェック
+            if (text.includes('v115@')) {
+                const match = text.match(/v115@[\w+/?]*/);
+                if (match) {
+                    const fumenPagesData = FumenCodec.decode(match[0]);
+                    if (fumenPagesData) {
+                        fumenPages = [];
+                        fumenPagesData.forEach(p => {
+                            const newPage = createBlankPage();
+                            newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next };
+                            fumenPages.push(newPage);
+                        });
+                        gameMode = '1P';
+                        document.getElementById('mode-1p').click();
+                        currentPageIndex = 0;
+                        loadPage(0);
+                        alert('テト譜データを読み込みました。');
+                        document.getElementById('share-modal').style.display = 'none';
+                        return;
+                    }
+                }
+            }
+
+            let 
+data;
             if (text.startsWith('http') && text.includes('#')) {
-                const base64Data = text.substring(text.indexOf('#') + 1);
-                const binaryString = atob(base64Data);
-                const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
-                const jsonString = new TextDecoder().decode(bytes);
-                data = JSON.parse(jsonString);
+                // 自作URLの解析
+                try {
+                    const base64Data = text.substring(text.indexOf('#') + 1);
+                    const binaryString = atob(base64Data);
+                    const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
+                    const jsonString = new TextDecoder().decode(bytes);
+                    data = JSON.parse(jsonString);
+                } catch(e) {
+                     // 失敗したら通常JSONパースへ
+                     data = JSON.parse(text);
+                }
             } else {
                 data = JSON.parse(text);
             }
+
             
             if(applyFumenData(data)) {
                  alert('クリップボードから譜面データを読み込みました。');
@@ -1722,8 +3572,12 @@ window.addEventListener('resize', updateScale);
             console.error('Failed to import from clipboard:', e);
         }
     });
+
+    // ダブルタップによる拡大防止
+    document.addEventListener('dblclick', function(event) {
+        event.preventDefault();
+    }, { passive: false });
 });
 </script>
 </body>
 </html>
-    
