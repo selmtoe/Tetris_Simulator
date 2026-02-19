@@ -2802,7 +2802,7 @@ window.addEventListener('message', (e) => {
     } else if (e.data && e.data.type === 'requestFumenUrl') {
         try {
             const fumenData = FumenCodec.export(fumenPages, 'p1');
-            const url = `https://knewjade.github.io/fumen-for-mobile/#?d=v115@${fumenData}`;
+            const url = `https://knewjade.github.io/fumen-for-mobile/#?d=${fumenData}`;
             window.parent.postMessage({
                 target: 'hub',
                 type: 'fumenUrlResponse',
