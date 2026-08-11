@@ -1,0 +1,328 @@
+<!DOCTYPE html> 
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1a2e">
+<title>譜面エディタ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+<link rel="stylesheet" href="./styles/fumen.css">
+</head>
+<body>
+
+<div class="main-container">
+    <div id="editor-container">
+        <div class="edit-section top-controls">
+            <div class="mode-selection">
+                <h2 id="mode-header" style="cursor: pointer; user-select: none;">MODE</h2>
+                <div class="button active" id="mode-1p">1P</div>
+                <div class="button" id="mode-2p">2P</div>
+                <button id="share-btn" style="margin-left: 15px;">共有</button>
+                <button id="send-to-simulator" style="margin-left: 5px; background-color: #00a000;">Simulator</button>
+                <button id="view-mode-btn" style="margin-left: 5px; background-color: #30a070;">View</button>
+                <button id="gen-code" style="margin-left: 5px; background-color: #00a0f0; display: none;">Gen Code</button>
+            </div>
+            <div class="page-controls">
+                <button id="prev-page">Prev ‹</button>
+                <span id="page-indicator">Page 1 / 1</span>
+                <button id="next-page">Next ›</button>
+                
+                <button id="new-page" style="margin-left: 15px;">新規追加</button>
+                <button id="delete-page">削除</button>
+
+                <button id="undo-btn" class="button undo-redo-btn" style="margin-left: 15px;" title="Undo">
+                    <svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.17 8 12.5 8z"/></svg>
+                </button>
+                <button id="redo-btn" class="button undo-redo-btn" title="Redo">
+                    <svg viewBox="0 0 24 24"><path d="M18.4 10.6C16.55 9 14.15 8 11.5 8c-4.67 0-8.58 3.03-9.96 7.22l2.37.78c1.05-3.19 4.05-5.5 7.59-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
+                </button>
+                
+                <button id="open-edit-menu-btn" style="margin-left: 15px;">編集</button>
+            </div>
+        </div>
+
+        <div class="player-editors">
+            <div class="editor-column" id="p1-editor-col">
+                <div class="edit-section next-editor">
+                    <h2>PLAYER 1 - NEXT</h2>
+                    <div class="mino-icons" id="p1-next-icons"></div>
+                    <div class="next-queue-display" id="p1-next-queue"></div>
+                    <div class="button-group" style="margin-top: 10px;">
+                        <button class="button" id="p1-next-delete-left">Delete</button>
+                        <button class="button" id="p1-next-clear">Clear</button>
+                    </div>
+                </div>
+                <div class="edit-section field-editor">
+                    <h2>PLAYER 1 - FIELD</h2>
+                    <div class="color-palette" id="p1-palette"></div>
+                    <canvas id="field-editor-canvas-p1"></canvas>
+                    <div class="field-controls">
+                        <button class="button" id="p1-field-shift-up">↑ Up</button>
+                        <button class="button" id="p1-field-shift-down">↓ Down</button>
+                        <button class="button" id="p1-field-shift-left">← Left</button>
+                        <button class="button" id="p1-field-shift-right">→ Right</button>
+                        <button class="button" id="p1-field-clear">Clear</button>
+                    </div>
+                </div>
+            </div>
+            <div class="editor-column" id="p2-editor-col" style="display: none;">
+                <div class="edit-section next-editor">
+                    <h2>PLAYER 2 - NEXT</h2>
+                    <div class="mino-icons" id="p2-next-icons"></div>
+                    <div class="next-queue-display" id="p2-next-queue"></div>
+                    <div class="button-group" style="margin-top: 10px;">
+                        <button class="button" id="p2-next-delete-left">Delete</button>
+                        <button class="button" id="p2-next-clear">Clear</button>
+                    </div>
+                </div>
+                <div class="edit-section field-editor">
+                    <h2>PLAYER 2 - FIELD</h2>
+                    <div class="color-palette" id="p2-palette"></div>
+                    <canvas id="field-editor-canvas-p2"></canvas>
+                    <div class="field-controls">
+                        <button class="button" id="p2-field-shift-up">↑ Up</button>
+                        <button class="button" id="p2-field-shift-down">↓ Down</button>
+                        <button class="button" id="p2-field-shift-left">← Left</button>
+                        <button class="button" id="p2-field-shift-right">→ Right</button>
+                        <button class="button" id="p2-field-clear">Clear</button>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+<div id="viewer-container">
+    <canvas id="viewerCanvas"></canvas>
+    <div id="viewer-controls"> 
+        <div class="viewer-top-row">
+            <span id="viewer-page-indicator">Page 1 / 1</span>
+            <button id="viewer-simulator-btn" class="button">Simulator</button>
+            <button id="back-to-editor-btn" class="button">Editor</button>
+            <button id="viewer-share-btn" class="button">共有</button>
+            <button id="viewer-export-btn" class="button">出力</button>
+            <button id="viewer-ai-score-btn" class="button">AI採点</button>
+        </div>
+        <div class="viewer-slider-container">
+            <input type="range" id="viewer-page-slider" min="0" max="0" value="0">
+        </div>
+    </div>
+</div>
+
+<div id="code-gen-modal">
+    <div id="code-gen-content">
+        <h2>Generate Simulator Code</h2>
+                <div id="code-gen-tabs">
+            <button class="button active" data-type="check">Check Blocks</button>
+            <button class="button" data-type="ghost">Draw Ghost</button>
+            <button class="button" data-type="place">Place Blocks</button>
+            <button class="button" data-type="export">Export P1 Data</button>
+            <button class="button" data-type="analyze">Analyze</button>
+     </div>
+        <textarea id="code-gen-output" readonly></textarea>
+        <div id="code-gen-controls">
+                    <button id="copy-code-button" class="button">Copy to Clipboard</button>
+            <button id="close-modal-button" class="button">Close</button>
+        </div>
+    </div>
+</div>
+
+<div id="export-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center; z-index: 200;">
+    <div class="modal-content" style="background-color: var(--bg-color); padding: 25px; border-radius: 10px; border: 2px solid var(--primary-color); width: 90%; max-width: 500px; font-family: var(--font-ui);">
+        <h2 style="margin-top:0;">画像/GIF出力</h2>
+        
+        <div class="export-option-group">
+            <h4>形式</h4>
+            <label class="radio-label"><input type="radio" name="export-format" value="png" checked> PNG画像</label>
+            <label class="radio-label"><input type="radio" name="export-format" value="gif"> GIFアニメ</label>
+        </div>
+
+        <div class="export-option-group">
+            <h4>範囲</h4>
+            <label class="radio-label"><input type="radio" name="export-range" value="all" checked> 全体 (Hold/Next含む)</label>
+            <label class="radio-label"><input type="radio" name="export-range" value="field"> 盤面のみ</label>
+        </div>
+
+        <div class="export-option-group" id="export-field-settings" style="display:none;">
+            <h4>盤面設定</h4>
+            <label>高さ: <input type="number" id="export-height" class="number-input" value="20" min="1" max="40"> ブロック</label>
+        </div>
+
+        <div class="export-option-group" id="export-gif-settings" style="display:none;">
+            <h4>GIF設定</h4>
+            <label>フレーム遅延: <input type="number" id="export-delay" class="number-input" value="500" min="50" step="50"> ms</label>
+        </div>
+
+        <div class="modal-controls" style="text-align: center; margin-top: 15px;">
+            <button id="do-export-btn" class="button" style="margin-right: 10px;">出力</button>
+            <button id="export-close-btn" class="button">キャンセル</button>
+        </div>
+    </div>
+</div>
+
+<div id="share-modal" style="position: fixed;
+top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center;
+z-index: 200;">
+
+    <div class="modal-content" style="background-color: var(--bg-color); padding: 25px; border-radius: 10px; border: 2px solid var(--primary-color); width: 90%;
+max-width: 500px; font-family: var(--font-ui);">
+        <h2>共有</h2>
+        
+        <div class="share-section">
+
+            <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">エクスポート</h3>
+            <p></p>
+            <div class="share-item" style="display: flex; flex-direction: column; align-items: flex-start;">
+                 <span>共有リンク</span>
+                <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box; background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; font-family: var(--font-ui);">
+                <div style="display: flex;
+gap: 10px; margin-top: 5px; flex-wrap: wrap;">
+                    <button id="copy-link-btn" class="button">リンクをコピー</button>
+                    <button id="export-fumen-p1-btn" class="button" >1Pテト譜コピー</button>
+                    <button id="export-fumen-p2-btn" class="button" style="display: none;">2Pテト譜コピー</button>
+                </div>
+            </div>
+        </div>
+
+        
+        <hr style="border-color: var(--primary-color); margin: 20px 0;">
+        
+        <div class="share-section">
+            <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">インポート</h3>
+            <p></p>
+            <button id="import-from-data-btn" class="button">クリップボードからインポート</button>
+        </div>
+
+        <div class="modal-controls" style="text-align: center;
+margin-top: 15px;">
+            <button id="share-close" class="button">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<div id="ai-score-modal" class="ai-score-modal" aria-hidden="true">
+    <div class="ai-score-content" role="dialog" aria-modal="true" aria-labelledby="ai-score-title">
+        <h2 id="ai-score-title">AI採点 <span>（P1のみ）</span></h2>
+        <section class="ai-score-setting">
+            <div class="ai-score-setting-head">
+                <label>採点範囲</label>
+                <output id="ai-score-range-label" for="ai-score-range-start ai-score-range-end"></output>
+            </div>
+            <div class="ai-score-dual-range">
+                <div id="ai-score-range-track" class="ai-score-range-track"></div>
+                <input id="ai-score-range-start" class="ai-score-range-input" type="range" min="1" max="1" value="1" aria-label="採点開始ページ">
+                <input id="ai-score-range-end" class="ai-score-range-input" type="range" min="1" max="1" value="1" aria-label="採点終了ページ">
+            </div>
+        </section>
+
+        <section class="ai-score-setting">
+            <div class="ai-score-setting-head">
+                <label for="ai-score-nodes">AIの思考量</label>
+                <output id="ai-score-nodes-label" for="ai-score-nodes"></output>
+            </div>
+            <input id="ai-score-nodes" class="ai-score-slider" type="range" min="500" max="20000" step="500" value="5000">
+        </section>
+
+        <section class="ai-score-setting">
+            <div class="ai-score-setting-head">
+                <label for="ai-score-plan-length">AIの予定表示手数</label>
+                <output id="ai-score-plan-length-label" for="ai-score-plan-length"></output>
+            </div>
+            <input id="ai-score-plan-length" class="ai-score-slider" type="range" min="1" max="12" step="1" value="6">
+        </section>
+
+        <section class="ai-score-setting">
+            <div class="ai-score-setting-head">
+                <label for="ai-score-threshold">悪手判定（評価値の差）</label>
+                <output id="ai-score-threshold-label" for="ai-score-threshold"></output>
+            </div>
+            <input id="ai-score-threshold" class="ai-score-slider" type="range" min="500" max="2000" step="100" value="1000">
+        </section>
+
+        <div class="ai-score-actions">
+            <button id="ai-score-run" class="button">AI採点を実行</button>
+            <button id="ai-score-stop" class="button ai-score-danger" hidden>中止</button>
+            <button id="ai-score-close" class="button">閉じる</button>
+        </div>
+        <p id="ai-score-status" class="ai-score-status" aria-live="polite"></p>
+
+        <section id="ai-score-results" class="ai-score-results" hidden>
+            <h3>悪手一覧</h3>
+            <p id="ai-score-summary"></p>
+            <div id="ai-score-list" class="ai-score-list"></div>
+            <p id="ai-score-mobile-warning" class="ai-score-warning" hidden>上部17行にブロックがある局面があります。譜面エディタ形式は完全に保存されますが、Fumen for Mobile は仕様上、上部を保持できません。</p>
+            <div class="ai-score-exports">
+                <button id="ai-score-open-editor" class="button" disabled>譜面エディタで開く</button>
+                <button id="ai-score-copy-editor" class="button" disabled>編集用リンクをコピー</button>
+                <button id="ai-score-copy-mobile" class="button" disabled>Fumen for Mobileをコピー</button>
+                <button id="ai-score-open-mobile" class="button" disabled>Fumen for Mobileを開く</button>
+            </div>
+        </section>
+    </div>
+</div>
+
+<div id="edit-menu-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center; z-index: 200;">
+    <div class="modal-content" style="background-color: var(--bg-color); padding: 25px; border-radius: 10px; border: 2px solid var(--primary-color); width: 90%; max-width: 400px; font-family: var(--font-ui);">
+        <h2 style="margin-top:0;">編集メニュー</h2>
+        
+        <div class="edit-menu-grid">
+            <div class="edit-menu-item">
+                <label>ページ操作</label>
+                <button id="copy-page-btn" class="button">コピー</button>
+                <button id="paste-page-btn" class="button">ペースト</button>
+       </div>
+            <div class="edit-menu-item">
+                <label>画像認識</label>
+                <div style="display: flex; gap: 5px;">
+                    <button id="load-img-p1-btn" class="button" style="flex: 1; padding: 8px 4px;">IMG (P1)</button>
+                    <button id="load-img-p2-btn" class="button" style="flex: 1; padding: 8px 4px;">IMG (P2)</button>
+                </div>
+                <button id="load-ppt-btn" class="button" style="margin-top: 5px;">Load PPT</button>
+            </div>
+            <div class="edit-menu-item">
+                <label>入替</label>
+                <button id="swap-p1p2-curr-btn" class="button">1P⇄2P (現ページ)</button>
+                <button id="swap-p1p2-all-btn" class="button">1P⇄2P (全ページ)</button>
+            </div>
+        </div>
+
+        <div class="modal-controls" style="text-align: center; margin-top: 15px;">
+            <button id="edit-menu-close" class="button">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<input type="file" id="hidden-img-loader" accept="image/*" style="display: none;">
+<input type="file" id="hidden-ppt-loader" accept="image/*" style="display: none;">
+
+<div id="scanner-container">
+    <div id="scan-instructions">左下をクリックしてください</div>
+    <canvas id="scanner-canvas"></canvas>
+    <div id="scan-controls">
+        <button id="scan-next-step-btn" class="button" style="display: none;">次へ</button>
+        <button id="scan-confirm-btn" class="button" style="display: none;">読込開始</button>
+        <button id="scan-cancel-btn" class="button">キャンセル</button>
+    </div>
+</div>
+
+<script defer src="./app/00-debug-console.js"></script>
+<script defer src="./app/10-state.js"></script>
+<script defer src="./app/20-editor.js"></script>
+<script defer src="./app/30-viewer.js"></script>
+<script defer src="./app/40-history.js"></script>
+<script defer src="./app/50-scanner.js"></script>
+<script defer src="./app/60-fumen-codec.js"></script>
+<script defer src="./app/70-hub-bridge.js"></script>
+<script defer src="./app/80-editor-bootstrap.js"></script>
+<script defer src="./app/81-export-controls.js"></script>
+<script defer src="./app/82-code-generator.js"></script>
+<script defer src="./app/83-share-controls.js"></script>
+<script defer src="./app/84-ai-scoring.js"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+
+        body { font-family: sans-serif; background: #202020; color: #fff; padding: 20px; }
+        h1 { border-bottom: 2px solid #444; padding-bottom: 10px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .control-panel { background: #333; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: grid; gap: 15px; }
+        .btn { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        .btn:disabled { background: #555; cursor: not-allowed; }
+        .btn:hover:not(:disabled) { background: #0056b3; }
+        
+        #logArea { 
+            background: #000; border: 1px solid #555; padding: 10px; 
+            height: 200px; overflow-y: scroll; font-family: monospace; 
+            white-space: pre-wrap; margin-top: 10px; font-size: 12px;
+        }
+        .log-error { color: #ff4444; font-weight: bold; }
+        .log-info { color: #00ff00; }
+        .log-warn { color: #ffff00; }
+
+        .preview-area { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+        canvas { border: 1px solid #555; max-width: 100%; height: auto; }
+        
+        .result-box { background: #444; padding: 15px; margin-top: 20px; border-radius: 5px; }
+        a.sim-link { color: #4db8ff; text-decoration: none; font-size: 18px; word-break: break-all; }
+        a.sim-link:hover { text-decoration: underline; }
+
+        .hidden { display: none; }
+    

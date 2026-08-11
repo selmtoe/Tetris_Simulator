@@ -1,0 +1,338 @@
+<!DOCTYPE html> 
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1a2e">
+<link rel="manifest" id="manifest-link" href="./manifest.webmanifest">
+<title>Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-V7TV25SK5M"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-V7TV25SK5M');
+</script>
+<link rel="stylesheet" href="./styles/simulator.css?v=app-v5">
+</head>
+<body>
+<div id="debug-console-overlay"></div>
+<script>
+    // エラーを画面に表示する仕組み
+    (function(){
+        const consoleDiv = document.getElementById('debug-console-overlay');
+        function logError(msg) {
+            consoleDiv.textContent += "ERROR: " + msg + "\n----------------\n";
+            consoleDiv.style.display = 'block';
+        }
+        window.onerror = function(msg, url, line, col, error) {
+            logError(`${msg}\nAt: ${line}:${col}\n${error ? error.stack : ''}`);
+            return false;
+        };
+        window.onunhandledrejection = function(e) {
+            logError(`Unhandled Promise Rejection: ${e.reason}`);
+        };
+    })();
+</script>
+
+<div class="main-container">
+    <div id="editor-container">
+        <div class="edit-section top-controls">
+<div class="mode-selection">
+    <h2>MODE</h2>
+    <div class="button active" id="mode-1p">1P</div>
+    <div class="button" id="mode-2p">2P</div>
+    <button id="settingsBtn" class="button" style="margin-left: 15px;">設定</button>
+     <button id="shareBtn" class="button" style="margin-left: 5px;">共有</button>
+     <button id="ruleBtn" class="button" style="margin-left: 5px;">ルール</button>
+     <button id="swapBtn" class="button" style="margin-left: 5px; display: none;">入れ替え</button>
+</div>
+            <button id="startGameBtn" class="button">START GAME</button>
+        </div>
+
+<div class="player-editors">
+            <div class="editor-column" id="p1-editor-col">
+                <div class="edit-section next-editor">
+                    <h2>PLAYER 1 - NEXT</h2>
+                    <div class="mino-icons" id="p1-next-icons"></div>
+                    <div class="next-queue-display" id="p1-next-queue"></div>
+                    <div class="button-group">
+                        <button class="button" id="p1-next-delete-left">Delete</button>
+                        <button class="button" id="p1-next-clear">Clear</button>
+                    </div>
+                </div>
+                <div class="edit-section field-editor">
+                    <h2>PLAYER 1 - FIELD</h2>
+                    <div class="color-palette" id="p1-palette"></div>
+
+<canvas id="field-editor-canvas-p1"></canvas>
+                    <div class="field-controls">
+                        <button class="button" id="p1-field-shift-up">↑ Up</button>
+                        <button class="button" id="p1-field-shift-down">↓ Down</button>
+                        <button class="button" id="p1-field-clear">Clear</button>
+                        <button class="button" id="p1-field-line-clear">Line Clear</button>
+                        <label for="imageLoader-p1" class="button">Img</label>
+                        <input type="file" id="imageLoader-p1" data-player="p1" accept="image/*">
+                        <label for="pptLoader-p1" class="button">PPT</label>
+                        <input type="file" id="pptLoader-p1" data-player="p1" accept="image/*">
+                    </div>
+<div class="key-config-controls" style="margin-top: 15px; text-align: center; display: flex; justify-content: center; align-items: center; gap: 10px;">
+                        <label class="setting-item" style="padding:0; margin:0;">
+                            <input type="checkbox" id="p1-ai-toggle">
+                            <span>AI</span>
+                        </label>
+                        <button class="button" id="p1-key-config-btn">操作設定</button>
+                    </div>
+                </div>
+            </div>
+<div class="editor-column" id="p2-editor-col" style="display: none;">
+                <div class="edit-section next-editor">
+                    <h2>PLAYER 2 - NEXT</h2>
+                    <div class="mino-icons" id="p2-next-icons"></div>
+                    <div class="next-queue-display" id="p2-next-queue"></div>
+                    <div class="button-group">
+                        <button class="button" id="p2-next-delete-left">Delete</button>
+                        <button class="button" id="p2-next-clear">Clear</button>
+                    </div>
+                </div>
+                <div class="edit-section field-editor">
+                    <h2>PLAYER 2 - FIELD</h2>
+                    <div class="color-palette" id="p2-palette"></div>
+<canvas id="field-editor-canvas-p2"></canvas>
+                    <div class="field-controls">
+                        <button class="button" id="p2-field-shift-up">↑ Up</button>
+                        <button class="button" id="p2-field-shift-down">↓ Down</button>
+                        <button class="button" id="p2-field-clear">Clear</button>
+                        <button class="button" id="p2-field-line-clear">Line Clear</button>
+                        <label for="imageLoader-p2" class="button">Img</label>
+                        <input type="file" id="imageLoader-p2" data-player="p2" accept="image/*">
+                        <label for="pptLoader-p2" class="button">PPT</label>
+                        <input type="file" id="pptLoader-p2" data-player="p2" accept="image/*">
+                    </div>
+<div class="key-config-controls" style="margin-top: 15px; text-align: center; display: flex; justify-content: center; align-items: center; gap: 10px;">
+                        <label class="setting-item" style="padding:0; margin:0;">
+                            <input type="checkbox" id="p2-ai-toggle">
+                            <span>AI</span>
+                        </label>
+                        <button class="button" id="p2-key-config-btn">操作設定</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<div id="game-container">
+<div id="rule-description-display" style="display: none; position: absolute; z-index: 155; color: var(--font-color); background: rgba(26, 26, 46, 0.9); padding: 15px; border-radius: 10px; border: 2px solid #4b4b7c; font-family: var(--font-ui); font-size: 14px; max-width: 200px; max-height: 400px; overflow-y: auto; box-sizing: border-box; word-wrap: break-word; backdrop-filter: blur(4px);"></div>
+<div id="ai-debug-display" style="display: none; position: absolute; z-index: 156; color: white; background: rgba(0,0,0,0.7); padding: 5px; font-family: monospace; font-size: 10px; left: 10px; top: 300px; max-height: 400px; overflow: auto;"></div>
+
+<div id="ai-debug-controls" style="display: none; position: absolute; z-index: 156; color: white; background: rgba(0,0,0,0.7); padding: 5px; font-family: monospace; font-size: 12px;
+left: 10px; top: 150px;">
+    <input id="ai-debug-piece" placeholder="Piece (T)" size="3">
+    <input id="ai-debug-x" placeholder="X" size="2">
+    <input id="ai-debug-y" placeholder="Y" size="2">
+    <input id="ai-debug-rot" placeholder="Rot" size="2">
+    <button id="ai-debug-execute">Execute</button>
+</div>
+<div id="ai-tree-debug-display" style="display: none; position: fixed; z-index: 157; color: white; background: rgba(0,0,0,0.7); padding: 5px; font-family: monospace; font-size: 12px; left: 10px; top: 10px;"></div>
+<canvas id="mainCanvas"></canvas>
+<div id="scan-instructions" style="display: none;"></div>
+
+        <div id="scan-controls" style="display: none; margin-top: 15px; gap: 10px; justify-content:center;">
+             <button id="scanConfirmBtn" class="button">次へ</button>
+             <button id="scanCancelBtn" class="button">キャンセル</button>
+        </div>
+    </div>
+</div>
+
+<div id="game-controls" style="display: none;
+position: fixed; top: 10px; right: 10px; z-index: 160; gap: 10px;">
+     <button id="analyzeBtn" class="button" hidden aria-hidden="true">分析</button>
+     <button id="pcSearchBtn" class="button" type="button">PC探索</button>
+     <button id="exportFumenBtn" class="button">記録</button>
+     <button id="retryBtn" class="button">リトライ</button>
+     <button id="gameSettingsBtn" class="button">設定</button>
+     <button id="backToEditorBtn" class="button">戻る</button>
+</div>
+
+<div id="analysis-modal">
+    <div id="analysis-content">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>分析</h2>
+            <button id="analysis-close" class="button">閉じる</button>
+        </div>
+        <div id="analysis-stats"></div>
+        <div id="analysis-canvas-container">
+            <canvas id="analysisCanvas"></canvas>
+        </div>
+    </div>
+</div>
+
+<div id="virtual-controller-container">
+
+    <div id="vc-edit-controls" style="display: none;">
+        <button id="vc-save-and-close-btn" class="button">保存して閉じる</button>
+    </div>
+    <canvas id="virtualControllerCanvas"></canvas>
+</div>
+
+<div id="settings-modal">
+    <div class="modal-content">
+<div class="modal-tabs">
+            <button class="tab-button active" data-tab="general">基本設定</button>
+            <button class="tab-button" data-tab="p1-keys">1P操作設定</button>
+            <button class="tab-button" data-tab="p2-keys" id="p2-keys-tab-btn" style="display: none;">2P操作設定</button>
+            <button class="tab-button" data-tab="layout-settings">描画設定</button>
+            <button class="tab-button" data-tab="ai-settings">AI設定</button>
+        </div>
+
+        <div class="tab-content active" id="tab-content-general">
+             <h2 style="margin-top: 20px;"></h2>
+             <p></p>
+             <div id="settings-list"></div>
+        </div>
+
+        <div class="tab-content" id="tab-content-p1-keys">
+            <h2 style="margin-top: 20px;">PLAYER 1 - 操作設定</h2>
+            <p></p>
+            <div id="p1-key-config-list" class="key-config-list-container"></div>
+            
+            <h3><br>タッチ操作設定 (P1)</h3>
+            <p></p>
+                        <div id="p1-touch-mode-selection" style="display: flex;
+justify-content: center; gap: 10px; margin-bottom: 15px;">
+                <button class="button active" data-touch-mode="button">Button</button>
+                <button class="button" data-touch-mode="draw">Draw</button>
+            </div>
+            <div id="p1-touch-draw-controls" style="display: none; margin-top: 15px; justify-content: center;">
+                 <div class="setting-item" style="padding: 5px 15px; max-width: 300px;">
+                    <label for="draw-move-delay-input">操作間隔 (ms)</label>
+                    <input type="number" id="draw-move-delay-input" min="0" max="200" step="1" style="width: 80px; min-width: 80px;">
+                </div>
+            </div>
+            <div class="modal-controls" id="p1-touch-button-controls" style="display: flex;
+justify-content: center; gap: 10px; flex-wrap: wrap;">
+                <button id="vc-edit-layout-btn" class="button">ボタン配置モードへ</button>
+                <button id="vc-copy-layout-btn" class="button">配置をコピー</button>
+
+                <button id="vc-paste-layout-btn" class="button">配置をインポート</button>
+            </div>
+        </div>
+        
+        <div class="tab-content" id="tab-content-p2-keys">
+         <h2 style="margin-top: 20px;">PLAYER 2 - 操作設定</h2>
+            <p></p>
+            <div id="p2-key-config-list" class="key-config-list-container"></div>
+        </div>
+
+        <div class="tab-content" id="tab-content-layout-settings">
+            <h2 style="margin-top: 20px;">描画設定</h2>
+            <p></p>
+            <div id="layout-settings-list" class="key-config-list-container"></div>
+        </div>
+
+        <div class="tab-content" id="tab-content-ai-settings">
+            <h2 style="margin-top: 20px;">AI設定</h2>
+            <p></p>
+            <div id="ai-settings-list" class="key-config-list-container"></div>
+        </div>
+        
+        <div class="modal-controls" style="border-top: 1px solid var(--primary-color); padding-top: 15px; margin-top: 20px;">
+            <button id="settings-close" class="button">保存して閉じる</button>
+        </div>
+    </div>
+</div>
+
+<div id="share-modal">
+    <div class="modal-content">
+        <h2>共有</h2>
+        
+        <div class="share-section">
+            <h3>エクスポート</h3>
+            <p></p>
+            <div class="share-item">
+                <span>共有リンク</span>
+                <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box;">
+                <div style="display: flex; gap: 10px; margin-top: 5px;">
+                    <button id="copy-link-btn" class="button">リンクをコピー</button>
+                    <button id="advanced-link-btn" class="button">詳細なリンク生成</button>
+                </div>
+            </div>
+            <div id="advanced-link-options" style="display: none; margin-top: 15px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px;">
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="start-sim-checkbox">
+                        <span>シミュレーションを即スタート</span>
+                    </label>
+                </div>
+<div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="no-hold-checkbox">
+                        <span>ホールドを禁止</span>
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="hide-back-btn-checkbox" disabled>
+                        <span>戻るボタンを非表示</span>
+                    </label>
+                </div>
+                 <button id="generate-advanced-link-btn" class="button" style="margin-top: 10px;">リンクを再生成</button>
+            </div>
+        </div>
+        
+        <hr style="border-color: var(--primary-color); margin: 20px 0;">
+        
+
+        <div class="share-section">
+            <h3>インポート</h3>
+            <p></p>
+            <button id="import-from-data-btn" class="button">クリップボードからインポート</button>
+        </div>
+
+
+        <div class="modal-controls">
+            <button id="share-close" class="button">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<div id="rule-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center; z-index: 200;">
+    <div class="modal-content" style="width: 90%; max-width: 700px;">
+        <h2>カスタムルール</h2>
+        
+        <div class="rule-section" style="margin-bottom: 20px;">
+            <h3>説明</h3>
+            <p style="font-size: 14px; color: #ccc; margin-top: 5px; margin-bottom: 10px;">ここに記述した内容は、ゲーム画面の左側（ホールドの下）に表示されます。</p>
+            <textarea id="rule-description-input" style="width: 100%; height: 100px; background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; font-family: var(--font-ui); box-sizing: border-box; resize: vertical;"></textarea>
+        </div>
+
+        <div class="rule-section">
+            <h3>コード (JS)</h3>
+            <p style="font-size: 14px; color: #ccc; margin-top: 5px; margin-bottom: 10px;">ゲームのクリア・オーバー条件などをプログラムで定義します。</p>
+            <textarea id="rule-code-input" style="width: 100%; height: 250px; background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; font-family: monospace; box-sizing: border-box; resize: vertical;"></textarea>
+        </div>
+
+        <div class="modal-controls" style="border-top: 1px solid var(--primary-color); padding-top: 15px; margin-top: 20px;">
+            <button id="rule-save-close" class="button">保存して閉じる</button>
+            <button id="rule-close" class="button">キャンセル</button>
+        </div>
+    </div>
+</div>
+
+<script defer src="./simulator/app/virtual-controller.js"></script>
+<script defer src="./simulator/app/runtime-config.js?v=app-v5"></script>
+<script defer src="./simulator/app/player-engine.js?v=app-v5"></script>
+<script defer src="./simulator/app/pc-finder.js?v=app-v5"></script>
+<script defer src="./simulator/app/editor.js"></script>
+<script defer src="./simulator/app/settings.js?v=app-v5"></script>
+<script defer src="./simulator/app/scanner.js"></script>
+<script defer src="./simulator/app/state-transport.js?v=app-v5"></script>
+<script defer src="./simulator/app/bootstrap.js?v=app-v5"></script>
+</body>
+</html>

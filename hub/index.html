@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tool Hub</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#1a1a2e">
+   
+    <style>
+        :root {
+            --bg-color: #1a1a2e;
+            --accent-color: #4b4b7c;
+            --active-color: #6a6aff;
+            --icon-bg: rgba(30, 30, 50, 0.9);
+            --splitter-width: 8px;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            font-family: sans-serif;
+        }
+
+        /* Desktop Area */
+        #desktop-area {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+
+        /* --- Tab Mode --- */
+        #desktop-area.tab-mode { display: block; }
+        #desktop-area.tab-mode .app-window { display: none; width: 100% !important; height: 100% !important; left: 0 !important; top: 0 !important; border: none; }
+        #desktop-area.tab-mode .app-window.active { display: flex; z-index: 2; }
+        #desktop-area.tab-mode #splitter { display: none; }
+        #desktop-area.tab-mode .window-header, #desktop-area.tab-mode .window-resizer { display: none; }
+
+        /* --- Split Mode --- */
+        #desktop-area.split-mode { display: flex;flex-direction: row-reverse; }
+        #desktop-area.split-mode.reverse { flex-direction: row;}
+        #desktop-area.split-mode .app-window { display: none; flex: 1; min-width: 0; width: auto !important; height: 100% !important; left: auto !important; top: auto !important; border: none; }
+        #desktop-area.split-mode .app-window.active { display: flex; position: relative; }
+        #desktop-area.split-mode .window-header, #desktop-area.split-mode .window-resizer { display: none; }
+        #desktop-area.split-mode #splitter {
+            display: flex;
+            width: var(--splitter-width);
+            background: #2a2a3e;
+            cursor: col-resize;
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            touch-action: none;
+        }
+        #desktop-area.split-mode #splitter::after {
+            content: "";
+            width: 2px;
+            height: 30px;
+            background: #555;
+            border-radius: 1px;
+        }
+
+        /* --- Window Mode --- */
+        #desktop-area.window-mode { display: block; height: calc(100% - 40px); overflow: hidden; }
+        #desktop-area.window-mode .app-window {
+            position: absolute;
+            background: #0f0f18;
+            border: 1px solid var(--accent-color);
+            border-radius: 5px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+        }
+        #desktop-area.window-mode .app-window.minimized { display: none !important; }
+        #desktop-area.window-mode #splitter { display: none; }
+
+        /* Window Components */
+        .window-header {
+            background: #2a2a3e;
+            color: #e0e0e0;
+            padding: 5px 10px;
+            font-size: 14px;
+            cursor: move;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+            font-family: var(--font-display);
+        }
+        .win-min-btn, .win-max-btn {
+            background: none;
+            border: none; color: #fff; cursor: pointer; font-weight: bold; padding: 0 5px;
+        }
+        .window-body { flex: 1; position: relative; width: 100%; height: 100%; }
+        .window-body iframe { width: 100%; height: 100%; border: none; display: block; }
+        .window-resizer {
+            position: absolute;
+            bottom: 0; right: 0;
+            width: 15px; height: 15px;
+            cursor: se-resize;
+            background: linear-gradient(135deg, transparent 50%, var(--active-color) 50%);
+            z-index: 10;
+        }
+
+        /* Overlays */
+        .overlay-btn {
+            position: absolute;
+            top: 15px; left: 50%; transform: translateX(-50%);
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            background: var(--icon-bg);
+            border: 2px solid var(--accent-color);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            color: #e0e0e0;
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer;
+            z-index: 10;
+            backdrop-filter: blur(4px);
+            transition: all 0.2s;
+            padding: 0; outline: none;
+        }
+        .overlay-btn:active { transform: translateX(-50%) scale(0.95); }
+        .overlay-btn svg { width: 24px; height: 24px; fill: currentColor; }
+        .overlay-btn:hover { border-color: var(--active-color); color: var(--active-color); box-shadow: 0 0 10px var(--active-color); }
+        /* Taskbar */
+
+        #taskbar {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            height: 40px;
+            background: #1a1a2e;
+            border-top: 1px solid var(--accent-color);
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            gap: 10px;
+            z-index: 10000;
+        }
+        #taskbar.hidden { display: none !important; }
+        .taskbar-item {
+            background: #2a2a3e;
+            color: #e0e0e0;
+            padding: 5px 15px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 13px;
+            border: 1px solid transparent;
+            user-select: none;
+        }
+        .taskbar-item:hover { border-color: var(--active-color); }
+        .taskbar-item.active { background: var(--accent-color); border-color: var(--active-color); }
+
+        /* FAB Menu */
+        .fab-container {
+            position: fixed;
+            bottom: 50px;
+            right: 25px;
+            display: flex;
+            flex-direction: column-reverse;
+            align-items: center;
+            gap: 15px;
+            z-index: 9999;
+            pointer-events: none;
+        }
+        .fab-btn {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: var(--icon-bg);
+            border: 2px solid var(--accent-color);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(4px);
+            transition: all 0.2s;
+            padding: 0;
+            outline: none;
+            color: #e0e0e0;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        .fab-btn:active { transform: scale(0.95); }
+        .fab-btn svg { width: 24px; height: 24px; fill: currentColor; }
+        .main-toggle { z-index: 10; width: 55px; height: 55px; pointer-events: auto; }
+        .main-toggle.open { transform: rotate(45deg); border-color: #ff4b4b; }
+
+        .sub-btn {
+            opacity: 0;
+            transform: translateY(20px) scale(0.5);
+            pointer-events: none;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .fab-container.open .sub-btn {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+        }
+        .fab-container.expand-down {
+            flex-direction: column;
+        }
+        .fab-container.expand-down .sub-btn {
+            transform: translateY(-20px) scale(0.5);
+        }
+        .fab-container.expand-down.open .sub-btn {
+            transform: translateY(0) scale(1);
+        }
+        .sub-btn.active {
+
+            border-color: var(--active-color);
+            box-shadow: 0 0 10px var(--active-color);
+            color: var(--active-color);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 10001;
+            justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: #1a1a2e;
+            border: 2px solid var(--accent-color);
+            border-radius: 10px;
+            padding: 20px;
+            width: 90%; max-width: 400px;
+            max-height: 80vh;
+            overflow-y: auto;
+            color: #e0e0e0;
+        }
+        .modal-header { display: flex; justify-content: space-between; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .file-item {
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(255,255,255,0.05);
+            padding: 10px; margin-bottom: 8px; border-radius: 5px;
+        }
+        .file-info { flex: 1; cursor: pointer; }
+        .file-date { font-size: 10px; color: #aaa; }
+        .delete-btn { color: #ff4b4b; background: none; border: none; cursor: pointer; padding: 5px; font-size: 24px; font-weight: bold; line-height: 1; display: flex; align-items: center;}
+        .rename-btn { color: #aaa; background: none; border: none; cursor: pointer; padding: 5px; margin-right: 5px; display: flex; align-items: center;}
+        .rename-btn svg, .control-btn svg { width: 18px; height: 18px; fill: currentColor; }
+        .tab-container { display: flex; gap: 5px; margin-bottom: 10px; }
+        .tab-btn { flex: 1; padding: 8px; background: rgba(255,255,255,0.05); border: 1px solid #444; color: #888; cursor: pointer; border-radius: 5px 5px 0 0; }
+        .tab-btn.active { background: var(--accent-color); color: #fff; border-color: var(--accent-color); }
+        .control-btn {
+            flex: 1; padding: 8px; background: rgba(255,255,255,0.1); border: 1px solid var(--accent-color);
+            color: #fff; border-radius: 5px; cursor: pointer; font-size: 12px; text-align: center; transition: background 0.2s;
+        }
+        .control-btn:hover { background: rgba(255,255,255,0.2); }
+        .modal-controls { display: flex; gap: 10px; margin-bottom: 15px; }
+
+        .setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .setting-row select, .setting-row input { background: var(--accent-color); color: #fff; border: 1px solid #fff; padding: 5px; border-radius: 4px; }
+
+        .toast {
+            position: fixed;
+            top: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); color: white; padding: 10px 20px;
+            border-radius: 20px; opacity: 0; pointer-events: none;
+            transition: opacity 0.3s;
+            z-index: 10005;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="desktop-area" class="tab-mode">
+        <div id="win-custom-editor" class="app-window" data-id="custom">
+            <div class="window-header">エディタ<div><button class="win-max-btn" onclick="toggleMaximizeWindow('custom')">□</button><button class="win-min-btn" onclick="minimizeWindow('custom')">_</button></div></div>
+            <div class="window-body">
+                <iframe id="iframe-editor-custom" src="../F/index.html"></iframe>
+            </div>
+            <div class="window-resizer"></div>
+   
+        </div>
+        <div id="win-official-editor" class="app-window" data-id="official">
+            <div class="window-header">fumen-for-mobile<div><button class="win-max-btn" onclick="toggleMaximizeWindow('official')">□</button><button class="win-min-btn" onclick="minimizeWindow('official')">_</button></div></div>
+            <div class="window-body">
+                <button id="official-import-btn" class="overlay-btn" onclick="importFromOfficial()" title="クリップボードからインポートしてシミュレータへ転送">
+                    <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+       
+                </button>
+                <iframe id="iframe-editor-official" src="https://knewjade.github.io/fumen-for-mobile/" style="background:#fff;"></iframe>
+            </div>
+            <div class="window-resizer"></div>
+        </div>
+
+
+        <div id="splitter"></div>
+
+        <div id="win-sim" class="app-window" data-id="sim">
+            <div class="window-header">シミュレータ<div><button class="win-max-btn" onclick="toggleMaximizeWindow('sim')">□</button><button class="win-min-btn" onclick="minimizeWindow('sim')">_</button></div></div>
+    
+            <div class="window-body">
+                <iframe id="iframe-sim" src="../index.html?v=app-v5"></iframe>
+            </div>
+            <div class="window-resizer"></div>
+        </div>
+    </div>
+
+    <div id="taskbar" class="hidden"></div>
+
+    <div class="fab-container" id="fabMenu">
+        <button class="fab-btn main-toggle" onclick="toggleMenu()">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+        </button>
+
+        <button class="fab-btn sub-btn" id="btn-split" onclick="toggleSplitMode()" title="画面分割(トグル)">
+            <svg viewBox="0 0 24 24" id="icon-split">
+                <path d="M4 18h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2zM4 8h6v8H4V8zm8 0h8v8h-8V8z"/>
+            </svg>
+        </button>
+
+        <button class="fab-btn sub-btn" id="btn-swap-side" onclick="swapSides()" title="左右入替 (分割時)">
+            <svg viewBox="0 0 24 24"><path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/></svg>
+        </button>
+        
+        <button class="fab-btn sub-btn" onclick="openSettings()" title="設定">
+            <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.06-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.73,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.06,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.43-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.49-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+        </button>
+
+        <button class="fab-btn sub-btn" onclick="saveCurrentState()" title="状態を手動保存">
+            <svg viewBox="0 0 24 24"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+        </button>
+
+        <button class="fab-btn sub-btn" onclick="openFileManager()" title="保存データ管理">
+            <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/></svg>
+        </button>
+
+        <button class="fab-btn sub-btn" id="btn-sim" onclick="switchTab('sim')" title="シミュレータへ (タブ時)">
+            <svg viewBox="0 0 24 24"><path d="M9 6h6v6h6v6H3v-6h6V6z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+
+        <button class="fab-btn sub-btn active" id="btn-editor" onclick="switchTab('editor')" title="エディタへ (タブ時)">
+            <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+        </button>
+    </div>
+
+    <div id="hubSettingsModal" class="modal" onclick="if(event.target === this) this.style.display='none'">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 onclick="triggerDevMode()" style="user-select:none;">設定</h3>
+                <button onclick="document.getElementById('hubSettingsModal').style.display='none'" style="background:none;border:none;color:white;cursor:pointer;">✕</button>
+            </div>
+            <div id="row-layout" class="setting-row" style="display:none;">
+                <span>表示レイアウト</span>
+                <select id="setting-layout">
+                    <option value="tab">タブ (全画面)</option>
+                    <option value="split">画面分割</option>
+                    <option value="window" id="opt-layout-window" style="display:none;">ウィンドウモード</option>
+                </select>
+            </div>
+            <div class="setting-row">
+                <span>デフォルトエディタ</span>
+                <select id="setting-editor">
+                    <option value="custom">エディタ</option>
+                    <option value="official">fumen-for-mobile</option>
+                </select>
+            </div>
+            <div class="setting-row">
+                <span>自動セーブ間隔</span>
+                <select id="setting-autosave">
+              
+                    <option value="60000">1分</option>
+                    <option value="300000">5分</option>
+                    <option value="600000">10分</option>
+                    <option value="0">しない</option>
+                </select>
+            </div>
+            <button id="btn-reset-layout" class="control-btn" style="width:100%;margin-top:10px; border-color:#ff4b4b; color:#ff4b4b; display:none;" onclick="resetWindowLayouts()">ウィンドウ配置を初期化</button>
+  
+            <button class="control-btn" style="width:100%;
+margin-top:10px;" onclick="saveHubSettings()">保存して適用</button>
+
+        </div>
+    </div>
+
+    <div id="fileModal" class="modal" onclick="if(event.target === this) this.style.display='none'">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>保存データ一覧</h3>
+                <button onclick="document.getElementById('fileModal').style.display='none'" style="background:none;border:none;color:white;cursor:pointer;">✕</button>
+            </div>
+            <div class="tab-container">
+                <button class="tab-btn active" id="tab-manual" onclick="switchSaveTab('manual')">手動セーブ</button>
+                <button class="tab-btn" id="tab-auto" onclick="switchSaveTab('auto')">自動セーブ</button>
+            </div>
+            <div class="modal-controls">
+                <button class="control-btn" onclick="exportData()" style="display:flex; align-items:center; justify-content:center; gap:5px;">
+                    <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-14 9v2h14v-2H5z"/></svg>全保存
+                </button>
+                <button class="control-btn" onclick="triggerImport()" style="display:flex;
+align-items:center; justify-content:center; gap:5px;">
+                    <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg>読込
+                </button>
+                <button class="control-btn" onclick="deleteAllFiles()" style="border-color:#ff4b4b;
+color:#ff4b4b;">全削除</button>
+            </div>
+            <div style="display:flex; gap:5px; margin-bottom:15px;">
+                <input type="text" id="importUrlInput" placeholder="共有URLをペースト" style="flex:1; padding:8px; border-radius:5px; border:1px solid var(--accent-color); background:rgba(255,255,255,0.1); color:white; outline:none;">
+                <button class="control-btn" onclick="loadFromUrlInput()" style="flex:none; width:60px;">開く</button>
+            </div>
+            <div id="fileList"></div>
+
+        </div>
+    </div>
+    <input type="file" id="importFile" style="display:none" accept=".json" onchange="importData(this)">
+
+    <div id="toast" class="toast"></div>
+
+    <script type="module" src="./js/main.js?v=app-v5"></script>
+</body>
+</html>

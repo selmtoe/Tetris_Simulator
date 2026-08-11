@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tetris PPT Scanner</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <link rel="stylesheet" href="./ppt-scanner.css">
+</head>
+<body>
+
+<div class="container">
+    <h1>Tetris PPT Scanner</h1>
+    
+    <div class="control-panel">
+        <div style="display:none;">
+            <label>モデルファイル:</label>
+            <input type="file" id="modelInput" accept=".onnx">
+            <label>解析する画像: </label>
+            <input type="file" id="imageInput" accept="image/*">
+            <button id="runBtn" class="btn" disabled>解析実行</button>
+        </div>
+        <div id="statusMessage" style="font-size: 1.2em; font-weight: bold; color: #00ff00;">
+            拡張機能からの待機中...
+        </div>
+    </div>
+
+    <h3>System Logs</h3>
+    <div id="logArea"></div>
+
+    <div id="resultArea" class="result-box hidden">
+        <h3>解析結果</h3>
+        <p><a id="simLink" class="sim-link" target="_blank" href="#">生成中...</a></p>
+    </div>
+
+    <h3>Debug Preview</h3>
+    <div class="preview-area">
+        <canvas id="debugCanvas"></canvas>
+    </div>
+</div>
+
+<script src="./ppt-scanner.js"></script>
+</body>
+</html>
