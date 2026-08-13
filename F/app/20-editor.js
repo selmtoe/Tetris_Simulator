@@ -190,7 +190,7 @@ function setupPlayerEditor(playerId) {
         const icon = document.createElement('div');
         icon.className = 'mino-icon';
         icon.dataset.piece = type;
-        icon.style.backgroundColor = EDITOR_COLORS[type];
+        icon.style.backgroundColor = NEXT_COLORS[type];
         icon.title = `Add ${type} to this snapshot NEXT`;
         icon.addEventListener('click', () => {
             if (currentCaseIsReplay()) return;
@@ -292,7 +292,7 @@ function updateNextQueueDisplay(playerId) {
     qd.replaceChildren();
     const data = fumenPages[currentPageIndex]?.[playerId];
     if (!data) return;
-    const nextArr = String(displayNextForPage(playerId) || '').split('').filter(type => EDITOR_COLORS[type]);
+    const nextArr = String(displayNextForPage(playerId) || '').split('').filter(type => NEXT_COLORS[type]);
     if (data.nextInsertionIndex === undefined) data.nextInsertionIndex = -1;
     const createGap = index => {
         const gap = document.createElement('div');
@@ -319,7 +319,7 @@ function updateNextQueueDisplay(playerId) {
     holdSlot.style.width = '38px';
     holdSlot.style.height = '38px';
     holdSlot.style.cursor = 'pointer';
-    holdSlot.style.backgroundColor = data.hold ? (EDITOR_COLORS[data.hold] || '#333') : 'transparent';
+    holdSlot.style.backgroundColor = data.hold ? (NEXT_COLORS[data.hold] || '#333') : 'transparent';
     holdSlot.style.border = data.hold ? '2px solid transparent' : '2px dashed #555';
     if (data.nextInsertionIndex === 'hold') holdSlot.style.borderColor = '#fff';
     holdSlot.addEventListener('click', event => {
@@ -338,7 +338,7 @@ function updateNextQueueDisplay(playerId) {
         icon.style.width = '38px';
         icon.style.height = '38px';
         icon.style.flex = '0 0 38px';
-        icon.style.backgroundColor = EDITOR_COLORS[type] || '#333';
+        icon.style.backgroundColor = NEXT_COLORS[type] || '#333';
         icon.title = `NEXT ${index + 1}: ${type}`;
         icon.addEventListener('click', event => {
             event.stopPropagation();
@@ -403,7 +403,7 @@ function drawEditorField(playerId) {
     };
     data.placementDraft.forEach(([x, y]) => drawCell(x, y, '#fff', false));
     const operation = operationForPage(data);
-    if (operation) operationCells(operation).forEach(([x, y]) => drawCell(x, y, COLORS[operation.type] || '#fff', true));
+    if (operation) operationCells(operation).forEach(([x, y]) => drawCell(x, y, NEXT_COLORS[operation.type] || '#fff', true));
 }
 
 function updateScale() {

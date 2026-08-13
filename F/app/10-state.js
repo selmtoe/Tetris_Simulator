@@ -14,6 +14,8 @@ const CANVAS_HEIGHT = (BOARD_VISIBLE_HEIGHT + 0.5) * BLOCK_SIZE;
 const PLAYFIELD_X_OFFSET = HOLD_AREA_WIDTH + PADDING;
 // Official tetris-fumen dark/non-guideline mino palette.
 const COLORS = { 'I': '#009999', 'O': '#999900', 'T': '#990099', 'L': '#996600', 'J': '#0000bb', 'S': '#009900', 'Z': '#990000', 'G': '#999999' };
+// NEXT/HOLD and attached-piece previews retain the original bright palette.
+const NEXT_COLORS = { 'I': '#00ffff', 'O': '#ffff00', 'T': '#ff00ff', 'L': '#ff9900', 'J': '#0000ff', 'S': '#00ff00', 'Z': '#ff0000', 'G': '#cccccc' };
 const EDITOR_COLORS = {...COLORS, 'EMPTY': '#000000'};
 
 let gameMode = '1P';

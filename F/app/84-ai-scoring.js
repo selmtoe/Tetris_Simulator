@@ -250,7 +250,7 @@
             if (x < 0 || x >= BOARD_WIDTH || y < viewY || y >= viewY + BOARD_VISIBLE_HEIGHT) continue;
             const px = x * BLOCK_SIZE;
             const py = (y - viewY) * BLOCK_SIZE;
-            ctx.fillStyle = COLORS[move.piece] || '#fff';
+            ctx.fillStyle = NEXT_COLORS[move.piece] || '#fff';
             ctx.globalAlpha = 1;
             ctx.fillRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
             ctx.fillStyle = 'rgba(255,255,255,0.16)';

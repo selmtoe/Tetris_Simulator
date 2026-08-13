@@ -17,7 +17,7 @@ function getShape(p, r) {
 function drawViewerBlock(ctx, p, x, y, alpha = 1.0) {
     if(y < -BLOCK_SIZE) return;
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = COLORS[p] || '#FFF';
+    ctx.fillStyle = NEXT_COLORS[p] || '#FFF';
     ctx.fillRect(x, y, BLOCK_SIZE, BLOCK_SIZE);
     ctx.strokeStyle = '#444';
     ctx.lineWidth = 0.5;
@@ -154,7 +154,7 @@ if (playerData.board[boardY]?.[x]) {
                 if (x < 0 || x >= BOARD_WIDTH || visibleY < 0 || visibleY >= BOARD_VISIBLE_HEIGHT) return;
                 const drawX = x * BLOCK_SIZE;
                 const drawY = visibleY * BLOCK_SIZE;
-                viewerCtx.fillStyle = COLORS[operation.type] || '#fff';
+                viewerCtx.fillStyle = NEXT_COLORS[operation.type] || '#fff';
                 viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
                 viewerCtx.fillStyle = 'rgba(255,255,255,.16)';
                 viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
