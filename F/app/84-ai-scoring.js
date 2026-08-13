@@ -211,15 +211,15 @@
     function drawComparisonField(ctx, board, viewY) {
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(0, 0, PLAYFIELD_WIDTH, BOARD_VISIBLE_HEIGHT * BLOCK_SIZE);
-        ctx.strokeStyle = '#444';
+        ctx.strokeStyle = '#333333';
         ctx.lineWidth = 0.5;
         for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
             for (let x = 0; x < BOARD_WIDTH; x++) {
                 ctx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
             }
         }
-        ctx.strokeStyle = '#4b4b7c';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = 1;
         ctx.strokeRect(1, 1, PLAYFIELD_WIDTH - 2, BOARD_VISIBLE_HEIGHT * BLOCK_SIZE - 2);
 
         for (let visibleY = 0; visibleY < BOARD_VISIBLE_HEIGHT; visibleY++) {
@@ -237,7 +237,7 @@
                     ctx.fillStyle = 'rgba(255,255,255,0.3)';
                     ctx.fillRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
                 }
-                ctx.strokeStyle = '#444';
+                ctx.strokeStyle = '#333333';
                 ctx.lineWidth = 0.5;
                 ctx.strokeRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
             }
@@ -255,7 +255,7 @@
             ctx.fillRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
             ctx.fillStyle = 'rgba(255,255,255,0.16)';
             ctx.fillRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
-            ctx.strokeStyle = '#444';
+            ctx.strokeStyle = '#333333';
             ctx.lineWidth = 0.5;
             ctx.strokeRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
         }
