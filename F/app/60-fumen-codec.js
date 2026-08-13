@@ -1,16 +1,3 @@
-function normalizeCodecOperation(value) {
-    if (typeof normalizeOperation === 'function') return normalizeOperation(value);
-    if (!value || typeof value !== 'object') return null;
-    const types = ['I', 'O', 'T', 'L', 'J', 'S', 'Z'];
-    const type = String(value.type || value.piece || '').toUpperCase();
-    if (!types.includes(type)) return null;
-    const rotations = ['spawn', 'right', 'reverse', 'left'];
-    const rotation = typeof value.rotation === 'number'
-        ? rotations[((value.rotation % 4) + 4) % 4]
-        : (rotations.includes(String(value.rotation || '').toLowerCase()) ? String(value.rotation).toLowerCase() : 'spawn');
-    return { type, rotation, x: Number.isFinite(Number(value.x)) ? Number(value.x) : 4, y: Number.isFinite(Number(value.y)) ? Number(value.y) : 20, hold: Boolean(value.hold) };
-}
-
 function getFumenDataForExport(pages = fumenPages, mode = gameMode) {
     const exportedData = {
         v: 'f2', // Fumen version 2 (圧縮対応)
@@ -40,17 +27,7 @@ function getFumenDataForExport(pages = fumenPages, mode = gameMode) {
         pageData.p1 = {
             b: p1BoardCompressed, // 圧縮データを格納
             h: page.p1.hold || '',
-            n: (typeof derivedNextForPage === 'function' && pages.some(item => operationForPage(item?.p1)))
-                ? derivedNextForPage('p1', i, pages)
-                : (page.p1.next || '')
-        };
-        const p1Operation = typeof operationForPage === 'function' ? operationForPage(page.p1) : null;
-        if (p1Operation) pageData.p1.o = {
-            type: p1Operation.type,
-            rotation: p1Operation.rotation,
-            x: p1Operation.x,
-            y: p1Operation.y,
-            ...(p1Operation.hold ? { hold: true } : {})
+            n: page.p1.next || ''
         };
         prevP1Board1D = currentP1Board1D; // 次の差分のために現在地を保存
 
@@ -67,17 +44,7 @@ function getFumenDataForExport(pages = fumenPages, mode = gameMode) {
             pageData.p2 = {
                 b: p2BoardCompressed,
                 h: page.p2.hold || '',
-                n: (typeof derivedNextForPage === 'function' && pages.some(item => operationForPage(item?.p2)))
-                    ? derivedNextForPage('p2', i, pages)
-                    : (page.p2.next || '')
-            };
-            const p2Operation = typeof operationForPage === 'function' ? operationForPage(page.p2) : null;
-            if (p2Operation) pageData.p2.o = {
-                type: p2Operation.type,
-                rotation: p2Operation.rotation,
-                x: p2Operation.x,
-                y: p2Operation.y,
-                ...(p2Operation.hold ? { hold: true } : {})
+                n: page.p2.next || ''
             };
             prevP2Board1D = currentP2Board1D;
         }
@@ -122,7 +89,7 @@ const FumenCodec = {
     },
 
     // 1ページ分のエンコード
-    encodePage: function(prevField, currentField, operation, hold, next) {
+    encodePage: function(prevField, currentField, hold, next) {
         let data = '';
 
         // 1. フィールド (Diff + RLE)
@@ -163,36 +130,16 @@ const FumenCodec = {
         // 今回はエディタ上のアクティブミノは再現せず、フラグ(コメント)のみ利用する
         // piece=0, rot=0, loc=0
         // flag_comment: Hold/Nextがある場合は1にする
-        const normalizedOperation = normalizeCodecOperation(operation);
-        const hasQuiz = Boolean(hold || next || normalizedOperation);
+        const hasQuiz = (hold || next);
         const flag_comment = hasQuiz ? 1 : 0;
         const flag_lock = 1; // 接着済みとして扱う
         const flag_color = 1;
         const flag_mirror = 0;
         const flag_raise = 0;
         
-        const pieceMap = { I: 1, L: 2, O: 3, Z: 4, T: 5, J: 6, S: 7 };
-        const rotationMap = { reverse: 0, right: 1, spawn: 2, left: 3 };
-        const piece = normalizedOperation ? (pieceMap[normalizedOperation.type] || 0) : 0;
-        const rot = normalizedOperation ? (rotationMap[normalizedOperation.rotation] ?? 2) : 0;
-        let fumenX = normalizedOperation ? normalizedOperation.x : 0;
-        let fumenY = normalizedOperation ? 39 - normalizedOperation.y : 22;
-        if (normalizedOperation) {
-            const type = normalizedOperation.type;
-            const rotation = normalizedOperation.rotation;
-            // Convert the editor's top-origin coordinates to the official
-            // fumen operation origin (field y=0 is the floor).
-            if (type === 'O' && rotation === 'left') { fumenX -= 1; fumenY += 1; }
-            else if (type === 'O' && rotation === 'reverse') { fumenX -= 1; }
-            else if (type === 'O' && rotation === 'spawn') { fumenY += 1; }
-            else if (type === 'I' && rotation === 'reverse') { fumenX -= 1; }
-            else if (type === 'I' && rotation === 'left') { fumenY += 1; }
-            else if (type === 'S' && rotation === 'spawn') { fumenY += 1; }
-            else if (type === 'S' && rotation === 'right') { fumenX += 1; }
-            else if (type === 'Z' && rotation === 'spawn') { fumenY += 1; }
-            else if (type === 'Z' && rotation === 'left') { fumenX -= 1; }
-        }
-        const loc = (23 - fumenY - 1) * 10 + fumenX;
+        const piece = 0;
+        const rot = 0;
+        const loc = 0;
 
         // Value計算 (Decodeの逆順に構成)
         // Decode順: piece -> rot -> loc -> raise -> mirror -> color -> comment -> lock
@@ -216,7 +163,7 @@ const FumenCodec = {
             let quizStr = '#Q=';
             if (hold) quizStr += `[${hold}]`;
             else quizStr += `[]`;
-            quizStr += `(${normalizedOperation?.type || ''})`;
+            quizStr += `()`;
             quizStr += next;
             const COMMENT_TABLE = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
             let escStr = '';
@@ -384,27 +331,6 @@ const FumenCodec = {
                     }
                 }
             }
-
-            let operation = null;
-            if (piece >= 1 && piece <= 7) {
-                const pieceMap = { 1: 'I', 2: 'L', 3: 'O', 4: 'Z', 5: 'T', 6: 'J', 7: 'S' };
-                const rotationMap = { 0: 'reverse', 1: 'right', 2: 'spawn', 3: 'left' };
-                let fumenX = loc % 10;
-                let fumenY = 22 - Math.floor(loc / 10);
-                const type = pieceMap[piece];
-                const rotation = rotationMap[rot] || 'spawn';
-                // These are the inverse of tetris-fumen's action encoder.
-                if (type === 'O' && rotation === 'left') { fumenX += 1; fumenY -= 1; }
-                else if (type === 'O' && rotation === 'reverse') { fumenX += 1; }
-                else if (type === 'O' && rotation === 'spawn') { fumenY -= 1; }
-                else if (type === 'I' && rotation === 'reverse') { fumenX += 1; }
-                else if (type === 'I' && rotation === 'left') { fumenY -= 1; }
-                else if (type === 'S' && rotation === 'spawn') { fumenY -= 1; }
-                else if (type === 'S' && rotation === 'right') { fumenX -= 1; }
-                else if (type === 'Z' && rotation === 'spawn') { fumenY -= 1; }
-                else if (type === 'Z' && rotation === 'left') { fumenX += 1; }
-                operation = { type, rotation, x: fumenX, y: 39 - fumenY };
-            }
             
             const customBoard = Array.from({length: 40}, () => Array(10).fill(null));
             for(let y=0; y<23; y++) {
@@ -417,8 +343,7 @@ const FumenCodec = {
             pages.push({
                 board: customBoard,
                 hold: hold,
-                next: next,
-                operation
+                next: next
             });
         }
         return pages;
@@ -446,12 +371,7 @@ const FumenCodec = {
                 }
             }
             
-            const next = typeof derivedNextForPage === 'function'
-                ? (pages.some(item => operationForPage(item?.[playerId]))
-                    ? derivedNextForPage(playerId, pages.indexOf(page), pages)
-                    : (pData.next || ''))
-                : (pData.next || '');
-            str += this.encodePage(prevField, currentField, pData.operation, pData.hold, next);
+            str += this.encodePage(prevField, currentField, pData.hold, pData.next);
             
             // --- 後処理 (Post Processing) ---
             // 次のページの差分計算のために、現在ページでライン消去が発生した場合、
@@ -532,7 +452,6 @@ function applyFumenData(data) {
                 newPage.p1.board = stringToBoard(currentP1Board1D.join(''));
                 newPage.p1.hold = pageData.p1.h || '';
                 newPage.p1.next = pageData.p1.n || '';
-                newPage.p1.operation = normalizeOperation(pageData.p1.o || pageData.p1.operation || pageData.p1.placement);
                 prevP1Board1D = currentP1Board1D;
             }
 
@@ -552,7 +471,6 @@ function applyFumenData(data) {
                 newPage.p2.board = stringToBoard(currentP2Board1D.join(''));
                 newPage.p2.hold = pageData.p2.h || '';
                 newPage.p2.next = pageData.p2.n || '';
-                newPage.p2.operation = normalizeOperation(pageData.p2.o || pageData.p2.operation || pageData.p2.placement);
                 prevP2Board1D = currentP2Board1D;
             }
             
@@ -609,7 +527,7 @@ function loadStateFromURL() {
                             fumenPages = [];
                             fumenPagesData.forEach(p => {
                                 const newPage = createBlankPage();
-                                newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next, operation: p.operation || null };
+                                newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next };
                                 // 2Pは空にする
                                 fumenPages.push(newPage);
                             });
@@ -643,13 +561,11 @@ if (data.v === 'f1' || data.v === 'f2') {
                     fumenPages[0].p1.board = stringToBoard(data.p1.b);
                     fumenPages[0].p1.next = data.p1.n || '';
                     fumenPages[0].p1.hold = data.p1.h || '';
-                    fumenPages[0].p1.operation = normalizeOperation(data.p1.o || data.p1.operation || data.p1.placement);
                 }
                 if (gameMode === '2P' && data.p2) {
                     fumenPages[0].p2.board = stringToBoard(data.p2.b);
                     fumenPages[0].p2.next = data.p2.n || '';
                     fumenPages[0].p2.hold = data.p2.h || '';
-                    fumenPages[0].p2.operation = normalizeOperation(data.p2.o || data.p2.operation || data.p2.placement);
                 }
                 currentPageIndex = 0;
                 loadPage(0);

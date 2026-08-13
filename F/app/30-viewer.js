@@ -55,7 +55,7 @@ function drawViewerUI(ctx, playerPageData, offsetX) {
     const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
     ctx.fillStyle = '#FFF';
 ctx.fillText('NEXT', rX, 40);
-    const nextQueue = String(playerPageData.next || '').split('');
+    const nextQueue = playerPageData.next.split('');
     for (let i = 0; i < Math.min(nextQueue.length, 6); i++) {
         const pT = nextQueue[i];
         if (!pT) continue;
@@ -143,26 +143,6 @@ if (playerData.board[boardY]?.[x]) {
 } 
             } 
         }
-
-        // The current page operation is the recorded lock for this turn.
-        // Keep it brighter than the historical field so an observed move is
-        // visually distinguishable in View mode.
-        const operation = typeof operationForPage === 'function' ? operationForPage(playerData) : null;
-        if (operation && typeof operationCells === 'function') {
-            for (const [x, boardY] of operationCells(operation)) {
-                const visibleY = boardY - viewY;
-                if (x < 0 || x >= BOARD_WIDTH || visibleY < 0 || visibleY >= BOARD_VISIBLE_HEIGHT) continue;
-                const drawX = x * BLOCK_SIZE;
-                const drawY = visibleY * BLOCK_SIZE;
-                viewerCtx.fillStyle = COLORS[operation.type] || '#FFF';
-                viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
-                viewerCtx.fillStyle = 'rgba(255,255,255,.34)';
-                viewerCtx.fillRect(drawX + 3, drawY + 3, BLOCK_SIZE - 6, BLOCK_SIZE - 6);
-                viewerCtx.strokeStyle = '#fff';
-                viewerCtx.lineWidth = 2;
-                viewerCtx.strokeRect(drawX + 1, drawY + 1, BLOCK_SIZE - 2, BLOCK_SIZE - 2);
-            }
-        }
         
         viewerCtx.restore();
         viewerCtx.restore();
@@ -179,27 +159,24 @@ function sendToSimulator() {
     
     const sanitize = (str) => str.replace(/[^IOTLSJZ]/gi, '');
     const p1Hold = sanitize(currentPage.p1.hold || '');
-    const p1Operation = typeof operationForPage === 'function' ? operationForPage(currentPage.p1) : null;
-    const p1Next = sanitize(typeof displayNextForPage === 'function' ? displayNextForPage('p1') : currentPage.p1.next || '');
-    const p1Queue = (p1Operation ? p1Operation.type : '') + p1Next;
+    const p1Next = sanitize(currentPage.p1.next || '');
 
     const stateData = {
         v: 2,
         m: gameMode,
         p1: {
             b: boardToString(currentPage.p1.board),
-            n: p1Queue,
+            n: p1Next,
             h: p1Hold
         },
     };
 
     if (gameMode === '2P') {
         const p2Hold = sanitize(currentPage.p2.hold || '');
-        const p2Operation = typeof operationForPage === 'function' ? operationForPage(currentPage.p2) : null;
-        const p2Next = sanitize(typeof displayNextForPage === 'function' ? displayNextForPage('p2') : currentPage.p2.next || '');
+        const p2Next = sanitize(currentPage.p2.next || '');
         stateData.p2 = {
             b: boardToString(currentPage.p2.board),
-            n: (p2Operation ? p2Operation.type : '') + p2Next,
+            n: p2Next,
             h: p2Hold
         };
     }

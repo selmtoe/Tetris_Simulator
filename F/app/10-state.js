@@ -52,27 +52,15 @@ const DRAW_SHAPE_MAP = {
     "-1,1;-1,2;0,1": { type: "Z", rot: 1, offset: [1, -1] },
 };
 const createEmptyBoard = () => Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
-const createBlankPlayer = () => ({
-    board: createEmptyBoard(),
-    viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT,
-    activeColor: 'I',
-    hold: '',
-    // Compatibility cache for old f2/simulator data. New pages derive NEXT.
-    next: '',
-    nextInsertionIndex: -1,
-    operation: null,
-    placementMode: false
-});
 const createBlankPage = () => ({
     // nextInsertionIndex を追加: 0なら先頭、-1なら末尾、'hold'ならホールド
-    p1: createBlankPlayer(),
-    p2: createBlankPlayer()
+    p1: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '', nextInsertionIndex: -1 },
+    p2: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '', nextInsertionIndex: -1 }
 });
 function loadPage(index) {
 
     if (index < 0 || index >= fumenPages.length) return;
     currentPageIndex = index;
-    if (typeof normalizeAllPages === 'function') normalizeAllPages();
 
     ['p1', 'p2'].forEach(playerId => {
         const data = fumenPages[currentPageIndex][playerId];
