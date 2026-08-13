@@ -833,8 +833,6 @@ std::string simulatorQueueForStep(const TimelineStep& step) {
     // queue head.  This makes every exported page chronological: the mino
     // about to be controlled is always the first visible item.
     std::string queue = sanitizePiece(step.piece) + sanitizePieces(step.next);
-    constexpr std::size_t SimulatorQueueLimit = 6;
-    if (queue.size() > SimulatorQueueLimit) queue.resize(SimulatorQueueLimit);
     return queue;
 }
 

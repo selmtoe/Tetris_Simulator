@@ -28,11 +28,11 @@
                 <button id="gen-code" style="margin-left: 5px; background-color: #00a0f0; display: none;">Gen Code</button>
             </div>
             <div class="page-controls">
-                <span class="case-label">SET</span>
+                <span class="case-label">データセット</span>
                 <select id="case-selector" class="case-selector" aria-label="Case"></select>
-                <button id="new-snapshot-case" class="button" type="button">New Set</button>
-                <button id="new-replay-case" class="button" type="button">New Replay</button>
-                <button id="delete-case" class="button" type="button">Delete Set</button>
+                <button id="new-snapshot-case" class="button" type="button">独立セット</button>
+                <button id="new-replay-case" class="button" type="button">対戦リプレイ</button>
+                <button id="delete-case" class="button" type="button">セット削除</button>
                 <button id="prev-page">Prev ‹</button>
                 <span id="page-indicator">Page 1 / 1</span>
                 <button id="next-page">Next ›</button>
@@ -52,11 +52,20 @@
         </div>
 
         <div id="case-meta" class="case-meta">
-            <span id="case-mode-label">Snapshot: independent pages</span>
-            <label>P1 start sequence <input id="p1-start-sequence" class="sequence-input" type="text" inputmode="text" placeholder="TIOLJSZ"></label>
-            <label id="p2-start-sequence-wrap">P2 start sequence <input id="p2-start-sequence" class="sequence-input" type="text" inputmode="text" placeholder="TIOLJSZ"></label>
-            <button id="apply-start-sequence" class="button" type="button">Apply sequence</button>
+            <span id="case-mode-label">独立セット：各ページは別の局面</span>
+            <label>P1開始順 <input id="p1-start-sequence" class="sequence-input" type="text" inputmode="text" placeholder="TIOLJSZ"></label>
+            <label id="p2-start-sequence-wrap">P2開始順 <input id="p2-start-sequence" class="sequence-input" type="text" inputmode="text" placeholder="TIOLJSZ"></label>
+            <button id="apply-start-sequence" class="button" type="button">開始順を適用</button>
         </div>
+        <details class="workflow-help" open>
+            <summary>使い方：接着リプレイを作る</summary>
+            <div class="workflow-help-body">
+                <p><strong>独立セット</strong>は、互いに関係のない局面を並べるためのモードです。ページごとに盤面・HOLD・NEXTを自由に指定します。</p>
+                <p><strong>対戦リプレイ</strong>は、最初のミノ順からページを再生するモードです。P1開始順には「その局面で落下中のミノ」から、記録できる範囲の順番を入力します。</p>
+                <p>盤面で <strong>「接着ミノを4マス指定」</strong> を押し、置かれた4マスをクリックしてから <strong>「AUTO接着」</strong> を押します。形・向き・位置を判定し、地面に接着できる場合だけ操作として保存します。Nextはこの操作履歴から自動復元されます。</p>
+                <p>シミュレータの「記録」や動画認識から読み込んだものも、同じ対戦リプレイとして扱われます。</p>
+            </div>
+        </details>
 
         <div class="player-editors">
             <div class="editor-column" id="p1-editor-col">
@@ -73,9 +82,9 @@
                     <h2>PLAYER 1 - FIELD</h2>
                     <div class="color-palette" id="p1-palette"></div>
                     <div class="placement-tools">
-                        <button class="button" id="p1-placement-mode" type="button">Draw placed mino</button>
-                        <button class="button" id="p1-placement-auto" type="button">AUTO lock</button>
-                        <button class="button" id="p1-placement-clear" type="button">Clear draft</button>
+                        <button class="button" id="p1-placement-mode" type="button">接着ミノを4マス指定</button>
+                        <button class="button" id="p1-placement-auto" type="button">AUTO接着</button>
+                        <button class="button" id="p1-placement-clear" type="button">指定クリア</button>
                         <span id="p1-placement-status" class="placement-status"></span>
                     </div>
                     <canvas id="field-editor-canvas-p1"></canvas>
@@ -102,9 +111,9 @@
                     <h2>PLAYER 2 - FIELD</h2>
                     <div class="color-palette" id="p2-palette"></div>
                     <div class="placement-tools">
-                        <button class="button" id="p2-placement-mode" type="button">Draw placed mino</button>
-                        <button class="button" id="p2-placement-auto" type="button">AUTO lock</button>
-                        <button class="button" id="p2-placement-clear" type="button">Clear draft</button>
+                        <button class="button" id="p2-placement-mode" type="button">接着ミノを4マス指定</button>
+                        <button class="button" id="p2-placement-auto" type="button">AUTO接着</button>
+                        <button class="button" id="p2-placement-clear" type="button">指定クリア</button>
                         <span id="p2-placement-status" class="placement-status"></span>
                     </div>
                     <canvas id="field-editor-canvas-p2"></canvas>
@@ -203,14 +212,15 @@ max-width: 500px; font-family: var(--font-ui);">
             <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">エクスポート</h3>
             <p></p>
             <div class="share-item" style="display: flex; flex-direction: column; align-items: flex-start;">
-                 <span>共有リンク</span>
+                 <span>アプリ共有リンク（リプレイ・NEXT・HOLDを保持）</span>
                 <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box; background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; font-family: var(--font-ui);">
                 <div style="display: flex;
 gap: 10px; margin-top: 5px; flex-wrap: wrap;">
                     <button id="copy-link-btn" class="button">リンクをコピー</button>
-                    <button id="export-fumen-p1-btn" class="button" >1Pテト譜コピー</button>
-                    <button id="export-fumen-p2-btn" class="button" style="display: none;">2Pテト譜コピー</button>
+                    <button id="export-fumen-p1-btn" class="button" title="本家テト譜リンクをコピー（HOLD/NEXTは含まれません）" >本家テト譜をコピー（1P）</button>
+                    <button id="export-fumen-p2-btn" class="button" style="display: none;" title="本家テト譜リンクをコピー（HOLD/NEXTは含まれません）">本家テト譜をコピー（2P）</button>
                 </div>
+                <small class="share-note">アプリ共有リンクは操作履歴からNEXTを復元します。本家テト譜は盤面と接着操作だけを変換し、HOLD/NEXTは仕様上含みません。</small>
             </div>
         </div>
 
@@ -335,19 +345,19 @@ margin-top: 15px;">
     </div>
 </div>
 
-<script defer src="./app/00-debug-console.js"></script>
-<script defer src="./app/10-state.js"></script>
-<script defer src="./app/15-sequence.js"></script>
-<script defer src="./app/20-editor.js"></script>
-<script defer src="./app/30-viewer.js"></script>
-<script defer src="./app/40-history.js"></script>
-<script defer src="./app/50-scanner.js"></script>
-<script defer src="./app/60-fumen-codec.js"></script>
-<script defer src="./app/70-hub-bridge.js"></script>
-<script defer src="./app/80-editor-bootstrap.js"></script>
-<script defer src="./app/81-export-controls.js"></script>
-<script defer src="./app/82-code-generator.js"></script>
-<script defer src="./app/83-share-controls.js"></script>
-<script defer src="./app/84-ai-scoring.js"></script>
+<script defer src="./app/00-debug-console.js?v=app-v6"></script>
+<script defer src="./app/10-state.js?v=app-v6"></script>
+<script defer src="./app/15-sequence.js?v=app-v6"></script>
+<script defer src="./app/20-editor.js?v=app-v6"></script>
+<script defer src="./app/30-viewer.js?v=app-v6"></script>
+<script defer src="./app/40-history.js?v=app-v6"></script>
+<script defer src="./app/50-scanner.js?v=app-v6"></script>
+<script defer src="./app/60-fumen-codec.js?v=app-v6"></script>
+<script defer src="./app/70-hub-bridge.js?v=app-v6"></script>
+<script defer src="./app/80-editor-bootstrap.js?v=app-v6"></script>
+<script defer src="./app/81-export-controls.js?v=app-v6"></script>
+<script defer src="./app/82-code-generator.js?v=app-v6"></script>
+<script defer src="./app/83-share-controls.js?v=app-v6"></script>
+<script defer src="./app/84-ai-scoring.js?v=app-v6"></script>
 </body>
 </html>

@@ -172,6 +172,8 @@ const FumenCodec = {
         const hasQuiz = false;
         const flag_comment = 0;
         const flag_lock = 1; // 接着済みとして扱う
+        // tetris-fumen's `colorize` flag must be true (1). With 0, the
+        // official viewer renders operation cells with a fallback color.
         const flag_color = 1;
         const flag_mirror = 0;
         const flag_raise = 0;

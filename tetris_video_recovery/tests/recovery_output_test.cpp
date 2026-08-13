@@ -141,7 +141,14 @@ int wmain(int argc, wchar_t** argv) {
         return 1;
     }
     const auto marker = output.p1Url.find('#');
-    if (marker == std::string::npos || decodeBase64(output.p1Url.substr(marker + 1)).find("\"n\":\"TSZOLJ\"") == std::string::npos) {
+    const std::string simulatorJson = marker == std::string::npos
+        ? std::string()
+        : decodeBase64(output.p1Url.substr(marker + 1));
+    if (marker == std::string::npos || simulatorJson.find("\"v\":3") == std::string::npos ||
+        simulatorJson.find("\"kind\":\"replay\"") == std::string::npos ||
+        simulatorJson.find("\"o\":{\"type\":\"T\"") == std::string::npos ||
+        simulatorJson.find("\"sequence\":\"TSZOLJ") == std::string::npos ||
+        simulatorJson.find("\"n\":\"TSZOLJ\"") == std::string::npos) {
         std::cerr << "simulator queue does not start with the active mino\n";
         return 1;
     }

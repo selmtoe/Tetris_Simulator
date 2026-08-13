@@ -99,8 +99,29 @@ if (gameMode === '2P') {
     if (editorData.rule.code) data.rc = editorData.rule.code;
     return data;
 }
+
+function replayCollectionToGameState(collection) {
+    const cases = Array.isArray(collection?.cases) ? collection.cases : [];
+    const caseIndex = Math.max(0, Math.min(Number(collection?.currentCase) || 0, cases.length - 1));
+    const activeCase = cases[caseIndex];
+    if (!activeCase || activeCase.kind !== 'replay' || !activeCase.initial) return null;
+    const toPlayerState = initial => ({
+        b: boardToString(initial?.board || Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null))),
+        n: String(initial?.sequence || '').replace(/[^IOTLSJZ]/gi, ''),
+        h: String(initial?.hold || '').replace(/[^IOTLSJZ]/gi, '')
+    });
+    const result = {
+        v: 2,
+        m: activeCase.gameMode || collection.m || '1P',
+        p1: toPlayerState(activeCase.initial.p1)
+    };
+    if (result.m === '2P') result.p2 = toPlayerState(activeCase.initial.p2);
+    return result;
+}
+
 function applyGameState(data) {
     try {
+        if (data?.v === 3) data = replayCollectionToGameState(data);
         if (!data || (data.v !== 1 && data.v !== 2)) {
             alert('無効または非対応のデータです。');
 return false;

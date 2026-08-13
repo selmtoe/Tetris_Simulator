@@ -274,7 +274,7 @@ function updatePlacementStatus(playerId) {
     if (!data) return;
     const button = document.getElementById(`${playerId}-placement-mode`);
     button.classList.toggle('active', Boolean(data.placementMode));
-    button.textContent = data.placementMode ? `Draw placed mino (${data.placementDraft.length}/4)` : 'Draw placed mino';
+    button.textContent = data.placementMode ? `接着ミノを指定 (${data.placementDraft.length}/4)` : '接着ミノを4マス指定';
     if (data.placementMode) {
         setPlacementStatus(playerId, `${data.placementDraft.length}/4 cells selected`);
     } else if (!data.operation) {
@@ -291,7 +291,7 @@ function updateNextQueueDisplay(playerId) {
     const replay = currentCaseIsReplay();
     const label = document.createElement('span');
     label.className = 'next-queue-label';
-    label.textContent = replay ? 'NEXT · derived' : 'NEXT · snapshot';
+    label.textContent = replay ? 'NEXT（操作履歴から自動）' : 'NEXT（このページだけ）';
     queue.appendChild(label);
     const hold = document.createElement('div');
     hold.className = 'next-queue-hold';
@@ -357,8 +357,12 @@ function drawEditorField(playerId) {
         ctx.fillStyle = color;
         ctx.fillRect(px, py, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
         if (inner) {
-            ctx.fillStyle = 'rgba(255,255,255,.38)';
-            ctx.fillRect(px + 4, py + 4, EDITOR_BLOCK_SIZE - 8, EDITOR_BLOCK_SIZE - 8);
+            ctx.save();
+            ctx.shadowColor = '#fff';
+            ctx.shadowBlur = 10;
+            ctx.fillStyle = 'rgba(255,255,255,.42)';
+            ctx.fillRect(px, py, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
+            ctx.restore();
         }
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 3;

@@ -75,6 +75,7 @@ reset() {
         if (this.id === '1') analysisData = []; // P1リセット時に分析データも初期化
         this.pieceCount = 0;
         this.linesClearedLastLock = 0;
+        this.lockUsedHold = false;
         this.player = { x: 0, y: 0, pieceType: null, rotation: 0 };
 this.nextQueue = [];
         this.fullMinoSequence = [];
@@ -506,6 +507,7 @@ hold() {
 
         this.canHold = false;
         this.lastMoveWasRotation = false;
+        this.lockUsedHold = true;
         if (this.holdPiece) {
             [this.player.pieceType, this.holdPiece] = [this.holdPiece, this.player.pieceType];
             this.player.rotation = 0;
@@ -522,6 +524,9 @@ hold() {
             }
         } else {
             this.holdPiece = this.player.pieceType;
+            // The current piece was stored and the next queue piece was
+            // spawned; that new active piece did not come from HOLD.
+            this.lockUsedHold = false;
             this.spawnNewPiece();
         }
 
@@ -532,6 +537,19 @@ hold() {
 
     lockPiece() {
         if (!this.player.pieceType) return;
+
+        const replayOperation = {
+            type: this.player.pieceType,
+            rotation: this.player.rotation,
+            x: this.player.x,
+            y: this.player.y,
+            holdBefore: this.holdPiece || '',
+            holdUsed: this.lockUsedHold === true,
+            boardBefore: this.board.map(row => [...row])
+        };
+        if (gameState === 'PLAYING' && typeof window.recordReplayLock === 'function') {
+            window.recordReplayLock(this, replayOperation);
+        }
 
         if (window.PCFinder && typeof window.PCFinder.onBeforeLock === 'function') {
             window.PCFinder.onBeforeLock(this);
@@ -734,7 +752,7 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
 } 
         else if (gameSettings.spawnDelay > 0) { this.isSpawning = true; this.spawnDelayTimer = gameSettings.spawnDelay;
 }
-        else { this.riseGarbage(); this.spawnNewPiece();
+        else { this.riseGarbage(); this.lockUsedHold = false; this.spawnNewPiece();
 }
     }
     

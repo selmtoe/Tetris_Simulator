@@ -154,13 +154,17 @@ if (playerData.board[boardY]?.[x]) {
                 if (x < 0 || x >= BOARD_WIDTH || visibleY < 0 || visibleY >= BOARD_VISIBLE_HEIGHT) return;
                 const drawX = x * BLOCK_SIZE;
                 const drawY = visibleY * BLOCK_SIZE;
+                viewerCtx.save();
+                viewerCtx.shadowColor = '#fff';
+                viewerCtx.shadowBlur = 10;
                 viewerCtx.fillStyle = COLORS[operation.type] || '#fff';
                 viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
-                viewerCtx.fillStyle = 'rgba(255,255,255,.4)';
-                viewerCtx.fillRect(drawX + 3, drawY + 3, BLOCK_SIZE - 6, BLOCK_SIZE - 6);
+                viewerCtx.fillStyle = 'rgba(255,255,255,.42)';
+                viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
                 viewerCtx.strokeStyle = '#fff';
                 viewerCtx.lineWidth = 2;
                 viewerCtx.strokeRect(drawX + 1, drawY + 1, BLOCK_SIZE - 2, BLOCK_SIZE - 2);
+                viewerCtx.restore();
             });
         }
         
@@ -176,13 +180,21 @@ function viewerLoop() {
 
 function sendToSimulator() {
     const currentPage = fumenPages[currentPageIndex];
+
+    // A replay case owns the complete starting sequence. Keep that v3
+    // collection intact so the simulator receives every remaining NEXT,
+    // instead of only the currently visible page's short preview.
+    const replayCollection = typeof collectionData === 'function' &&
+        typeof currentCaseIsReplay === 'function' && currentCaseIsReplay()
+        ? collectionData()
+        : null;
     
     const sanitize = (str) => str.replace(/[^IOTLSJZ]/gi, '');
     const p1Hold = sanitize(currentPage.p1.hold || '');
     const p1Next = sanitize(typeof displayNextForPage === 'function' ? displayNextForPage('p1') : currentPage.p1.next || '');
     const p1Operation = typeof operationForPage === 'function' ? operationForPage(currentPage.p1) : null;
 
-    const stateData = {
+    const stateData = replayCollection || {
         v: 2,
         m: gameMode,
         p1: {

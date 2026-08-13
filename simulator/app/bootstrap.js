@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const modeTitle = document.querySelector('.mode-selection h2');
     let debugClickCount = 0;
     let debugClickTimer = null;
+    let recordedReplayEvents = [];
 
     function ensureMemoryMonitor() {
         let memMon = document.getElementById('memory-monitor');
@@ -77,6 +78,84 @@ document.addEventListener('DOMContentLoaded', () => {
     mainCanvas = document.getElementById('mainCanvas'); ctx = mainCanvas.getContext('2d');
     
     virtualController.init();
+
+    // The simulator used to export only board snapshots. Keep a separate
+    // event stream so the editor can reconstruct the exact locked operation,
+    // including the board before the lock and whether HOLD was used.
+    window.resetRecordedReplay = () => { recordedReplayEvents = []; };
+    window.recordReplayLock = (lockingPlayer, operation) => {
+        if (!lockingPlayer || !operation || !players.length) return;
+        const event = { time: performance.now(), pages: {} };
+        players.forEach(player => {
+            const playerId = `p${player.id}`;
+            const isLockingPlayer = player === lockingPlayer;
+            event.pages[playerId] = {
+                b: isLockingPlayer ? boardToString(operation.boardBefore) : boardToString(player.board),
+                h: isLockingPlayer ? (operation.holdBefore || '') : (player.holdPiece || ''),
+                n: '',
+                o: isLockingPlayer ? {
+                    type: operation.type,
+                    rotation: operation.rotation,
+                    x: operation.x,
+                    y: operation.y,
+                    lock: true,
+                    ...(operation.holdUsed ? { holdUsed: true } : {})
+                } : null
+            };
+        });
+        recordedReplayEvents.push(event);
+    };
+    window.createRecordedReplayCollection = () => {
+        if (!recordedReplayEvents.length || !gameHistoryLog.length) return null;
+        const initialLog = gameHistoryLog[0];
+        const playerIds = gameMode === '2P' ? ['p1', 'p2'] : ['p1'];
+        const initial = {};
+        playerIds.forEach(playerId => {
+            const player = players.find(item => `p${item.id}` === playerId);
+            const initialPage = initialLog[playerId] || { b: boardToString(Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null))), h: '', n: '' };
+            const sequence = player?.fullMinoSequence?.filter(piece => ['I', 'O', 'T', 'L', 'J', 'S', 'Z'].includes(piece)).join('')
+                || String(initialPage.n || '').replace(/[^IOTLSJZ]/gi, '');
+            initial[playerId] = {
+                board: stringToBoard(initialPage.b),
+                hold: String(initialPage.h || '').replace(/[^IOTLSJZ]/gi, ''),
+                sequence
+            };
+        });
+        const pages = recordedReplayEvents.map(event => {
+            const page = {};
+            playerIds.forEach(playerId => {
+                const entry = event.pages[playerId];
+                page[playerId] = {
+                    board: stringToBoard(entry.b),
+                    hold: entry.h || '',
+                    next: '',
+                    operation: entry.o || null,
+                    placementDraft: [],
+                    placementMode: false,
+                    nextInsertionIndex: -1,
+                    viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT,
+                    activeColor: 'I'
+                };
+            });
+            return page;
+        });
+        return {
+            v: 3,
+            m: gameMode,
+            currentCase: 0,
+            cases: [{
+                id: `simulator-replay-${Date.now()}`,
+                name: 'Simulator recorded replay',
+                kind: 'replay',
+                gameMode,
+                initial: {
+                    p1: initial.p1,
+                    p2: initial.p2 || { board: stringToBoard(''), hold: '', sequence: '' }
+                },
+                pages
+            }]
+        };
+    };
 
     loadKeyBindings();
     loadGameSettings();
@@ -209,6 +288,7 @@ document.getElementById('advanced-link-btn').addEventListener('click', () => {
     });
 document.getElementById('startGameBtn').addEventListener('click', () => {
         gameHistoryLog = [];
+        window.resetRecordedReplay?.();
         let currentRunSettings = { ...gameSettings };
         gameStartTime = performance.now();
         let startTime = gameStartTime;
@@ -514,6 +594,7 @@ if (gameSettings.touchControlsEnabled && gameSettings.touchControlType === 'butt
 document.getElementById('backToEditorBtn').addEventListener('click', () => {
         gameState = 'EDITING';
         gameHistoryLog = [];
+        window.resetRecordedReplay?.();
         
         if (players.length > 0) {
             players.forEach(p => {
@@ -702,6 +783,7 @@ document.getElementById('retryBtn').addEventListener('click', () => {
 
         loadGameSettings();
         gameHistoryLog = [];
+        window.resetRecordedReplay?.();
      
         let currentRunSettings = { ...gameSettings };
         gameStartTime = performance.now();
@@ -961,6 +1043,53 @@ p.ruleWorker.postMessage({
     });
 
     document.getElementById('exportFumenBtn').addEventListener('click', () => {
+        const recordedCollection = window.createRecordedReplayCollection?.();
+        if (!recordedCollection) {
+            alert('接着操作がまだ記録されていません。まずゲームを開始して、1個以上ミノを接着してください。');
+            return;
+        }
+        const recordedJson = JSON.stringify(recordedCollection);
+        const recordedBytes = new TextEncoder().encode(recordedJson);
+        let recordedBinary = '';
+        for (let index = 0; index < recordedBytes.length; index += 8192) {
+            recordedBinary += String.fromCharCode(...recordedBytes.subarray(index, index + 8192));
+        }
+        const recordedBase64 = btoa(recordedBinary);
+
+        gameState = 'EDITING';
+        players.forEach(player => {
+            player.aiWorker?.terminate();
+            player.ruleWorker?.terminate();
+        });
+        players = [];
+        loadGameSettings();
+        document.getElementById('game-container').style.display = 'none';
+        document.getElementById('game-controls').style.display = 'none';
+        document.getElementById('editor-container').style.display = 'flex';
+        document.getElementById('rule-description-display').style.display = 'none';
+        virtualController.hide();
+        setTimeout(updateScale, 0);
+
+        let recordedEditorUrl = './F/index.html';
+        try {
+            const path = window.location.pathname;
+            recordedEditorUrl = path.substring(0, path.lastIndexOf('/') + 1) + 'F/index.html';
+        } catch (error) {
+            console.warn('Could not resolve editor URL:', error);
+        }
+        if (window.parent !== window) {
+            window.parent.postMessage({ target: 'editor', type: 'loadFumen', data: recordedCollection }, '*');
+        } else {
+            // Opening a new tab is frequently blocked when the simulator is
+            // hosted inside an app shell. Navigate in the current tab so the
+            // recorded operation-aware replay is always visible.
+            window.location.href = `${recordedEditorUrl}#${recordedBase64}`;
+        }
+        return;
+    });
+
+        /* Legacy snapshot exporter kept below for reference; the active path
+           above always exports the operation-aware v3 replay collection.
         if (gameHistoryLog.length === 0) {
             alert('記録するデータがありません。');
             return;
@@ -1086,7 +1215,7 @@ try {
                 const path = window.location.pathname;
 const parentPath = path.substring(0, path.lastIndexOf('/') + 1);
 fumenEditorURL = parentPath + 'F/index.html';
-} catch (e) { /* fallback */ }
+} catch (e) { legacy fallback }
 
                 if (window.parent !== window) {
                     window.parent.postMessage({
@@ -1115,6 +1244,7 @@ if (confirm('リンクの生成に失敗しました。データが長すぎる�
 }
     });
 
+        */
     // Analysis is intentionally available only while Debug Mode is enabled.
     document.getElementById('analyzeBtn').addEventListener('click', () => {
         if (!gameSettings.debugEnabled) return;

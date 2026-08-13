@@ -71,7 +71,7 @@
 
     .next-queue-display {
         background-color: rgba(0,0,0,0.3); padding: 8px; border-radius: 5px; min-height: 38px;
-        display: flex; gap: 5px; flex-wrap: nowrap; min-width: 0; overflow: hidden;
+        display: flex; gap: 5px; flex-wrap: nowrap; min-width: 0; max-width: 100%; overflow: hidden;
         border: 1px solid var(--primary-color);
     }
     .next-queue-display > div:first-child { flex: 0 0 auto; }
