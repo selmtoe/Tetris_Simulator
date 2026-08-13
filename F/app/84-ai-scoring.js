@@ -556,7 +556,10 @@
                 indices.add(result.pageIndex);
                 indices.add(result.pageIndex + 1);
             }
-            return [...indices].sort((a, b) => a - b).map(index => cleanClone(run.pages[index]));
+            return [...indices]
+                .filter(index => Number.isInteger(index) && index >= 0 && index < run.pages.length)
+                .sort((a, b) => a - b)
+                .map(index => cleanClone(run.pages[index]));
         }
 
         function renderResults(run) {

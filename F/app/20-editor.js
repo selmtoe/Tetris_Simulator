@@ -397,8 +397,8 @@ function drawEditorField(playerId) {
             ctx.fillStyle = 'rgba(255,255,255,.24)';
             ctx.fillRect(px + 4, py + 4, EDITOR_BLOCK_SIZE - 8, EDITOR_BLOCK_SIZE - 8);
         }
-        ctx.strokeStyle = '#111';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 1;
         ctx.strokeRect(px + 1, py + 1, EDITOR_BLOCK_SIZE - 2, EDITOR_BLOCK_SIZE - 2);
     };
     data.placementDraft.forEach(([x, y]) => drawCell(x, y, '#fff', false));

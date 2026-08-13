@@ -158,8 +158,8 @@ if (playerData.board[boardY]?.[x]) {
                 viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
                 viewerCtx.fillStyle = 'rgba(255,255,255,.24)';
                 viewerCtx.fillRect(drawX + 3, drawY + 3, BLOCK_SIZE - 6, BLOCK_SIZE - 6);
-                viewerCtx.strokeStyle = '#111';
-                viewerCtx.lineWidth = 1.5;
+                viewerCtx.strokeStyle = '#444';
+                viewerCtx.lineWidth = 0.5;
                 viewerCtx.strokeRect(drawX + 1, drawY + 1, BLOCK_SIZE - 2, BLOCK_SIZE - 2);
             });
         }
