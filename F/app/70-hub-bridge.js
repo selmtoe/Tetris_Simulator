@@ -2,12 +2,15 @@
 window.addEventListener('message', (e) => {
     if (e.data && e.data.type === 'loadFumen') {
         const fumenData = e.data.data;
-        if (typeof applyFumenData === 'function' && applyFumenData(fumenData)) {
+        const applied = fumenData?.v === 3 && typeof applyCollectionData === 'function'
+            ? applyCollectionData(fumenData)
+            : (typeof applyFumenData === 'function' && applyFumenData(fumenData));
+        if (applied) {
            console.log("Applied fumen data from Hub");
         }
     } else if (e.data && e.data.type === 'requestState') {
         try {
-            const fumenData = getFumenDataForExport();
+            const fumenData = getCollectionDataForExport();
             window.parent.postMessage({
                 target: 'hub',
                 type: 'saveSnapshotResponse',
@@ -37,9 +40,12 @@ window.addEventListener('message', (e) => {
                 const fumenPagesData = FumenCodec.decode(match[0]);
                 if (fumenPagesData && fumenPagesData.length > 0) {
                     fumenPages = [];
+                    fumenCases = [createCase('Imported Fumen', 'snapshot')];
+                    fumenCases[0].pages = fumenPages;
+                    currentCaseIndex = 0;
                     fumenPagesData.forEach(p => {
                         const newPage = createBlankPage();
-                        newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next };
+                        newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next, operation: p.operation || null };
                         fumenPages.push(newPage);
                     });
                     gameMode = '1P';
@@ -53,7 +59,7 @@ window.addEventListener('message', (e) => {
                         v: 2, m: gameMode,
                         p1: { 
                             b: boardToString(fumenPages[0].p1.board), 
-                            n: (fumenPages[0].p1.next || '').replace(/[^IOTLSJZ]/gi, ''), 
+                            n: ((fumenPages[0].p1.operation?.type || '') + (typeof displayNextForPage === 'function' ? displayNextForPage('p1', 0) : fumenPages[0].p1.next || '')).replace(/[^IOTLSJZ]/gi, ''),
                             h: (fumenPages[0].p1.hold || '').replace(/[^IOTLSJZ]/gi, '') 
                         }
                     };
@@ -69,4 +75,3 @@ window.addEventListener('message', (e) => {
         }
     }
 });
-

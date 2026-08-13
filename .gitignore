@@ -1,2 +1,11 @@
 # Imported recovery copies are intentionally kept outside the application tree.
 .archive/
+
+# Local build/runtime payloads for the video recovery tool.
+tetris_video_recovery/bin/
+tetris_video_recovery/third_party/
+tetris_video_recovery/data/exports/
+
+# Local scratch files from the video recovery workflow.
+0.47
+0.81

@@ -149,7 +149,7 @@ codeGenTabs.querySelectorAll('.button').forEach(tab => {
             generateCode(tab.dataset.type);
         });
     });
-window.addEventListener('resize', updateScale);
-    setTimeout(updateScale, 100);
+window.addEventListener('resize', () => window.updateScale?.());
+    setTimeout(() => window.updateScale?.(), 100);
 
 });

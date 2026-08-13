@@ -11,6 +11,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     fumenPages.push(createBlankPage());
+    fumenCases = [createCase('Case 1', 'snapshot')];
+    fumenCases[0].pages = fumenPages;
+    currentCaseIndex = 0;
     setupEditors();
     loadPage(0);
     loadStateFromURL();
@@ -46,6 +49,8 @@ viewerCanvas = document.getElementById('viewerCanvas');
     
     // Init History
     historyStack = [{
+        cases: JSON.parse(JSON.stringify(fumenCases)),
+        caseIndex: currentCaseIndex,
         pages: JSON.parse(JSON.stringify(fumenPages)),
         idx: currentPageIndex,
         mode: gameMode
@@ -98,8 +103,12 @@ viewerCanvas = document.getElementById('viewerCanvas');
             loadPage(currentPageIndex + 1);
         } else {
             pushHistory();
-            const newPage = JSON.parse(JSON.stringify(fumenPages[currentPageIndex]));
+            const currentPage = fumenPages[currentPageIndex];
+            const newPage = typeof createPageAfterOperation === 'function' && currentCaseIsReplay()
+                ? createPageAfterOperation(currentPage)
+                : JSON.parse(JSON.stringify(currentPage));
             fumenPages.push(newPage);
+            saveCurrentCase();
             loadPage(currentPageIndex + 1);
              updatePageControls();
         }

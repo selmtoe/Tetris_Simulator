@@ -1,0 +1,65 @@
+{
+  "schema": "tetris-video-recovery.training/v1",
+  "source": {
+    "videoPath": "video/match_001_0123456789abcdef.mp4",
+    "originalVideoPath": "C:/dataset/match_001.mp4",
+    "sha256": "a 64-character SHA-256 hex digest is written here",
+    "bytes": 123456789
+  },
+  "dataset": {
+    "selfContained": true,
+    "videoFile": "video/match_001_0123456789abcdef.mp4",
+    "videoStorage": "hardlink"
+  },
+  "stateConvention": "timeline[i] is the board/queue state while active is controlled; placing timeline[i].active produces timeline[i+1].board",
+  "annotationPolicy": "human-approved legal reconstruction; manual=true marks an explicitly chosen candidate",
+  "review": { "approvedByExplicitExport": true },
+  "queueObservations": {
+    "p1": [
+      {
+        "time": 17.76,
+        "active": "L",
+        "hold": "Z",
+        "next": "OJSIO",
+        "decodedHold": "Z",
+        "decodedNext": "OJSIT",
+        "stable": false,
+        "manual": false,
+        "sequenceCorrected": true,
+        "rejected": false
+      }
+    ],
+    "p2": []
+  },
+  "players": {
+    "p1": [
+      {
+        "start": 12.34,
+        "time": 12.71,
+        "active": "T",
+        "action": "place",
+        "hold": "I",
+        "next": "SZLOJ",
+        "simulatorNext": "TSZLOJ",
+        "garbage": {
+          "lines": 2,
+          "holeMasks": [16, 128],
+          "matchRatio": 0,
+          "manual": true
+        },
+        "placement": {
+          "piece": "T",
+          "x": 3,
+          "y": 37,
+          "rotation": 1,
+          "clearedLines": 1
+        },
+        "manual": true,
+        "observed": ["... 40 rows ..."],
+        "fullBoard": ["... 40 rows ..."],
+        "board": ["... 40 rows ..."]
+      }
+    ],
+    "p2": []
+  }
+}

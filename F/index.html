@@ -28,6 +28,11 @@
                 <button id="gen-code" style="margin-left: 5px; background-color: #00a0f0; display: none;">Gen Code</button>
             </div>
             <div class="page-controls">
+                <span class="case-label">SET</span>
+                <select id="case-selector" class="case-selector" aria-label="Case"></select>
+                <button id="new-snapshot-case" class="button" type="button">New Set</button>
+                <button id="new-replay-case" class="button" type="button">New Replay</button>
+                <button id="delete-case" class="button" type="button">Delete Set</button>
                 <button id="prev-page">Prev ‹</button>
                 <span id="page-indicator">Page 1 / 1</span>
                 <button id="next-page">Next ›</button>
@@ -46,6 +51,13 @@
             </div>
         </div>
 
+        <div id="case-meta" class="case-meta">
+            <span id="case-mode-label">Snapshot: independent pages</span>
+            <label>P1 start sequence <input id="p1-start-sequence" class="sequence-input" type="text" inputmode="text" placeholder="TIOLJSZ"></label>
+            <label id="p2-start-sequence-wrap">P2 start sequence <input id="p2-start-sequence" class="sequence-input" type="text" inputmode="text" placeholder="TIOLJSZ"></label>
+            <button id="apply-start-sequence" class="button" type="button">Apply sequence</button>
+        </div>
+
         <div class="player-editors">
             <div class="editor-column" id="p1-editor-col">
                 <div class="edit-section next-editor">
@@ -60,6 +72,12 @@
                 <div class="edit-section field-editor">
                     <h2>PLAYER 1 - FIELD</h2>
                     <div class="color-palette" id="p1-palette"></div>
+                    <div class="placement-tools">
+                        <button class="button" id="p1-placement-mode" type="button">Draw placed mino</button>
+                        <button class="button" id="p1-placement-auto" type="button">AUTO lock</button>
+                        <button class="button" id="p1-placement-clear" type="button">Clear draft</button>
+                        <span id="p1-placement-status" class="placement-status"></span>
+                    </div>
                     <canvas id="field-editor-canvas-p1"></canvas>
                     <div class="field-controls">
                         <button class="button" id="p1-field-shift-up">↑ Up</button>
@@ -83,6 +101,12 @@
                 <div class="edit-section field-editor">
                     <h2>PLAYER 2 - FIELD</h2>
                     <div class="color-palette" id="p2-palette"></div>
+                    <div class="placement-tools">
+                        <button class="button" id="p2-placement-mode" type="button">Draw placed mino</button>
+                        <button class="button" id="p2-placement-auto" type="button">AUTO lock</button>
+                        <button class="button" id="p2-placement-clear" type="button">Clear draft</button>
+                        <span id="p2-placement-status" class="placement-status"></span>
+                    </div>
                     <canvas id="field-editor-canvas-p2"></canvas>
                     <div class="field-controls">
                         <button class="button" id="p2-field-shift-up">↑ Up</button>
@@ -313,6 +337,7 @@ margin-top: 15px;">
 
 <script defer src="./app/00-debug-console.js"></script>
 <script defer src="./app/10-state.js"></script>
+<script defer src="./app/15-sequence.js"></script>
 <script defer src="./app/20-editor.js"></script>
 <script defer src="./app/30-viewer.js"></script>
 <script defer src="./app/40-history.js"></script>

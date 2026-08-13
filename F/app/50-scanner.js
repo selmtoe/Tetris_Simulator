@@ -86,14 +86,26 @@ async function runHighPrecisionAnalysis(imgBitmap) {
 
         const p1Data = await analyzePlayerHighPrecision(processedCanvas, imgBitmap, cropData, p1Config);
         fumenPages[currentPageIndex].p1.board = p1Data.board;
-        fumenPages[currentPageIndex].p1.next = p1Data.nextQueue.join('');
-        fumenPages[currentPageIndex].p1.hold = p1Data.holdMino || '';
+        if (typeof currentCaseIsReplay !== 'function' || !currentCaseIsReplay()) {
+            fumenPages[currentPageIndex].p1.next = p1Data.nextQueue.join('');
+            fumenPages[currentPageIndex].p1.hold = p1Data.holdMino || '';
+        } else if (currentPageIndex === 0 && !currentCase().initial.p1.sequence) {
+            currentCase().initial.p1.sequence = p1Data.nextQueue.join('');
+            currentCase().initial.p1.hold = p1Data.holdMino || '';
+            normalizeReplayCase(currentCase());
+        }
         
         // 常にP2も解析してデータを格納する（1Pモードでも内部データは保持）
         const p2Data = await analyzePlayerHighPrecision(processedCanvas, imgBitmap, cropData, p2Config);
         fumenPages[currentPageIndex].p2.board = p2Data.board;
-        fumenPages[currentPageIndex].p2.next = p2Data.nextQueue.join('');
-        fumenPages[currentPageIndex].p2.hold = p2Data.holdMino || '';
+        if (typeof currentCaseIsReplay !== 'function' || !currentCaseIsReplay()) {
+            fumenPages[currentPageIndex].p2.next = p2Data.nextQueue.join('');
+            fumenPages[currentPageIndex].p2.hold = p2Data.holdMino || '';
+        } else if (currentPageIndex === 0 && !currentCase().initial.p2.sequence) {
+            currentCase().initial.p2.sequence = p2Data.nextQueue.join('');
+            currentCase().initial.p2.hold = p2Data.holdMino || '';
+            normalizeReplayCase(currentCase());
+        }
 
     } catch (err) {
         console.error("Analysis Error:", err);
@@ -562,4 +574,3 @@ document.getElementById('scan-next-step-btn').addEventListener('click', () => {
 
 document.getElementById('scan-cancel-btn').addEventListener('click', endScanProcess);
 document.getElementById('scan-confirm-btn').addEventListener('click', processAndLoadBoard);
-

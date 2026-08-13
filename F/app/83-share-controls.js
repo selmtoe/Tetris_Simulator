@@ -63,10 +63,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (match) {
                     const fumenPagesData = FumenCodec.decode(match[0]);
                     if (fumenPagesData) {
-                        fumenPages = [];
-                        fumenPagesData.forEach(p => {
-                            const newPage = createBlankPage();
-                            newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next };
+                            fumenPages = [];
+                            fumenCases = [createCase('Imported Fumen', 'snapshot')];
+                            fumenCases[0].pages = fumenPages;
+                            currentCaseIndex = 0;
+                            fumenPagesData.forEach(p => {
+                                const newPage = createBlankPage();
+                            newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next, operation: p.operation || null };
                             fumenPages.push(newPage);
                         });
                         gameMode = '1P';
@@ -99,7 +102,10 @@ data;
             }
 
             
-            if(applyFumenData(data)) {
+            const applied = data?.v === 3 && typeof applyCollectionData === 'function'
+                ? applyCollectionData(data)
+                : applyFumenData(data);
+            if(applied) {
                  alert('クリップボードから譜面データを読み込みました。');
                  document.getElementById('share-modal').style.display = 'none';
             }

@@ -376,7 +376,11 @@ function updateNextQueueDisplay(playerId) {
     nextContainer.style.alignItems = 'center';
     nextContainer.style.gap = '5px';
     nextContainer.style.paddingLeft = '8px';
-    nextContainer.style.flexWrap = 'wrap';
+    nextContainer.style.flexWrap = 'nowrap';
+    nextContainer.style.minWidth = '0';
+    nextContainer.style.overflowX = 'auto';
+    nextContainer.style.overflowY = 'hidden';
+    nextContainer.style.maxWidth = '100%';
 
    nextContainer.appendChild(createGap(0));
     data.nextQueue.forEach((key, i) => {
@@ -451,5 +455,4 @@ ctx.fillRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, ED
 }
     }
 }
-
 

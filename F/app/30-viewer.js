@@ -55,8 +55,10 @@ function drawViewerUI(ctx, playerPageData, offsetX) {
     const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
     ctx.fillStyle = '#FFF';
 ctx.fillText('NEXT', rX, 40);
-    const nextQueue = playerPageData.next.split('');
-    for (let i = 0; i < Math.min(nextQueue.length, 6); i++) {
+    const nextQueue = (typeof displayNextForPage === 'function'
+        ? displayNextForPage(offsetX === 0 ? 'p1' : 'p2')
+        : String(playerPageData.next || '')).split('');
+    for (let i = 0; i < nextQueue.length; i++) {
         const pT = nextQueue[i];
         if (!pT) continue;
         const s = getShape(pT, 0);
@@ -84,12 +86,12 @@ function drawViewer() {
         viewerCtx.save();
         viewerCtx.translate(offsetX, 0);
 
-        drawViewerUI(viewerCtx, playerData, 0);
+        drawViewerUI(viewerCtx, playerData, index === 0 ? 0 : 1);
 
         viewerCtx.save();
         viewerCtx.translate(PLAYFIELD_X_OFFSET, 0.5 * BLOCK_SIZE);
- 
-       
+
+
         viewerCtx.fillStyle = 'rgba(0,0,0,0.5)';
         viewerCtx.fillRect(0, 0, PLAYFIELD_WIDTH, BOARD_VISIBLE_HEIGHT * BLOCK_SIZE);
         
@@ -101,12 +103,13 @@ function drawViewer() {
           viewerCtx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
             }
         }
+
         viewerCtx.strokeStyle = '#4b4b7c';
         viewerCtx.lineWidth = 2; 
         viewerCtx.strokeRect(1, 1, PLAYFIELD_WIDTH - 2, (BOARD_VISIBLE_HEIGHT * BLOCK_SIZE) - 2);
 
         const viewY = BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT;
-for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) { 
+        for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
             const boardY = y + viewY;
             
             let isLineClear = true;
@@ -143,6 +146,23 @@ if (playerData.board[boardY]?.[x]) {
 } 
             } 
         }
+
+        const operation = typeof operationForPage === 'function' ? operationForPage(playerData) : null;
+        if (operation && typeof operationCells === 'function') {
+            operationCells(operation).forEach(([x, boardY]) => {
+                const visibleY = boardY - viewY;
+                if (x < 0 || x >= BOARD_WIDTH || visibleY < 0 || visibleY >= BOARD_VISIBLE_HEIGHT) return;
+                const drawX = x * BLOCK_SIZE;
+                const drawY = visibleY * BLOCK_SIZE;
+                viewerCtx.fillStyle = COLORS[operation.type] || '#fff';
+                viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
+                viewerCtx.fillStyle = 'rgba(255,255,255,.4)';
+                viewerCtx.fillRect(drawX + 3, drawY + 3, BLOCK_SIZE - 6, BLOCK_SIZE - 6);
+                viewerCtx.strokeStyle = '#fff';
+                viewerCtx.lineWidth = 2;
+                viewerCtx.strokeRect(drawX + 1, drawY + 1, BLOCK_SIZE - 2, BLOCK_SIZE - 2);
+            });
+        }
         
         viewerCtx.restore();
         viewerCtx.restore();
@@ -159,24 +179,26 @@ function sendToSimulator() {
     
     const sanitize = (str) => str.replace(/[^IOTLSJZ]/gi, '');
     const p1Hold = sanitize(currentPage.p1.hold || '');
-    const p1Next = sanitize(currentPage.p1.next || '');
+    const p1Next = sanitize(typeof displayNextForPage === 'function' ? displayNextForPage('p1') : currentPage.p1.next || '');
+    const p1Operation = typeof operationForPage === 'function' ? operationForPage(currentPage.p1) : null;
 
     const stateData = {
         v: 2,
         m: gameMode,
         p1: {
             b: boardToString(currentPage.p1.board),
-            n: p1Next,
+            n: (p1Operation ? p1Operation.type : '') + p1Next,
             h: p1Hold
         },
     };
 
     if (gameMode === '2P') {
         const p2Hold = sanitize(currentPage.p2.hold || '');
-        const p2Next = sanitize(currentPage.p2.next || '');
+        const p2Next = sanitize(typeof displayNextForPage === 'function' ? displayNextForPage('p2') : currentPage.p2.next || '');
+        const p2Operation = typeof operationForPage === 'function' ? operationForPage(currentPage.p2) : null;
         stateData.p2 = {
             b: boardToString(currentPage.p2.board),
-            n: p2Next,
+            n: (p2Operation ? p2Operation.type : '') + p2Next,
             h: p2Hold
         };
     }

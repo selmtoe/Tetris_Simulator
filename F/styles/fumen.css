@@ -681,6 +681,49 @@ flex-wrap: wrap;
         border: 1px solid var(--primary-color);
     }
 
+    .case-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 10px 12px;
+        border: 1px solid var(--primary-color);
+        border-radius: 6px;
+        background: rgba(0,0,0,.18);
+    }
+    .case-selector, .sequence-input {
+        min-width: 110px;
+        max-width: 210px;
+        padding: 6px 8px;
+        background: var(--canvas-bg-color);
+        color: var(--font-color);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+    }
+    .sequence-input {
+        width: 150px;
+        text-transform: uppercase;
+        font-family: monospace;
+    }
+    .case-mode-label, .case-label { color: #aaa; font-size: 12px; }
+    .replay-only { display: none; }
+    .placement-tools {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 6px 0 10px;
+    }
+    .placement-tools .button.active {
+        background: var(--primary-hover-color);
+        box-shadow: 0 0 8px var(--primary-hover-color);
+    }
+    .placement-status { min-height: 18px; color: #c7c7ff; font-size: 12px; }
+    .placement-draft-cell {
+        outline: 3px solid #fff;
+    }
+
     .button-group {
         display: flex;
         gap: 10px;

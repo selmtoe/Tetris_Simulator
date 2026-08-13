@@ -1,0 +1,404 @@
+/*
+ * Independent case collection and operation/replay helpers.
+ *
+ * Snapshot cases keep the original page model: every page may describe a
+ * completely unrelated position. Replay cases add one initial piece stream
+ * and a list of locked operations; NEXT is derived from that case only.
+ */
+
+const PIECE_TYPES = ['I', 'O', 'T', 'L', 'J', 'S', 'Z'];
+const OPERATION_ROTATIONS = ['spawn', 'right', 'reverse', 'left'];
+
+function normalizePieceType(value, fallback = '') {
+    const type = String(value || '').toUpperCase();
+    return PIECE_TYPES.includes(type) ? type : fallback;
+}
+
+function normalizeRotation(value) {
+    if (typeof value === 'number') return OPERATION_ROTATIONS[((value % 4) + 4) % 4];
+    const rotation = String(value || '').toLowerCase();
+    return OPERATION_ROTATIONS.includes(rotation) ? rotation : 'spawn';
+}
+
+function rotationIndex(value) {
+    return OPERATION_ROTATIONS.indexOf(normalizeRotation(value));
+}
+
+function normalizeOperation(value) {
+    if (!value || typeof value !== 'object') return null;
+    const type = normalizePieceType(value.type || value.piece);
+    if (!type) return null;
+    const x = Number(value.x);
+    const y = Number(value.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return {
+        type,
+        rotation: normalizeRotation(value.rotation),
+        x: Math.round(x),
+        y: Math.round(y),
+        lock: value.lock !== false,
+        holdUsed: Boolean(value.holdUsed || value.hold || value.source === 'hold'),
+        source: value.source === 'hold' ? 'hold' : 'next'
+    };
+}
+
+function operationForPage(playerData) {
+    return normalizeOperation(playerData?.operation || playerData?.placement);
+}
+
+function cloneBoard(board) {
+    return Array.from({ length: BOARD_HEIGHT }, (_, y) =>
+        Array.from({ length: BOARD_WIDTH }, (_, x) => board?.[y]?.[x] || null));
+}
+
+function clonePage(page) {
+    return JSON.parse(JSON.stringify(page || createBlankPage()));
+}
+
+function createCase(name = 'Case 1', kind = 'snapshot') {
+    const page = createBlankPage();
+    return {
+        id: `case-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name,
+        kind: kind === 'replay' ? 'replay' : 'snapshot',
+        gameMode: '1P',
+        initial: {
+            p1: { board: cloneBoard(page.p1.board), hold: '', sequence: '' },
+            p2: { board: cloneBoard(page.p2.board), hold: '', sequence: '' }
+        },
+        pages: [page]
+    };
+}
+
+function normalizeCase(caseData) {
+    const normalized = caseData && typeof caseData === 'object' ? caseData : createCase();
+    normalized.name = String(normalized.name || 'Case');
+    normalized.kind = normalized.kind === 'replay' ? 'replay' : 'snapshot';
+    normalized.gameMode = normalized.gameMode === '2P' ? '2P' : '1P';
+    normalized.initial = normalized.initial || {};
+    ['p1', 'p2'].forEach(playerId => {
+        normalized.initial[playerId] = normalized.initial[playerId] || {};
+        normalized.initial[playerId].board = cloneBoard(normalized.initial[playerId].board);
+        normalized.initial[playerId].hold = normalizePieceType(normalized.initial[playerId].hold);
+        normalized.initial[playerId].sequence = String(normalized.initial[playerId].sequence || '')
+            .toUpperCase().split('').filter(piece => PIECE_TYPES.includes(piece)).join('');
+    });
+    normalized.pages = Array.isArray(normalized.pages) && normalized.pages.length
+        ? normalized.pages.map(page => {
+            const normalizedPage = page || createBlankPage();
+            ['p1', 'p2'].forEach(playerId => {
+                normalizedPage[playerId] = normalizedPage[playerId] || createBlankPage()[playerId];
+                normalizedPage[playerId].board = cloneBoard(normalizedPage[playerId].board);
+                normalizedPage[playerId].hold = normalizePieceType(normalizedPage[playerId].hold);
+                normalizedPage[playerId].next = String(normalizedPage[playerId].next || '')
+                    .toUpperCase().split('').filter(piece => PIECE_TYPES.includes(piece)).join('');
+                normalizedPage[playerId].operation = operationForPage(normalizedPage[playerId]);
+                normalizedPage[playerId].placementDraft = Array.isArray(normalizedPage[playerId].placementDraft)
+                    ? normalizedPage[playerId].placementDraft.map(cell => [Number(cell[0]), Number(cell[1])])
+                        .filter(cell => Number.isFinite(cell[0]) && Number.isFinite(cell[1]))
+                    : [];
+                normalizedPage[playerId].placementMode = Boolean(normalizedPage[playerId].placementMode);
+            });
+            return normalizedPage;
+        })
+        : [createBlankPage()];
+    if (normalized.kind === 'replay') normalizeReplayCase(normalized);
+    return normalized;
+}
+
+function normalizeActiveCase() {
+    if (!fumenCases.length) {
+        const initialCase = createCase('Case 1', 'snapshot');
+        initialCase.pages = fumenPages.length ? fumenPages : initialCase.pages;
+        fumenCases = [initialCase];
+        currentCaseIndex = 0;
+    }
+    currentCaseIndex = Math.max(0, Math.min(currentCaseIndex, fumenCases.length - 1));
+    fumenCases[currentCaseIndex] = normalizeCase(fumenCases[currentCaseIndex]);
+    fumenCases[currentCaseIndex].pages = fumenPages;
+    fumenCases[currentCaseIndex].gameMode = gameMode;
+    if (fumenCases[currentCaseIndex].kind === 'replay') normalizeReplayCase(fumenCases[currentCaseIndex]);
+    if (typeof updateCaseControls === 'function') updateCaseControls();
+}
+
+function currentCase() {
+    normalizeActiveCase();
+    return fumenCases[currentCaseIndex];
+}
+
+function currentCaseIsReplay() {
+    return currentCase()?.kind === 'replay';
+}
+
+function saveCurrentCase() {
+    if (!fumenCases.length) return;
+    fumenCases[currentCaseIndex] = normalizeCase(fumenCases[currentCaseIndex]);
+    fumenCases[currentCaseIndex].pages = fumenPages;
+    fumenCases[currentCaseIndex].gameMode = gameMode;
+}
+
+function switchCase(index) {
+    saveCurrentCase();
+    const nextIndex = Math.max(0, Math.min(Number(index) || 0, fumenCases.length - 1));
+    const selected = normalizeCase(fumenCases[nextIndex]);
+    fumenCases[nextIndex] = selected;
+    currentCaseIndex = nextIndex;
+    fumenPages = selected.pages;
+    gameMode = selected.gameMode;
+    currentPageIndex = 0;
+    document.getElementById('mode-1p')?.classList.toggle('active', gameMode === '1P');
+    document.getElementById('mode-2p')?.classList.toggle('active', gameMode === '2P');
+    const p2 = document.getElementById('p2-editor-col');
+    if (p2) p2.style.display = gameMode === '2P' ? 'flex' : 'none';
+    loadPage(0);
+    updateScale();
+}
+
+function addCase(kind = 'snapshot') {
+    saveCurrentCase();
+    const number = fumenCases.length + 1;
+    const newCase = createCase(kind === 'replay' ? `Replay ${number}` : `Case ${number}`, kind);
+    fumenCases.push(newCase);
+    switchCase(fumenCases.length - 1);
+    pushHistory();
+}
+
+function deleteCurrentCase() {
+    if (fumenCases.length <= 1) return;
+    fumenCases.splice(currentCaseIndex, 1);
+    currentCaseIndex = Math.min(currentCaseIndex, fumenCases.length - 1);
+    fumenPages = normalizeCase(fumenCases[currentCaseIndex]).pages;
+    currentPageIndex = 0;
+    loadPage(0);
+    if (typeof updateCaseControls === 'function') updateCaseControls();
+    pushHistory();
+}
+
+function operationCells(operation) {
+    const normalized = normalizeOperation(operation);
+    if (!normalized || typeof getShape !== 'function') return [];
+    return getShape(normalized.type, rotationIndex(normalized.rotation))
+        .map(([x, y]) => [normalized.x + Math.round(x), normalized.y + Math.round(y)]);
+}
+
+const FUMEN_BASE_SHAPES = {
+    I: [[0, 0], [-1, 0], [1, 0], [2, 0]],
+    O: [[0, 0], [1, 0], [0, 1], [1, 1]],
+    T: [[0, 0], [-1, 0], [1, 0], [0, 1]],
+    L: [[0, 0], [-1, 0], [1, 0], [1, 1]],
+    J: [[0, 0], [-1, 0], [1, 0], [-1, 1]],
+    S: [[0, 0], [-1, 0], [0, 1], [1, 1]],
+    Z: [[0, 0], [1, 0], [0, 1], [-1, 1]]
+};
+
+function fumenShape(type, rotation) {
+    let shape = FUMEN_BASE_SHAPES[type]?.map(([x, y]) => [x, y]) || [];
+    for (let i = 0; i < rotationIndex(rotation); i++) shape = shape.map(([x, y]) => [y, -x]);
+    return shape;
+}
+
+function cellSet(cells) {
+    return cells.map(([x, y]) => `${Math.round(x)},${Math.round(y)}`).sort().join('|');
+}
+
+function findOperationAnchor(type, rotation, targetCells, xHint, yHint) {
+    const shape = getShape(type, rotationIndex(rotation)).map(([x, y]) => [Math.round(x), Math.round(y)]);
+    const target = cellSet(targetCells);
+    for (let y = Math.round(yHint) - 4; y <= Math.round(yHint) + 4; y++) {
+        for (let x = Math.round(xHint) - 4; x <= Math.round(xHint) + 4; x++) {
+            if (cellSet(shape.map(([dx, dy]) => [x + dx, y + dy])) === target) return { x, y };
+        }
+    }
+    return null;
+}
+
+function editorOperationToFumen(operation) {
+    const normalized = normalizeOperation(operation);
+    if (!normalized) return null;
+    const target = operationCells(normalized).map(([x, y]) => [x, 39 - y]);
+    const shape = fumenShape(normalized.type, normalized.rotation);
+    const targetKey = cellSet(target);
+    const hintY = 39 - normalized.y;
+    for (let y = hintY - 4; y <= hintY + 4; y++) {
+        for (let x = normalized.x - 4; x <= normalized.x + 4; x++) {
+            if (cellSet(shape.map(([dx, dy]) => [x + dx, y + dy])) === targetKey) {
+                return { ...normalized, x, y };
+            }
+        }
+    }
+    return { ...normalized, y: hintY };
+}
+
+function fumenOperationToEditor(operation) {
+    if (!operation) return null;
+    const type = normalizePieceType(operation.type);
+    if (!type) return null;
+    const rotation = normalizeRotation(operation.rotation);
+    const shape = fumenShape(type, rotation);
+    const target = shape.map(([x, y]) => [Number(operation.x) + x, 39 - (Number(operation.y) + y)]);
+    const anchor = findOperationAnchor(type, rotation, target, Number(operation.x), 39 - Number(operation.y));
+    return normalizeOperation({
+        ...operation,
+        type,
+        rotation,
+        x: anchor?.x ?? Number(operation.x),
+        y: anchor?.y ?? (39 - Number(operation.y))
+    });
+}
+
+function canFillOperation(board, operation) {
+    const cells = operationCells(operation);
+    if (cells.length !== 4) return false;
+    return cells.every(([x, y]) => x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT && !board[y][x]);
+}
+
+function canLockOperation(board, operation) {
+    if (!canFillOperation(board, operation)) return false;
+    return !canFillOperation(board, { ...operation, y: operation.y + 1 });
+}
+
+function clearLines(board) {
+    const kept = board.filter(row => !row.every(Boolean));
+    while (kept.length < BOARD_HEIGHT) kept.unshift(Array(BOARD_WIDTH).fill(null));
+    return kept;
+}
+
+function advanceBoardByOperation(board, operation) {
+    const nextBoard = cloneBoard(board);
+    for (const [x, y] of operationCells(operation)) {
+        if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT) nextBoard[y][x] = operation.type;
+    }
+    return clearLines(nextBoard);
+}
+
+function detectOperationFromDraft(board, draft) {
+    if (!Array.isArray(draft) || draft.length !== 4) return null;
+    const target = draft.map(([x, y]) => `${Math.round(x)},${Math.round(y)}`).sort().join('|');
+    const candidates = [];
+    PIECE_TYPES.forEach(type => {
+        for (let rotation = 0; rotation < 4; rotation++) {
+            const shape = getShape(type, rotation).map(([x, y]) => [Math.round(x), Math.round(y)]);
+            for (const [anchorX, anchorY] of draft) {
+                const [shapeX, shapeY] = shape[0];
+                const operation = { type, rotation, x: Math.round(anchorX) - shapeX, y: Math.round(anchorY) - shapeY };
+                const actual = operationCells(operation).map(([x, y]) => `${x},${y}`).sort().join('|');
+                if (actual !== target || !canLockOperation(board, operation)) continue;
+                candidates.push({ ...operation, rotation: OPERATION_ROTATIONS[rotation] });
+            }
+        }
+    });
+    const unique = candidates.filter((candidate, index, all) =>
+        all.findIndex(other => other.type === candidate.type && other.rotation === candidate.rotation &&
+            other.x === candidate.x && other.y === candidate.y) === index);
+    if (!unique.length) return null;
+    // O has identical geometry in all rotations. Prefer spawn in that case.
+    return unique.sort((a, b) => rotationIndex(a.rotation) - rotationIndex(b.rotation))[0];
+}
+
+function replayStateAtPage(caseData, playerId, pageIndex) {
+    const initial = caseData.initial[playerId] || {};
+    const sequence = String(initial.sequence || '').split('').filter(piece => PIECE_TYPES.includes(piece));
+    const state = { current: sequence.shift() || '', queue: sequence, hold: normalizePieceType(initial.hold) };
+    const pages = caseData.pages || [];
+    for (let index = 0; index <= pageIndex; index++) {
+        const operation = operationForPage(pages[index]?.[playerId]);
+        if (operation?.holdUsed) {
+            if (state.hold) {
+                const previousCurrent = state.current;
+                state.current = state.hold;
+                state.hold = previousCurrent;
+            } else {
+                state.hold = state.current;
+                state.current = state.queue.shift() || '';
+            }
+        }
+        if (index === pageIndex) return state;
+        if (operation) state.current = state.queue.shift() || '';
+    }
+    return state;
+}
+
+function normalizeReplayCase(caseData) {
+    if (!caseData || caseData.kind !== 'replay') return;
+    ['p1', 'p2'].forEach(playerId => {
+        let state;
+        const initial = caseData.initial[playerId] || {};
+        const sequence = String(initial.sequence || '').split('').filter(piece => PIECE_TYPES.includes(piece));
+        state = { current: sequence.shift() || '', queue: sequence, hold: normalizePieceType(initial.hold) };
+        caseData.pages.forEach(page => {
+            const player = page[playerId];
+            const operation = operationForPage(player);
+            if (operation?.holdUsed) {
+                if (state.hold) {
+                    const previousCurrent = state.current;
+                    state.current = state.hold;
+                    state.hold = previousCurrent;
+                } else {
+                    state.hold = state.current;
+                    state.current = state.queue.shift() || '';
+                }
+            }
+            player.hold = state.hold;
+            player.next = state.queue.join('');
+            if (operation) state.current = state.queue.shift() || '';
+        });
+    });
+}
+
+function derivedNextForPage(playerId, pageIndex, pages = fumenPages) {
+    const active = currentCase();
+    if (!active || active.kind !== 'replay') return String(pages[pageIndex]?.[playerId]?.next || '');
+    normalizeReplayCase(active);
+    return String(pages[pageIndex]?.[playerId]?.next || '');
+}
+
+function displayNextForPage(playerId, pageIndex = currentPageIndex) {
+    return currentCaseIsReplay()
+        ? derivedNextForPage(playerId, pageIndex)
+        : String(fumenPages[pageIndex]?.[playerId]?.next || '');
+}
+
+function createPageAfterOperation(page) {
+    const nextPage = clonePage(page);
+    ['p1', 'p2'].forEach(playerId => {
+        const player = nextPage[playerId];
+        const operation = operationForPage(page[playerId]);
+        if (operation) player.board = advanceBoardByOperation(page[playerId].board, operation);
+        player.operation = null;
+        player.placementDraft = [];
+        player.placementMode = false;
+        player.nextInsertionIndex = -1;
+    });
+    return nextPage;
+}
+
+function setReplaySequence(playerId, sequence) {
+    const active = currentCase();
+    if (!active || active.kind !== 'replay') return;
+    active.initial[playerId].sequence = String(sequence || '').toUpperCase()
+        .split('').filter(piece => PIECE_TYPES.includes(piece)).join('');
+    normalizeReplayCase(active);
+    loadPage(currentPageIndex);
+}
+
+function collectionData() {
+    saveCurrentCase();
+    return {
+        v: 3,
+        m: gameMode,
+        currentCase: currentCaseIndex,
+        cases: fumenCases.map(caseData => normalizeCase(caseData))
+    };
+}
+
+function applyCollectionData(data) {
+    if (!data || data.v !== 3 || !Array.isArray(data.cases) || !data.cases.length) return false;
+    fumenCases = data.cases.map(normalizeCase);
+    currentCaseIndex = Math.max(0, Math.min(Number(data.currentCase) || 0, fumenCases.length - 1));
+    fumenPages = fumenCases[currentCaseIndex].pages;
+    gameMode = fumenCases[currentCaseIndex].gameMode || data.m || '1P';
+    currentPageIndex = 0;
+    loadPage(0);
+    if (typeof updateCaseControls === 'function') updateCaseControls();
+    return true;
+}

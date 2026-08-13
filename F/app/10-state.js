@@ -18,6 +18,11 @@ const EDITOR_COLORS = {...COLORS, 'EMPTY': '#000000'};
 let gameMode = '1P';
 let fumenPages = [];
 let currentPageIndex = 0;
+// A document is a collection of independent cases. `fumenPages` remains the
+// active case's page array so the existing editor/viewer code can keep its
+// page-oriented API.
+let fumenCases = [];
+let currentCaseIndex = 0;
 let historyStack = [];
 let historyIndex = -1;
 const MAX_HISTORY = 50;
@@ -52,15 +57,26 @@ const DRAW_SHAPE_MAP = {
     "-1,1;-1,2;0,1": { type: "Z", rot: 1, offset: [1, -1] },
 };
 const createEmptyBoard = () => Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
+const boardToString = (board) => board.map(row => row.map(cell => cell || '_').join('')).join('');
+const stringToBoard = (value) => {
+    const text = String(value || '').padEnd(BOARD_WIDTH * BOARD_HEIGHT, '_').slice(0, BOARD_WIDTH * BOARD_HEIGHT);
+    return Array.from({ length: BOARD_HEIGHT }, (_, y) =>
+        Array.from({ length: BOARD_WIDTH }, (_, x) => {
+            const cell = text[y * BOARD_WIDTH + x];
+            return cell === '_' || cell === 'E' || cell === '0' ? null : cell;
+        }));
+};
 const createBlankPage = () => ({
     // nextInsertionIndex を追加: 0なら先頭、-1なら末尾、'hold'ならホールド
-    p1: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '', nextInsertionIndex: -1 },
-    p2: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '', nextInsertionIndex: -1 }
+    p1: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '', nextInsertionIndex: -1, operation: null, placementDraft: [], placementMode: false },
+    p2: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '', nextInsertionIndex: -1, operation: null, placementDraft: [], placementMode: false }
 });
 function loadPage(index) {
 
     if (index < 0 || index >= fumenPages.length) return;
     currentPageIndex = index;
+
+    if (typeof normalizeActiveCase === 'function') normalizeActiveCase();
 
     ['p1', 'p2'].forEach(playerId => {
         const data = fumenPages[currentPageIndex][playerId];

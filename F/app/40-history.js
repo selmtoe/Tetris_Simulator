@@ -89,6 +89,8 @@ function pushHistory() {
         historyStack = historyStack.slice(0, historyIndex + 1);
     }
     const state = {
+        cases: JSON.parse(JSON.stringify(fumenCases)),
+        caseIndex: currentCaseIndex,
         pages: JSON.parse(JSON.stringify(fumenPages)),
         idx: currentPageIndex,
         mode: gameMode
@@ -117,7 +119,17 @@ function redo() {
 }
 
 function restoreState(state) {
-    fumenPages = JSON.parse(JSON.stringify(state.pages));
+    if (Array.isArray(state.cases) && state.cases.length) {
+        fumenCases = JSON.parse(JSON.stringify(state.cases));
+        currentCaseIndex = Number.isInteger(state.caseIndex) ? state.caseIndex : 0;
+        currentCaseIndex = Math.max(0, Math.min(currentCaseIndex, fumenCases.length - 1));
+        fumenPages = fumenCases[currentCaseIndex].pages;
+    } else {
+        fumenPages = JSON.parse(JSON.stringify(state.pages));
+        fumenCases = [createCase('Case 1', 'snapshot')];
+        fumenCases[0].pages = fumenPages;
+        currentCaseIndex = 0;
+    }
     currentPageIndex = state.idx;
     gameMode = state.mode;
     

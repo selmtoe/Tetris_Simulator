@@ -27,7 +27,18 @@ function getFumenDataForExport(pages = fumenPages, mode = gameMode) {
         pageData.p1 = {
             b: p1BoardCompressed, // 圧縮データを格納
             h: page.p1.hold || '',
-            n: page.p1.next || ''
+            n: typeof displayNextForPage === 'function' && pages === fumenPages
+                ? displayNextForPage('p1', i)
+                : (page.p1.next || '')
+        };
+        const p1Operation = typeof operationForPage === 'function' ? operationForPage(page.p1) : null;
+        if (p1Operation) pageData.p1.o = {
+            type: p1Operation.type,
+            rotation: p1Operation.rotation,
+            x: p1Operation.x,
+            y: p1Operation.y,
+            lock: p1Operation.lock,
+            ...(p1Operation.holdUsed ? { holdUsed: true } : {})
         };
         prevP1Board1D = currentP1Board1D; // 次の差分のために現在地を保存
 
@@ -44,7 +55,18 @@ function getFumenDataForExport(pages = fumenPages, mode = gameMode) {
             pageData.p2 = {
                 b: p2BoardCompressed,
                 h: page.p2.hold || '',
-                n: page.p2.next || ''
+                n: typeof displayNextForPage === 'function' && pages === fumenPages
+                    ? displayNextForPage('p2', i)
+                    : (page.p2.next || '')
+            };
+            const p2Operation = typeof operationForPage === 'function' ? operationForPage(page.p2) : null;
+            if (p2Operation) pageData.p2.o = {
+                type: p2Operation.type,
+                rotation: p2Operation.rotation,
+                x: p2Operation.x,
+                y: p2Operation.y,
+                lock: p2Operation.lock,
+                ...(p2Operation.holdUsed ? { holdUsed: true } : {})
             };
             prevP2Board1D = currentP2Board1D;
         }
@@ -53,6 +75,20 @@ function getFumenDataForExport(pages = fumenPages, mode = gameMode) {
     }
     
     return exportedData;
+}
+
+function getCollectionDataForExport() {
+    return typeof collectionData === 'function' ? collectionData() : getFumenDataForExport();
+}
+
+function encodeBase64Utf8(text) {
+    const bytes = new TextEncoder().encode(text);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+    }
+    return btoa(binary);
 }
 
 // --- テト譜 v115 変換ロジック ---
@@ -89,7 +125,7 @@ const FumenCodec = {
     },
 
     // 1ページ分のエンコード
-    encodePage: function(prevField, currentField, hold, next) {
+    encodePage: function(prevField, currentField, operation) {
         let data = '';
 
         // 1. フィールド (Diff + RLE)
@@ -130,16 +166,38 @@ const FumenCodec = {
         // 今回はエディタ上のアクティブミノは再現せず、フラグ(コメント)のみ利用する
         // piece=0, rot=0, loc=0
         // flag_comment: Hold/Nextがある場合は1にする
-        const hasQuiz = (hold || next);
-        const flag_comment = hasQuiz ? 1 : 0;
+        const normalizedOperation = typeof editorOperationToFumen === 'function'
+            ? editorOperationToFumen(operation)
+            : (typeof normalizeOperation === 'function' ? normalizeOperation(operation) : null);
+        const hasQuiz = false;
+        const flag_comment = 0;
         const flag_lock = 1; // 接着済みとして扱う
         const flag_color = 1;
         const flag_mirror = 0;
         const flag_raise = 0;
         
-        const piece = 0;
-        const rot = 0;
-        const loc = 0;
+        const pieceMap = { I: 1, L: 2, O: 3, Z: 4, T: 5, J: 6, S: 7 };
+        const rotationMap = { reverse: 0, right: 1, spawn: 2, left: 3 };
+        const piece = normalizedOperation ? (pieceMap[normalizedOperation.type] || 0) : 0;
+        const rot = normalizedOperation ? (rotationMap[normalizedOperation.rotation] ?? 2) : 0;
+        let fumenX = normalizedOperation ? normalizedOperation.x : 0;
+        let fumenY = normalizedOperation ? normalizedOperation.y : 22;
+        if (normalizedOperation) {
+            if (normalizedOperation.type === 'O') {
+                if (normalizedOperation.rotation === 'left' || normalizedOperation.rotation === 'reverse') fumenX -= 1;
+                if (normalizedOperation.rotation === 'left' || normalizedOperation.rotation === 'spawn') fumenY += 1;
+            } else if (normalizedOperation.type === 'I') {
+                if (normalizedOperation.rotation === 'reverse') fumenX -= 1;
+                if (normalizedOperation.rotation === 'left') fumenY += 1;
+            } else if (normalizedOperation.type === 'S') {
+                if (normalizedOperation.rotation === 'spawn') fumenY += 1;
+                if (normalizedOperation.rotation === 'right') fumenX += 1;
+            } else if (normalizedOperation.type === 'Z') {
+                if (normalizedOperation.rotation === 'spawn') fumenY += 1;
+                if (normalizedOperation.rotation === 'left') fumenX -= 1;
+            }
+        }
+        const loc = normalizedOperation ? (23 - fumenY - 1) * 10 + fumenX : 0;
 
         // Value計算 (Decodeの逆順に構成)
         // Decode順: piece -> rot -> loc -> raise -> mirror -> color -> comment -> lock
@@ -291,6 +349,7 @@ const FumenCodec = {
             const mirror = temp % 2; temp = Math.floor(temp / 2);
             const color = temp % 2; temp = Math.floor(temp / 2);
             const commentFlag = temp % 2; temp = Math.floor(temp / 2);
+            const lockFlag = temp % 2;
             
             let hold = '';
             let next = '';
@@ -332,6 +391,33 @@ const FumenCodec = {
                 }
             }
             
+            const typeByPiece = { 1: 'I', 2: 'L', 3: 'O', 4: 'Z', 5: 'T', 6: 'J', 7: 'S' };
+            const rotationByCode = { 0: 'reverse', 1: 'right', 2: 'spawn', 3: 'left' };
+            let operation = null;
+            if (piece !== 0 && typeByPiece[piece]) {
+                let fumenX = loc % 10;
+                let fumenY = 22 - Math.floor(loc / 10);
+                const type = typeByPiece[piece];
+                const rotation = rotationByCode[rot] || 'spawn';
+                if (type === 'O') {
+                    if (rotation === 'left' || rotation === 'reverse') fumenX += 1;
+                    if (rotation === 'left' || rotation === 'spawn') fumenY -= 1;
+                } else if (type === 'I') {
+                    if (rotation === 'reverse') fumenX += 1;
+                    if (rotation === 'left') fumenY -= 1;
+                } else if (type === 'S') {
+                    if (rotation === 'spawn') fumenY -= 1;
+                    if (rotation === 'right') fumenX -= 1;
+                } else if (type === 'Z') {
+                    if (rotation === 'spawn') fumenY -= 1;
+                    if (rotation === 'left') fumenX += 1;
+                }
+                const officialOperation = { type, rotation, x: fumenX, y: fumenY, lock: lockFlag === 0 };
+                operation = typeof fumenOperationToEditor === 'function'
+                    ? fumenOperationToEditor(officialOperation)
+                    : { ...officialOperation, y: 39 - fumenY };
+            }
+
             const customBoard = Array.from({length: 40}, () => Array(10).fill(null));
             for(let y=0; y<23; y++) {
                 for(let x=0; x<10; x++) {
@@ -343,7 +429,8 @@ const FumenCodec = {
             pages.push({
                 board: customBoard,
                 hold: hold,
-                next: next
+                next: next,
+                operation
             });
         }
         return pages;
@@ -371,13 +458,26 @@ const FumenCodec = {
                 }
             }
             
-            str += this.encodePage(prevField, currentField, pData.hold, pData.next);
+            str += this.encodePage(prevField, currentField, pData.operation);
             
             // --- 後処理 (Post Processing) ---
             // 次のページの差分計算のために、現在ページでライン消去が発生した場合、
             // それを反映した状態を prevField (基準) とする。
             // これを行わないと、ライン消去を含むページの次のページで差分がズレてデータが崩壊する。
             
+            const operation = typeof normalizeOperation === 'function'
+                ? normalizeOperation(pData.operation)
+                : null;
+            if (operation && typeof operationCells === 'function') {
+                const fumenPiece = this.TYPE_TO_FUMEN[operation.type] || 0;
+                for (const [x, y] of operationCells(operation)) {
+                    const fumenY = 39 - y;
+                    if (x >= 0 && x < 10 && fumenY >= 0 && fumenY < 23) {
+                        currentField[fumenY * 10 + x] = fumenPiece;
+                    }
+                }
+            }
+
             const nextPrevField = Array(240).fill(0);
             let writeRow = 22; // Fumenフィールドは下から y=22 -> 0
 
@@ -452,6 +552,9 @@ function applyFumenData(data) {
                 newPage.p1.board = stringToBoard(currentP1Board1D.join(''));
                 newPage.p1.hold = pageData.p1.h || '';
                 newPage.p1.next = pageData.p1.n || '';
+                newPage.p1.operation = typeof normalizeOperation === 'function'
+                    ? normalizeOperation(pageData.p1.o)
+                    : null;
                 prevP1Board1D = currentP1Board1D;
             }
 
@@ -471,12 +574,18 @@ function applyFumenData(data) {
                 newPage.p2.board = stringToBoard(currentP2Board1D.join(''));
                 newPage.p2.hold = pageData.p2.h || '';
                 newPage.p2.next = pageData.p2.n || '';
+                newPage.p2.operation = typeof normalizeOperation === 'function'
+                    ? normalizeOperation(pageData.p2.o)
+                    : null;
                 prevP2Board1D = currentP2Board1D;
             }
             
             fumenPages.push(newPage);
         }
 
+        fumenCases = [createCase('Imported Set', 'snapshot')];
+        fumenCases[0].pages = fumenPages;
+        currentCaseIndex = 0;
         currentPageIndex = 0;
         loadPage(0);
         updateScale();
@@ -489,10 +598,9 @@ function applyFumenData(data) {
 }
     
 function generateAndDisplayLink() {
-    const stateData = getFumenDataForExport();
+    const stateData = getCollectionDataForExport();
     const jsonString = JSON.stringify(stateData);
-    const uint8Array = new TextEncoder().encode(jsonString);
-    const base64Data = btoa(String.fromCharCode.apply(null, uint8Array));
+    const base64Data = encodeBase64Utf8(jsonString);
     const url = new URL(window.location);
     url.hash = base64Data;
     document.getElementById('share-link-input').value = url.href;
@@ -525,9 +633,12 @@ function loadStateFromURL() {
                         if (fumenPagesData) {
                             // 読み込み成功時の処理
                             fumenPages = [];
+                            fumenCases = [createCase('Imported Fumen', 'snapshot')];
+                            fumenCases[0].pages = fumenPages;
+                            currentCaseIndex = 0;
                             fumenPagesData.forEach(p => {
                                 const newPage = createBlankPage();
-                                newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next };
+                                newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next, operation: p.operation || null };
                                 // 2Pは空にする
                                 fumenPages.push(newPage);
                             });
@@ -544,7 +655,11 @@ function loadStateFromURL() {
                 throw e;
             }
 
-if (data.v === 'f1' || data.v === 'f2') {
+            if (data.v === 3) {
+                if (applyCollectionData(data)) {
+                    alert('Collection data loaded.');
+                }
+            } else if (data.v === 'f1' || data.v === 'f2') {
 
                 if (applyFumenData(data)) {       
                 }
@@ -561,11 +676,17 @@ if (data.v === 'f1' || data.v === 'f2') {
                     fumenPages[0].p1.board = stringToBoard(data.p1.b);
                     fumenPages[0].p1.next = data.p1.n || '';
                     fumenPages[0].p1.hold = data.p1.h || '';
+                    fumenPages[0].p1.operation = typeof normalizeOperation === 'function'
+                        ? normalizeOperation(data.p1.o)
+                        : null;
                 }
                 if (gameMode === '2P' && data.p2) {
                     fumenPages[0].p2.board = stringToBoard(data.p2.b);
                     fumenPages[0].p2.next = data.p2.n || '';
                     fumenPages[0].p2.hold = data.p2.h || '';
+                    fumenPages[0].p2.operation = typeof normalizeOperation === 'function'
+                        ? normalizeOperation(data.p2.o)
+                        : null;
                 }
                 currentPageIndex = 0;
                 loadPage(0);
