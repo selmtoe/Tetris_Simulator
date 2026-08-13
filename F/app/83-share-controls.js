@@ -18,20 +18,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     const copyToClipboard = (text) => {
-        navigator.clipboard.writeText(text)
-            .then(() => alert('テト譜リンクをコピーしました！'))
-            .catch(err => alert('コピー失敗: ' + err));
+        const fallbackCopy = () => {
+            const helper = document.createElement('textarea');
+            helper.value = text;
+            helper.style.position = 'fixed';
+            helper.style.opacity = '0';
+            document.body.appendChild(helper);
+            helper.select();
+            const copied = document.execCommand('copy');
+            helper.remove();
+            if (!copied) throw new Error('copy command failed');
+        };
+        const copy = navigator.clipboard?.writeText
+            ? navigator.clipboard.writeText(text).catch(() => fallbackCopy())
+            : Promise.resolve().then(fallbackCopy);
+        copy.then(() => alert('リンクをコピーしました。'))
+            .catch(err => alert('コピーに失敗しました: ' + err));
+    };
+
+    const setOpenLink = (id, url) => {
+        const link = document.getElementById(id);
+        if (!link) return;
+        link.href = url;
+        link.hidden = false;
     };
 
     document.getElementById('export-fumen-p1-btn').addEventListener('click', () => {
         const fumenData = FumenCodec.export(fumenPages, 'p1');
         const url = `https://knewjade.github.io/fumen-for-mobile/#?d=${fumenData}`;
+        setOpenLink('fumen-p1-open', url);
         copyToClipboard(url);
     });
 
     document.getElementById('export-fumen-p2-btn').addEventListener('click', () => {
         const fumenData = FumenCodec.export(fumenPages, 'p2');
         const url = `https://knewjade.github.io/fumen-for-mobile/#?d=${fumenData}`;
+        setOpenLink('fumen-p2-open', url);
         copyToClipboard(url);
     });
 
@@ -45,9 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('copy-link-btn').addEventListener('click', () => {
         const input = document.getElementById('share-link-input');
         input.select();
-        navigator.clipboard.writeText(input.value)
-            .then(() => alert('共有リンクをクリップボードにコピーしました！'))
-            .catch(err => alert('コピーに失敗しました: ' + err));
+        copyToClipboard(input.value);
     });
     document.getElementById('import-from-data-btn').addEventListener('click', async () => {
         try {
@@ -83,28 +103,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            let 
-data;
-            if (text.startsWith('http') && text.includes('#')) {
-                // 自作URLの解析
-                try {
-                    const base64Data = text.substring(text.indexOf('#') + 1);
-                    const binaryString = atob(base64Data);
-                    const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
-                    const jsonString = new TextDecoder().decode(bytes);
-                    data = JSON.parse(jsonString);
-                } catch(e) {
-                     // 失敗したら通常JSONパースへ
-                     data = JSON.parse(text);
-                }
-            } else {
-                data = JSON.parse(text);
-            }
+            const data = typeof decodeSharedStateText === 'function'
+                ? decodeSharedStateText(text)
+                : JSON.parse(text);
 
             
-            const applied = data?.v === 3 && typeof applyCollectionData === 'function'
-                ? applyCollectionData(data)
-                : applyFumenData(data);
+            const applied = data?.simulatorData || data?.pageFormat === 'operation-pages/v1' || data?.version === 5
+                ? applyVideoRecoveryData(data)
+                : data?.v === 3 && typeof applyCollectionData === 'function'
+                    ? applyCollectionData(data)
+                    : applyFumenData(data);
             if(applied) {
                  alert('クリップボードから譜面データを読み込みました。');
                  document.getElementById('share-modal').style.display = 'none';

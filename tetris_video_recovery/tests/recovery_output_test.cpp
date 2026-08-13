@@ -118,7 +118,8 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (!std::filesystem::exists(output.jsonPath) || !std::filesystem::exists(output.trainingAnnotationPath) ||
         !std::filesystem::exists(output.trainingVideoPath) || !std::filesystem::exists(output.trainingManifestPath) ||
-        !std::filesystem::exists(output.combinedUrlPath)) {
+        !std::filesystem::exists(output.combinedUrlPath) || !std::filesystem::exists(output.linksPath) ||
+        !std::filesystem::exists(output.reportPath)) {
         std::cerr << "expected export files are missing\n";
         return 1;
     }
@@ -136,8 +137,13 @@ int wmain(int argc, wchar_t** argv) {
         return 1;
     }
     if (!contains(output.jsonPath, "\"garbage\"") || !contains(output.jsonPath, "\"placement\"") ||
-        !contains(output.jsonPath, "\"queueObservations\"")) {
+        !contains(output.jsonPath, "\"queueObservations\"") ||
+        !contains(output.jsonPath, "\"simulatorData\":{\"v\":3")) {
         std::cerr << "recovery JSON is missing structural labels\n";
+        return 1;
+    }
+    if (!contains(output.linksPath, "<a href='") || !contains(output.linksPath, "Open 2P simulator")) {
+        std::cerr << "simulator links page is incomplete\n";
         return 1;
     }
     const auto marker = output.p1Url.find('#');

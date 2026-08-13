@@ -91,6 +91,34 @@ function encodeBase64Utf8(text) {
     return btoa(binary);
 }
 
+function decodeSharedStateText(value) {
+    let text = String(value || '').trim().replace(/^\uFEFF/, '');
+    if (!text) throw new Error('Empty shared data');
+    const internetShortcut = text.match(/^\[InternetShortcut\]\s*URL=(\S+)/i);
+    if (internetShortcut) return decodeSharedStateText(internetShortcut[1]);
+    if (text.startsWith('{') || text.startsWith('[')) return JSON.parse(text);
+
+    if (/^https?:\/\//i.test(text)) {
+        const hashIndex = text.indexOf('#');
+        if (hashIndex >= 0) text = text.slice(hashIndex + 1);
+        else {
+            const dataIndex = text.indexOf('d=');
+            if (dataIndex >= 0) return text.slice(dataIndex + 2);
+        }
+    }
+    if (text.startsWith('#')) text = text.slice(1);
+    text = decodeURIComponent(text).replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+    while (text.length % 4) text += '=';
+    const binaryString = atob(text);
+    const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
+    const decoded = new TextDecoder().decode(bytes).replace(/^\uFEFF/, '').trim();
+    try {
+        return JSON.parse(decoded);
+    } catch (error) {
+        return decoded;
+    }
+}
+
 // --- テト譜 v115 変換ロジック ---
 const FumenCodec = {
     TABLE: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
@@ -606,6 +634,11 @@ function generateAndDisplayLink() {
     const url = new URL(window.location);
     url.hash = base64Data;
     document.getElementById('share-link-input').value = url.href;
+    const openLink = document.getElementById('share-link-open');
+    if (openLink) {
+        openLink.href = url.href;
+        openLink.hidden = false;
+    }
 }
 
 function openShareModal() {
@@ -616,20 +649,17 @@ function openShareModal() {
 function loadStateFromURL() {
     if (window.location.hash) {
         try {
-            const base64Data = window.location.hash.substring(1);
-            const binaryString = atob(base64Data);
-            const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
-            const jsonString = new TextDecoder().decode(bytes);
+            const decodedState = decodeSharedStateText(window.location.href);
             
             // テト譜判定 (URLハッシュの場合は ?d=v115@ 等が含まれる可能性があるが、
             // ここでのロードは自作形式のBase64デコード後なので、JSONパースを試みる)
             let data;
             try {
-                data = JSON.parse(jsonString);
+                data = typeof decodedState === 'string' ? JSON.parse(decodedState) : decodedState;
             } catch(e) {
                 // JSONでない場合、生の文字列としてチェック
-                if (jsonString.includes('v115@')) {
-                    const match = jsonString.match(/v115@.*/);
+                if (typeof decodedState === 'string' && decodedState.includes('v115@')) {
+                    const match = decodedState.match(/v115@.*/);
                     if (match) {
                         const fumenPagesData = FumenCodec.decode(match[0]);
                         if (fumenPagesData) {
@@ -657,7 +687,9 @@ function loadStateFromURL() {
                 throw e;
             }
 
-            if (data.v === 3) {
+            if (data?.simulatorData || data?.pageFormat === 'operation-pages/v1' || data?.version === 5) {
+                applyVideoRecoveryData(data);
+            } else if (data.v === 3) {
                 applyCollectionData(data);
             } else if (data.v === 'f1' || data.v === 'f2') {
 

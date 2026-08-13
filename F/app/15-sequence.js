@@ -43,7 +43,9 @@ function normalizeOperation(value) {
 }
 
 function operationForPage(playerData) {
-    return normalizeOperation(playerData?.operation || playerData?.placement);
+    // `operation` is the editor's in-memory name; `o` is the compact key
+    // used by native video exports and the fumen-compatible payload.
+    return normalizeOperation(playerData?.operation || playerData?.o || playerData?.placement);
 }
 
 function cloneBoard(board) {
@@ -401,4 +403,146 @@ function applyCollectionData(data) {
     loadPage(0);
     if (typeof updateCaseControls === 'function') updateCaseControls();
     return true;
+}
+
+// The native video recovery tool also writes a human-readable analysis JSON.
+// Its timeline is intentionally different from the editor's v3 collection,
+// but each timeline entry still contains the exact board/queue state and the
+// placement that produced the following state.  Convert that file here so a
+// user can import either the generated URL or the adjacent .json file.
+function recoveryBoardToEditorBoard(value) {
+    if (Array.isArray(value) && value.length && Array.isArray(value[0])) {
+        const board = createEmptyBoard();
+        const sourceRows = value.length === BOARD_VISIBLE_HEIGHT
+            ? value.map(row => row)
+            : value.slice(0, BOARD_HEIGHT);
+        const targetOffset = value.length === BOARD_VISIBLE_HEIGHT
+            ? BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT
+            : 0;
+        sourceRows.forEach((row, sourceY) => {
+            const targetY = targetOffset + sourceY;
+            if (targetY < 0 || targetY >= BOARD_HEIGHT) return;
+            for (let x = 0; x < BOARD_WIDTH; x++) {
+                const cell = row?.[x];
+                board[targetY][x] = cell && cell !== '_' && cell !== 'E' && cell !== '0'
+                    ? String(cell).toUpperCase()
+                    : null;
+            }
+        });
+        return board;
+    }
+    if (Array.isArray(value)) return stringToBoard(value.join(''));
+    if (typeof value === 'string') return stringToBoard(value);
+    return createEmptyBoard();
+}
+
+function recoveryQueueForEntry(entry) {
+    const queue = entry?.simulatorNext || `${entry?.active || ''}${entry?.next || ''}`;
+    return String(queue).toUpperCase().split('').filter(piece => PIECE_TYPES.includes(piece)).join('');
+}
+
+function recoveryOperationForEntry(entry) {
+    const placement = entry?.placement || entry?.operation;
+    if (!placement || !normalizePieceType(placement.piece || placement.type)) return null;
+    return normalizeOperation({
+        ...placement,
+        type: placement.type || placement.piece,
+        holdUsed: Boolean(placement.holdUsed || /hold/i.test(String(entry?.action || '')))
+    });
+}
+
+function recoverySequence(entries) {
+    let sequence = '';
+    let previousQueue = '';
+    entries.forEach(entry => {
+        const queue = recoveryQueueForEntry(entry);
+        if (!queue) return;
+        if (!sequence) {
+            sequence = queue;
+            previousQueue = queue;
+            return;
+        }
+        let overlap = 0;
+        const maxOverlap = Math.min(previousQueue.length, queue.length);
+        for (let length = maxOverlap; length > 0; length--) {
+            if (previousQueue.slice(-length) === queue.slice(0, length)) {
+                overlap = length;
+                break;
+            }
+        }
+        sequence += queue.slice(overlap);
+        previousQueue = queue;
+    });
+    return sequence;
+}
+
+function recoveryPlayerHasContent(entries) {
+    return Array.isArray(entries) && entries.some(entry =>
+        normalizePieceType(entry?.active) || recoveryOperationForEntry(entry) ||
+        recoveryBoardToEditorBoard(entry?.board).some(row => row.some(Boolean)));
+}
+
+function recoveryPlayerCaseData(entries) {
+    const source = Array.isArray(entries) ? entries : [];
+    const first = source[0] || {};
+    const pages = source.length ? source.map((entry, index) => {
+        const page = createBlankPage();
+        const player = page.p1;
+        player.board = recoveryBoardToEditorBoard(entry.board || entry.fullBoard);
+        player.hold = normalizePieceType(entry.hold);
+        player.next = recoveryQueueForEntry(entry);
+        // In the native timeline, placement[i] is the lock that produces
+        // board[i]. The page exported by the simulator therefore shows the
+        // placement stored on the next timeline state.
+        player.operation = index + 1 < source.length
+            ? recoveryOperationForEntry(source[index + 1])
+            : null;
+        return page;
+    }) : [createBlankPage()];
+    return {
+        board: recoveryBoardToEditorBoard(first.board || first.fullBoard),
+        hold: normalizePieceType(first.hold),
+        sequence: recoverySequence(source),
+        pages
+    };
+}
+
+function applyVideoRecoveryData(data) {
+    if (!data || typeof data !== 'object') return false;
+
+    // New native exports embed the exact v3 collection used by the generated
+    // simulator URL. Prefer it so operation coordinates and player timing are
+    // preserved byte-for-byte.
+    const embedded = data.simulatorData || data.collectionData || data.collection;
+    if (embedded?.v === 3 && typeof applyCollectionData === 'function') {
+        return applyCollectionData(embedded);
+    }
+    if (data.v === 3 && typeof applyCollectionData === 'function') return applyCollectionData(data);
+    if (data.pageFormat !== 'operation-pages/v1' && data.version !== 5) return false;
+
+    const p1 = recoveryPlayerCaseData(data.p1);
+    const p2 = recoveryPlayerCaseData(data.p2);
+    const isTwoPlayer = data.urls?.combined && data.urls?.p1
+        ? data.urls.combined !== data.urls.p1
+        : recoveryPlayerHasContent(data.p2);
+    const imported = {
+        v: 3,
+        m: isTwoPlayer ? '2P' : '1P',
+        currentCase: 0,
+        cases: [{
+            id: 'video-recovery-import',
+            name: 'Video recovery',
+            kind: 'replay',
+            gameMode: isTwoPlayer ? '2P' : '1P',
+            initial: {
+                p1: { board: p1.board, hold: p1.hold, sequence: p1.sequence },
+                p2: { board: p2.board, hold: p2.hold, sequence: p2.sequence }
+            },
+            pages: p1.pages.map((page, index) => {
+                if (isTwoPlayer) page.p2 = p2.pages[index]?.p1 || createBlankPage().p1;
+                return page;
+            })
+        }]
+    };
+    return typeof applyCollectionData === 'function' ? applyCollectionData(imported) : false;
 }

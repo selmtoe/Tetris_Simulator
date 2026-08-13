@@ -204,11 +204,16 @@ max-width: 500px; font-family: var(--font-ui);">
             <div class="share-item" style="display: flex; flex-direction: column; align-items: flex-start;">
                  <span>アプリ共有リンク（リプレイ・NEXT・HOLDを保持）</span>
                 <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box; background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; font-family: var(--font-ui);">
+                <a id="share-link-open" class="share-open-link" target="_blank" rel="noopener noreferrer" hidden>Open application link in browser</a>
                 <div style="display: flex;
 gap: 10px; margin-top: 5px; flex-wrap: wrap;">
                     <button id="copy-link-btn" class="button">リンクをコピー</button>
                     <button id="export-fumen-p1-btn" class="button" title="本家テト譜リンクをコピー（HOLD/NEXTは含まれません）" >本家テト譜をコピー（1P）</button>
                     <button id="export-fumen-p2-btn" class="button" style="display: none;" title="本家テト譜リンクをコピー（HOLD/NEXTは含まれません）">本家テト譜をコピー（2P）</button>
+                </div>
+                <div class="share-open-links">
+                    <a id="fumen-p1-open" class="share-open-link" target="_blank" rel="noopener noreferrer" hidden>Open official Fumen (1P)</a>
+                    <a id="fumen-p2-open" class="share-open-link" target="_blank" rel="noopener noreferrer" hidden>Open official Fumen (2P)</a>
                 </div>
                 <small class="share-note">アプリ共有リンクは操作履歴からNEXTを復元します。本家テト譜は盤面と接着操作だけを変換し、HOLD/NEXTは仕様上含みません。</small>
             </div>
@@ -335,19 +340,19 @@ margin-top: 15px;">
     </div>
 </div>
 
-<script defer src="./app/00-debug-console.js?v=app-v11"></script>
-<script defer src="./app/10-state.js?v=app-v11"></script>
-<script defer src="./app/15-sequence.js?v=app-v11"></script>
-<script defer src="./app/20-editor.js?v=app-v11"></script>
-<script defer src="./app/30-viewer.js?v=app-v11"></script>
-<script defer src="./app/40-history.js?v=app-v11"></script>
-<script defer src="./app/50-scanner.js?v=app-v11"></script>
-<script defer src="./app/60-fumen-codec.js?v=app-v11"></script>
-<script defer src="./app/70-hub-bridge.js?v=app-v11"></script>
-<script defer src="./app/80-editor-bootstrap.js?v=app-v11"></script>
-<script defer src="./app/81-export-controls.js?v=app-v11"></script>
-<script defer src="./app/82-code-generator.js?v=app-v11"></script>
-<script defer src="./app/83-share-controls.js?v=app-v11"></script>
-<script defer src="./app/84-ai-scoring.js?v=app-v11"></script>
+<script defer src="./app/00-debug-console.js?v=app-v13"></script>
+<script defer src="./app/10-state.js?v=app-v13"></script>
+<script defer src="./app/15-sequence.js?v=app-v13"></script>
+<script defer src="./app/20-editor.js?v=app-v13"></script>
+<script defer src="./app/30-viewer.js?v=app-v13"></script>
+<script defer src="./app/40-history.js?v=app-v13"></script>
+<script defer src="./app/50-scanner.js?v=app-v13"></script>
+<script defer src="./app/60-fumen-codec.js?v=app-v13"></script>
+<script defer src="./app/70-hub-bridge.js?v=app-v13"></script>
+<script defer src="./app/80-editor-bootstrap.js?v=app-v13"></script>
+<script defer src="./app/81-export-controls.js?v=app-v13"></script>
+<script defer src="./app/82-code-generator.js?v=app-v13"></script>
+<script defer src="./app/83-share-controls.js?v=app-v13"></script>
+<script defer src="./app/84-ai-scoring.js?v=app-v13"></script>
 </body>
 </html>

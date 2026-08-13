@@ -72,6 +72,21 @@
     .button:hover, button:hover {
         background-color: var(--primary-hover-color);
     }
+    .share-open-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 8px;
+    }
+    .share-open-link {
+        color: var(--primary-hover-color);
+        font-family: var(--font-ui);
+        text-decoration: underline;
+        cursor: pointer;
+    }
+    .share-open-link:hover {
+        color: var(--font-color);
+    }
     button:disabled {
         background-color: #333;
         color: #888;

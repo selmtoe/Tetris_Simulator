@@ -1082,12 +1082,22 @@ void exportApprovedResult(HWND window) {
             g_outputDir.c_str(), SW_SHOWNORMAL));
         browserOpened = launchResult > 32;
     }
+    // If Explorer cannot resolve the .url shortcut, open the small HTML link
+    // page instead. It contains ordinary clickable browser links and is also
+    // a reliable manual fallback shown in the completion dialog.
+    if (!browserOpened && !g_output.linksPath.empty() && std::filesystem::exists(g_output.linksPath)) {
+        const auto launchResult = reinterpret_cast<INT_PTR>(ShellExecuteW(
+            window, L"open", g_output.linksPath.c_str(), nullptr,
+            g_outputDir.c_str(), SW_SHOWNORMAL));
+        browserOpened = launchResult > 32;
+    }
 
     const std::wstring message = L"確認済みの復元結果を書き出しました。\n\n"
         L"出力先:\n" + g_outputDir.wstring() +
         (browserOpened
             ? L"\n\n2Pシミュレータを既定ブラウザで開きました。"
-            : L"\n\nブラウザを起動できませんでした。出力先の *_2P.url をダブルクリックしてください。");
+            : L"\n\nブラウザを起動できませんでした。出力先の *_links.html をダブルクリックしてください。")
+        + L"\n\nClickable links: " + g_output.linksPath.wstring();
     std::wstring messageWithTraining = message;
     if (!g_output.trainingAnnotationPath.empty()) {
         messageWithTraining += L"\n\n学習用の確定ラベル:\n" + g_output.trainingAnnotationPath.wstring();

@@ -23,6 +23,7 @@ struct RecoveryOutput {
     std::filesystem::path p1UrlPath;
     std::filesystem::path p2UrlPath;
     std::filesystem::path combinedUrlPath;
+    std::filesystem::path linksPath;
     std::filesystem::path reportPath;
     std::filesystem::path trainingDatasetDirectory;
     std::filesystem::path trainingAnnotationPath;

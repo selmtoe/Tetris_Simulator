@@ -1383,6 +1383,7 @@ bool writeOutputs(const std::filesystem::path& input, const std::filesystem::pat
     output.p1UrlPath = directory / (name + L"_P1.url");
     output.p2UrlPath = directory / (name + L"_P2.url");
     output.combinedUrlPath = directory / (name + L"_2P.url");
+    output.linksPath = directory / (name + L"_links.html");
     output.reportPath = directory / (name + L"_report.html");
 
     auto p1Pages = pageEntries(p1);
@@ -1394,6 +1395,7 @@ bool writeOutputs(const std::filesystem::path& input, const std::filesystem::pat
     output.p1Url = simulatorUrl(p1Pages, p2Pages, false);
     output.p2Url = simulatorUrl(p2Pages, p1Pages, false);
     output.combinedUrl = twoPlayers ? simulatorUrl(p1Pages, p2Pages, true) : output.p1Url;
+    const std::string simulatorData = collectionSimulatorJson(p1Pages, p2Pages, twoPlayers);
 
     {
         std::ofstream p1File(output.p1UrlPath);
@@ -1419,6 +1421,7 @@ bool writeOutputs(const std::filesystem::path& input, const std::filesystem::pat
         json << ",\"p2\":";
         writeQueueRecognitionJson(json, output.queueObservationsP2);
         json << "}"
+             << ",\"simulatorData\":" << simulatorData
              << ",\"urls\":{\"p1\":\"" << jsonEscape(output.p1Url)
              << "\",\"p2\":\"" << jsonEscape(output.p2Url)
              << "\",\"combined\":\"" << jsonEscape(output.combinedUrl) << "\"}}\n";
@@ -1452,6 +1455,17 @@ bool writeOutputs(const std::filesystem::path& input, const std::filesystem::pat
         report << "<h2>Simulator URLs</h2><p><a href='" << jsonEscape(output.p1Url) << "'>P1</a></p>"
                << "<p><a href='" << jsonEscape(output.p2Url) << "'>P2</a></p>"
                << "<p><a href='" << jsonEscape(output.combinedUrl) << "'>2P</a></p>";
+    }
+    {
+        std::ofstream links(output.linksPath);
+        if (!links) { error = "Could not write simulator links page"; return false; }
+        links << "<!doctype html><meta charset='utf-8'><title>Tetris Simulator links</title>"
+              << "<style>body{font-family:system-ui;background:#111;color:#eee;padding:24px}a{display:block;margin:16px 0;color:#7cf;font-size:1.1rem}</style>"
+              << "<h1>Tetris Simulator</h1>"
+              << "<a href='" << jsonEscape(output.p1Url) << "'>Open P1 simulator</a>"
+              << "<a href='" << jsonEscape(output.p2Url) << "'>Open P2 simulator</a>"
+              << "<a href='" << jsonEscape(output.combinedUrl) << "'>Open 2P simulator</a>";
+        if (!links) { error = "Could not finish simulator links page"; return false; }
     }
     return true;
 }
