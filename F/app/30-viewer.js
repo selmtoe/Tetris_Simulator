@@ -19,7 +19,7 @@ function drawViewerBlock(ctx, p, x, y, alpha = 1.0) {
     ctx.globalAlpha = alpha;
     ctx.fillStyle = COLORS[p] || '#FFF';
     ctx.fillRect(x, y, BLOCK_SIZE, BLOCK_SIZE);
-    ctx.strokeStyle = '#333333';
+    ctx.strokeStyle = '#444';
     ctx.lineWidth = 0.5;
     ctx.strokeRect(x, y, BLOCK_SIZE, BLOCK_SIZE);
     ctx.globalAlpha = 1.0;
@@ -92,10 +92,10 @@ function drawViewer() {
         viewerCtx.translate(PLAYFIELD_X_OFFSET, 0.5 * BLOCK_SIZE);
 
 
-        viewerCtx.fillStyle = '#000000';
+        viewerCtx.fillStyle = 'rgba(0,0,0,0.5)';
         viewerCtx.fillRect(0, 0, PLAYFIELD_WIDTH, BOARD_VISIBLE_HEIGHT * BLOCK_SIZE);
         
-        viewerCtx.strokeStyle = '#333333';
+        viewerCtx.strokeStyle = '#444';
         viewerCtx.lineWidth = 0.5;
         for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
             for (let x = 0; x < BOARD_WIDTH; x++) {
@@ -104,8 +104,8 @@ function drawViewer() {
             }
         }
 
-        viewerCtx.strokeStyle = '#333333';
-        viewerCtx.lineWidth = 1;
+        viewerCtx.strokeStyle = '#4b4b7c';
+        viewerCtx.lineWidth = 2; 
         viewerCtx.strokeRect(1, 1, PLAYFIELD_WIDTH - 2, (BOARD_VISIBLE_HEIGHT * BLOCK_SIZE) - 2);
 
         const viewY = BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT;
@@ -139,7 +139,7 @@ if (playerData.board[boardY]?.[x]) {
                         viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
                     }
                     
-                    viewerCtx.strokeStyle = '#333333';
+                    viewerCtx.strokeStyle = '#444';
                     viewerCtx.lineWidth = 0.5;
                     viewerCtx.strokeRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
                     viewerCtx.globalAlpha = 1.0;
@@ -158,7 +158,7 @@ if (playerData.board[boardY]?.[x]) {
                 viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
                 viewerCtx.fillStyle = 'rgba(255,255,255,.16)';
                 viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
-                viewerCtx.strokeStyle = '#333333';
+                viewerCtx.strokeStyle = '#444';
                 viewerCtx.lineWidth = 0.5;
                 viewerCtx.strokeRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
             });

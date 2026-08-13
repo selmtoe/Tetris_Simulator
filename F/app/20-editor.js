@@ -370,7 +370,7 @@ function drawEditorField(playerId) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const data = fumenPages[currentPageIndex][playerId];
-    ctx.fillStyle = '#000000';
+    ctx.fillStyle = '#0f0f18';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
         const boardY = y + data.viewY;
@@ -381,7 +381,7 @@ function drawEditorField(playerId) {
                 ctx.fillStyle = COLORS[pieceType] || '#FFF';
                 ctx.fillRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
             }
-            ctx.strokeStyle = '#333333';
+            ctx.strokeStyle = '#444';
             ctx.lineWidth = 1;
             ctx.strokeRect(x * EDITOR_BLOCK_SIZE, y * EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
         }
@@ -397,7 +397,7 @@ function drawEditorField(playerId) {
             ctx.fillStyle = 'rgba(255,255,255,.16)';
             ctx.fillRect(px, py, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
         }
-        ctx.strokeStyle = '#333333';
+        ctx.strokeStyle = '#444';
         ctx.lineWidth = 1;
         ctx.strokeRect(px, py, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
     };

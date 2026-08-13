@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.scale(scale, scale);
             
             // 背景塗りつぶし (黒っぽい色)
-            ctx.fillStyle = '#000000';
+            ctx.fillStyle = '#0f0f18'; 
             ctx.fillRect(0, 0, w, h);
             
             // 描画位置の調整
@@ -75,8 +75,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const fullCtx = fullCanvas.getContext('2d');
             fullCtx.scale(scale, scale);
             
-            // 背景 (#111111)
-            fullCtx.fillStyle = '#111111';
+            // 背景 (#1a1a2e)
+            fullCtx.fillStyle = '#1a1a2e';
             fullCtx.fillRect(0, 0, fullW, fullH);
             
             // DrawViewerを乗っ取る
@@ -119,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // 背景色を合成 (destination-over: 既存の絵の後ろに描画)
             ctx.globalCompositeOperation = 'destination-over';
-            ctx.fillStyle = '#000000'; // 本家テト譜と同じ盤面色
+            ctx.fillStyle = '#0f0f18'; // 盤面のみの場合は黒っぽい色
             ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
             ctx.globalCompositeOperation = 'source-over'; // 戻す
 
@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 背景色を合成 (destination-over: 既存の絵の後ろに描画)
             ctx.globalCompositeOperation = 'destination-over';
-            ctx.fillStyle = '#111111'; // 本家テト譜のダーク背景
+            ctx.fillStyle = '#1a1a2e'; // エディタ背景色
             ctx.fillRect(0, 0, w, h);
             ctx.globalCompositeOperation = 'source-over'; // 戻す
             
@@ -186,7 +186,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     workers: 2,
                     quality: 10,
                     workerScript: workerUrl,
-                    background: (range === 'field') ? '#000000' : '#111111' // GIFの背景色設定
+                    background: (range === 'field') ? '#0f0f18' : '#1a1a2e' // GIFの背景色設定
                 });
 
                 const originalIndex = currentPageIndex;
