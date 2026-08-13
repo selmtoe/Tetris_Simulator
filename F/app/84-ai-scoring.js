@@ -497,8 +497,17 @@
 
         let rangeWasOpened = false;
 
+        function scoringPageIndices() {
+            if (typeof currentCaseIsReplay === 'function' && currentCaseIsReplay()) {
+                return fumenPages.map((page, index) =>
+                    typeof operationForPage === 'function' && operationForPage(page?.p1) ? index : -1)
+                    .filter(index => index >= 0);
+            }
+            return fumenPages.map((_, index) => index).slice(0, -1);
+        }
+
         function movePageCount() {
-            return Math.max(0, fumenPages.length - 1);
+            return scoringPageIndices().length;
         }
 
         function updateRange(source) {
@@ -556,8 +565,8 @@
             const blunders = scored.filter(result => result.blunder);
             resultPanel.hidden = false;
             resultList.replaceChildren();
-            resultSummary.textContent = `${scored.length} 手を採点、${blunders.length} 件を悪手として検出しました。`;
-
+            const attempted = run.results.length;
+            resultSummary.textContent = `${scored.length}/${attempted} 手を採点（${blunders.length} 件を要確認）`;
             if (!blunders.length) {
                 const empty = document.createElement('p');
                 empty.className = 'ai-score-empty';
@@ -658,6 +667,9 @@
             const runId = ++activeRunId;
             const startPage = Number(startInput.value) - 1;
             const endPage = Number(endInput.value) - 1;
+            const replay = typeof currentCaseIsReplay === 'function' && currentCaseIsReplay();
+            const operationPages = replay ? scoringPageIndices() : null;
+            const replayInitial = replay ? cleanClone(currentCase()?.initial || {}) : null;
             lastRun = null;
             destroyPlanAnimations();
             resultPanel.hidden = true;
@@ -682,6 +694,7 @@
                     const run = {
                         pages,
                         mode: gameMode,
+                        replay,
                         results: Array.isArray(message.results) ? message.results : []
                     };
                     scoreWorker.terminate();
@@ -702,6 +715,9 @@
                 pages,
                 startPage,
                 endPage,
+                replay,
+                operationPages,
+                replayInitial,
                 nodeBudget: Number(nodeInput.value),
                 planLength: Number(planLengthInput.value),
                 thresholdScore: Number(thresholdInput.value)

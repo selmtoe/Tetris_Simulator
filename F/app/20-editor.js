@@ -48,6 +48,8 @@ function updateCaseControls() {
         ? 'Replay: NEXT is derived from the start sequence and locked turns'
         : 'Snapshot: every page is independent';
     const replay = active.kind === 'replay';
+    const caseMeta = document.getElementById('case-meta');
+    if (caseMeta) caseMeta.style.display = replay ? 'flex' : 'none';
     ['p1-start-sequence', 'p2-start-sequence'].forEach(id => {
         const element = document.getElementById(id);
         if (element) element.parentElement?.classList.toggle('replay-only', !replay);
@@ -282,40 +284,75 @@ function updatePlacementStatus(playerId) {
     }
 }
 
+// Keep the original icon-based NEXT strip, but let the strip scroll instead
+// of wrapping when a replay contains a long recorded queue.
 function updateNextQueueDisplay(playerId) {
-    const queue = document.getElementById(`${playerId}-next-queue`);
-    if (!queue) return;
-    queue.replaceChildren();
+    const qd = document.getElementById(`${playerId}-next-queue`);
+    if (!qd) return;
+    qd.replaceChildren();
     const data = fumenPages[currentPageIndex]?.[playerId];
     if (!data) return;
-    const replay = currentCaseIsReplay();
-    const label = document.createElement('span');
-    label.className = 'next-queue-label';
-    label.textContent = replay ? 'NEXT（操作履歴から自動）' : 'NEXT（このページだけ）';
-    queue.appendChild(label);
-    const hold = document.createElement('div');
-    hold.className = 'next-queue-hold';
-    hold.textContent = `H ${data.hold || '—'}`;
-    if (data.hold) hold.style.color = EDITOR_COLORS[data.hold];
-    queue.appendChild(hold);
+    const nextArr = String(displayNextForPage(playerId) || '').split('').filter(type => EDITOR_COLORS[type]);
+    if (data.nextInsertionIndex === undefined) data.nextInsertionIndex = -1;
+    const createGap = index => {
+        const gap = document.createElement('div');
+        gap.style.width = '8px';
+        gap.style.height = '38px';
+        gap.style.flex = '0 0 8px';
+        gap.style.cursor = 'pointer';
+        gap.style.backgroundColor = data.nextInsertionIndex === index ||
+            (index === -1 && data.nextInsertionIndex === nextArr.length) ? '#fff' : 'rgba(255,255,255,0.1)';
+        gap.addEventListener('click', event => {
+            event.stopPropagation();
+            data.nextInsertionIndex = index;
+            updateNextQueueDisplay(playerId);
+        });
+        return gap;
+    };
+    const holdContainer = document.createElement('div');
+    holdContainer.style.cssText = 'display:flex;align-items:center;gap:3px;flex:0 0 auto;padding-right:8px;border-right:1px solid #555;margin-right:5px;';
+    const holdLabel = document.createElement('span');
+    holdLabel.textContent = 'H';
+    holdLabel.style.fontFamily = 'var(--font-display)';
+    const holdSlot = document.createElement('div');
+    holdSlot.className = 'mino-icon';
+    holdSlot.style.width = '38px';
+    holdSlot.style.height = '38px';
+    holdSlot.style.cursor = 'pointer';
+    holdSlot.style.backgroundColor = data.hold ? (EDITOR_COLORS[data.hold] || '#333') : 'transparent';
+    holdSlot.style.border = data.hold ? '2px solid transparent' : '2px dashed #555';
+    if (data.nextInsertionIndex === 'hold') holdSlot.style.borderColor = '#fff';
+    holdSlot.addEventListener('click', event => {
+        event.stopPropagation();
+        data.nextInsertionIndex = 'hold';
+        updateNextQueueDisplay(playerId);
+    });
+    holdContainer.append(holdLabel, holdSlot);
+    qd.appendChild(holdContainer);
     const track = document.createElement('div');
     track.className = 'next-queue-track';
-    const next = displayNextForPage(playerId);
-    Array.from(next).forEach((type, index) => {
-        const item = document.createElement('div');
-        item.className = 'next-queue-item';
-        item.style.backgroundColor = EDITOR_COLORS[type] || '#333';
-        item.textContent = type;
-        item.title = `NEXT ${index + 1}: ${type}`;
-        track.appendChild(item);
+    track.appendChild(createGap(0));
+    nextArr.forEach((type, index) => {
+        const icon = document.createElement('div');
+        icon.className = 'mino-icon';
+        icon.style.width = '38px';
+        icon.style.height = '38px';
+        icon.style.flex = '0 0 38px';
+        icon.style.backgroundColor = EDITOR_COLORS[type] || '#333';
+        icon.title = `NEXT ${index + 1}: ${type}`;
+        icon.addEventListener('click', event => {
+            event.stopPropagation();
+            data.nextInsertionIndex = index + 1;
+            updateNextQueueDisplay(playerId);
+        });
+        track.append(icon, createGap(index + 1));
     });
-    if (!next.length) {
-        const empty = document.createElement('span');
-        empty.className = 'next-queue-empty';
-        empty.textContent = replay ? 'No more recorded pieces' : 'No NEXT';
-        track.appendChild(empty);
-    }
-    queue.appendChild(track);
+    track.addEventListener('click', event => {
+        if (event.target !== track) return;
+        data.nextInsertionIndex = nextArr.length;
+        updateNextQueueDisplay(playerId);
+    });
+    qd.appendChild(track);
     updatePlacementStatus(playerId);
 }
 
@@ -357,15 +394,11 @@ function drawEditorField(playerId) {
         ctx.fillStyle = color;
         ctx.fillRect(px, py, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
         if (inner) {
-            ctx.save();
-            ctx.shadowColor = '#fff';
-            ctx.shadowBlur = 10;
-            ctx.fillStyle = 'rgba(255,255,255,.42)';
-            ctx.fillRect(px, py, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
-            ctx.restore();
+            ctx.fillStyle = 'rgba(255,255,255,.24)';
+            ctx.fillRect(px + 4, py + 4, EDITOR_BLOCK_SIZE - 8, EDITOR_BLOCK_SIZE - 8);
         }
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 2;
         ctx.strokeRect(px + 1, py + 1, EDITOR_BLOCK_SIZE - 2, EDITOR_BLOCK_SIZE - 2);
     };
     data.placementDraft.forEach(([x, y]) => drawCell(x, y, '#fff', false));

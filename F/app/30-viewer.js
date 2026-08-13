@@ -154,17 +154,13 @@ if (playerData.board[boardY]?.[x]) {
                 if (x < 0 || x >= BOARD_WIDTH || visibleY < 0 || visibleY >= BOARD_VISIBLE_HEIGHT) return;
                 const drawX = x * BLOCK_SIZE;
                 const drawY = visibleY * BLOCK_SIZE;
-                viewerCtx.save();
-                viewerCtx.shadowColor = '#fff';
-                viewerCtx.shadowBlur = 10;
                 viewerCtx.fillStyle = COLORS[operation.type] || '#fff';
                 viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
-                viewerCtx.fillStyle = 'rgba(255,255,255,.42)';
-                viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
-                viewerCtx.strokeStyle = '#fff';
-                viewerCtx.lineWidth = 2;
+                viewerCtx.fillStyle = 'rgba(255,255,255,.24)';
+                viewerCtx.fillRect(drawX + 3, drawY + 3, BLOCK_SIZE - 6, BLOCK_SIZE - 6);
+                viewerCtx.strokeStyle = '#111';
+                viewerCtx.lineWidth = 1.5;
                 viewerCtx.strokeRect(drawX + 1, drawY + 1, BLOCK_SIZE - 2, BLOCK_SIZE - 2);
-                viewerCtx.restore();
             });
         }
         

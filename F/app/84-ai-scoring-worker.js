@@ -70,6 +70,7 @@ function pageState(page) {
     return {
         board: Array.isArray(p1.board) ? p1.board : [],
         hold: cleanPieces(p1.hold)[0] || null,
+        current: cleanPieces(p1.current)[0] || null,
         // In an F page NEXT[0] is the mino which is about to be placed.
         next: cleanPieces(p1.next)
     };
@@ -200,14 +201,18 @@ function sameOccupancy(left, right) {
 }
 
 function createSearch(preMoveBoard, source, context) {
-    // There is no valid P1 action to reconstruct without NEXT[0].  Do not
-    // invent one of the seven pieces or treat NEXT[1] as the current mino.
-    if (!source.next.length) return null;
+    // Legacy pages expose the current piece as NEXT[0]. Replay pages expose
+    // the pre-hold current piece separately and keep NEXT as the queue that
+    // existed before the recorded operation.
+    const hasExplicitCurrent = Boolean(source.current);
+    const currentPiece = hasExplicitCurrent ? source.current : source.next[0];
+    const nextQueue = hasExplicitCurrent ? source.next : source.next.slice(1);
+    if (!currentPiece) return null;
     const search = new Search();
     search.synchronize({
         board: preMoveBoard,
-        currentPiece: source.next[0],
-        nextQueue: source.next.slice(1),
+        currentPiece,
+        nextQueue,
         holdPiece: source.hold,
         canHold: true,
         isB2B: Boolean(context.b2b),
@@ -215,6 +220,110 @@ function createSearch(preMoveBoard, source, context) {
     });
     search.expand(search.root);
     return search;
+}
+
+const SIMULATOR_SHAPES = Object.freeze({
+    I: { shape: [[0, 0], [1, 0], [2, 0], [3, 0]], center: [1.5, 0.5] },
+    O: { shape: [[0, 0], [1, 0], [0, -1], [1, -1]], center: [0.5, -0.5] },
+    T: { shape: [[0, 0], [-1, 0], [0, -1], [1, 0]], center: [0, 0] },
+    L: { shape: [[-1, 0], [0, 0], [1, 0], [1, -1]], center: [0, 0] },
+    J: { shape: [[0, 0], [-1, 0], [1, 0], [-1, -1]], center: [0, 0] },
+    S: { shape: [[1, -1], [-1, 0], [0, 0], [0, -1]], center: [0, 0] },
+    Z: { shape: [[0, 0], [1, 0], [0, -1], [-1, -1]], center: [0, 0] }
+});
+
+function operationRotationIndex(value) {
+    if (typeof value === 'number') return ((Math.round(value) % 4) + 4) % 4;
+    const index = ['spawn', 'right', 'reverse', 'left'].indexOf(String(value || 'spawn').toLowerCase());
+    return index >= 0 ? index : 0;
+}
+
+function simulatorShape(type, rotation) {
+    const definition = SIMULATOR_SHAPES[type];
+    if (!definition) return [];
+    if (type === 'O' || rotation === 0) return definition.shape.map(cell => [...cell]);
+    return definition.shape.map(([baseX, baseY]) => {
+        let x = baseX - definition.center[0];
+        let y = baseY - definition.center[1];
+        for (let index = 0; index < rotation; index++) [x, y] = [-y, x];
+        return [Math.round(x + definition.center[0] + (type === 'O' ? 0.5 : 0)),
+            Math.round(y + definition.center[1] + (type === 'O' ? 0.5 : 0))];
+    });
+}
+
+function recordedOperationCells(operation) {
+    if (!operation || !SIMULATOR_SHAPES[operation.type]) return [];
+    const rotation = operationRotationIndex(operation.rotation);
+    return simulatorShape(operation.type, rotation)
+        .map(([x, y]) => [Math.round(operation.x + x), Math.round(operation.y + y)])
+        .filter(([x, y]) => x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT);
+}
+
+function normalizeRecordedOperation(value) {
+    if (!value || typeof value !== 'object') return null;
+    const type = cleanPieces(value.type || value.piece)[0];
+    const x = Number(value.x);
+    const y = Number(value.y);
+    if (!type || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return {
+        type,
+        x: Math.round(x),
+        y: Math.round(y),
+        rotation: operationRotationIndex(value.rotation),
+        holdUsed: Boolean(value.holdUsed || value.hold || value.source === 'hold')
+    };
+}
+
+function operationForWorker(page) {
+    return normalizeRecordedOperation(page?.p1?.operation);
+}
+
+function replaySourceAtPage(pages, initial, pageIndex) {
+    const seed = initial || {};
+    const stream = cleanPieces(seed.sequence);
+    let current = stream.shift() || null;
+    const queue = stream;
+    let hold = cleanPieces(seed.hold)[0] || null;
+    for (let index = 0; index < pageIndex; index++) {
+        const operation = normalizeRecordedOperation(pages[index]?.p1?.operation);
+        if (operation?.holdUsed) {
+            if (hold) {
+                const previousCurrent = current;
+                current = hold;
+                hold = previousCurrent;
+            } else {
+                hold = current;
+                current = queue.shift() || null;
+            }
+        }
+        if (operation) current = queue.shift() || null;
+    }
+    const page = pages[pageIndex]?.p1 || {};
+    return {
+        board: Array.isArray(page.board) ? page.board : [],
+        current: current || cleanPieces(page.current)[0] || null,
+        hold: hold || cleanPieces(page.hold)[0] || null,
+        next: cleanPieces(page.next)
+    };
+}
+
+function recordedOperationMatches(search, operation) {
+    if (!search?.root?.children || !operation) return [];
+    const cells = recordedOperationCells(operation);
+    if (cells.length !== 4) return [];
+    return search.root.children
+        .filter(edge => Boolean(edge.hold) === operation.holdUsed)
+        .filter(edge => edge.placement.type === operation.type)
+        .filter(edge => edge.placement.rotation === operation.rotation)
+        .filter(edge => sameCells(publicMove(edge).cells, cells))
+        .map(edge => ({
+            edge,
+            state: {
+                holdExact: true,
+                queue: { count: 0, exact: true, compatible: true },
+                valid: true
+            }
+        }));
 }
 
 function edgeCanBeRecordedMove(edge, source) {
@@ -502,22 +611,139 @@ function scoreTransition(pageIndex, source, target, context, nodeBudget, detailN
     return { result, nextContext: contextFromEdge(actualEdge) };
 }
 
+function scoreRecordedOperation(pageIndex, source, operation, context, nodeBudget, detailNodeBudget, thresholdScore, planLength) {
+    const preMoveBoard = normalizeLayout(source.board);
+    const search = createSearch(preMoveBoard, source, context);
+    const operationCells = recordedOperationCells(operation);
+    if (!search || operationCells.length !== 4) {
+        return ignoredResult(pageIndex, 'invalid-recorded-operation', context, false);
+    }
+    const matches = recordedOperationMatches(search, operation);
+    if (!matches.length) {
+        return ignoredResult(pageIndex, 'invalid-recorded-operation', context, false);
+    }
+    search.thinkNodes(nodeBudget, 3000);
+    const actualMatch = selectMatchingEdge(search, matches);
+    if (!actualMatch) return ignoredResult(pageIndex, 'invalid-recorded-operation', context, false);
+
+    const actualEdge = actualMatch.edge;
+    const roughNodes = search.nodeCount;
+    const rough = scorePair(search, actualEdge);
+    let final = rough;
+    let detailed = false;
+    if (meetsThreshold(rough.scoreGap, thresholdScore)) {
+        search.thinkNodes(detailNodeBudget, 10000);
+        final = scorePair(search, actualEdge);
+        detailed = true;
+    }
+    let aiPlan = principalVariation(search, final.bestEdge, planLength);
+    final = scorePair(search, actualEdge);
+    aiPlan = principalVariation(search, final.bestEdge, planLength);
+    final = scorePair(search, actualEdge);
+    if (!detailed && meetsThreshold(final.scoreGap, thresholdScore)) {
+        search.thinkNodes(detailNodeBudget, 10000);
+        detailed = true;
+        final = scorePair(search, actualEdge);
+        aiPlan = principalVariation(search, final.bestEdge, planLength);
+        final = scorePair(search, actualEdge);
+    }
+
+    const { actual: actualScore, best: bestScore, bestEdge, scoreGap } = final;
+    const result = {
+        pageIndex,
+        status: 'scored',
+        reconstruction: 'recorded-operation',
+        sourceConvention: 'operation',
+        targetConvention: 'operation',
+        sourceBoardVariant: 'raw',
+        targetBoardVariant: 'raw',
+        displayBoard: cloneLayout(preMoveBoard),
+        sourceBoard: cloneLayout(preMoveBoard),
+        garbageRows: 0,
+        contextReset: false,
+        candidateCount: new Set(matches.map(match => physicalMoveKey(match.edge))).size,
+        boardDistance: 0,
+        queuePrefix: source.next.length,
+        queueExact: true,
+        holdExact: true,
+        thresholdScore,
+        roughNodes,
+        nodes: search.nodeCount,
+        detailed,
+        detailNodes: detailed ? search.nodeCount : null,
+        actualMove: observedMove(search, actualEdge, operationCells),
+        bestMove: publicMove(bestEdge),
+        actualScore: actualScore.value,
+        actualSpike: actualScore.spike,
+        bestScore: bestScore.value,
+        bestSpike: bestScore.spike,
+        scoreGap,
+        roughActualScore: rough.actual.value,
+        roughBestScore: rough.best.value,
+        roughScoreGap: rough.scoreGap,
+        aiPlan,
+        scoreReliable: true,
+        blunder: meetsThreshold(scoreGap, thresholdScore)
+    };
+    return { result, nextContext: contextFromEdge(actualEdge) };
+}
+
 self.onmessage = event => {
-    const data = event.data || {};
-    if (data.type !== 'score') return;
-    try {
-        const pages = Array.isArray(data.pages) ? data.pages : [];
-        const lastMovePage = pages.length - 2;
+        const data = event.data || {};
+        if (data.type !== 'score') return;
+        try {
+            const pages = Array.isArray(data.pages) ? data.pages : [];
+            const nodeBudget = Math.max(500, Math.floor(Number(data.nodeBudget) || 5000));
+            const detailNodeBudget = Math.max(nodeBudget, 15000);
+            const requestedThreshold = Number(data.thresholdScore);
+            const thresholdScore = Math.max(0, Number.isFinite(requestedThreshold) ? requestedThreshold : 1000);
+            const requestedPlanLength = Number(data.planLength);
+            const planLength = Math.max(1, Math.min(12,
+                Number.isFinite(requestedPlanLength) ? Math.floor(requestedPlanLength) : 6));
+
+            if (data.replay) {
+                const operationPages = Array.isArray(data.operationPages)
+                    ? data.operationPages.map(Number).filter(index => Number.isInteger(index) && index >= 0 && index < pages.length)
+                    : pages.map((page, index) => operationForWorker(page) ? index : -1).filter(index => index >= 0);
+                const lastOrdinal = operationPages.length - 1;
+                if (lastOrdinal < 0) {
+                    self.postMessage({ type: 'done', runId: data.runId, results: [], total: 0 });
+                    return;
+                }
+                const startOrdinal = Math.max(0, Math.min(lastOrdinal, Number(data.startPage) || 0));
+                const endOrdinal = Math.max(startOrdinal, Math.min(lastOrdinal, Number(data.endPage) || lastOrdinal));
+                const total = endOrdinal - startOrdinal + 1;
+                const results = [];
+                let context = { b2b: false, ren: -1 };
+                let completed = 0;
+                for (let ordinal = 0; ordinal <= endOrdinal; ordinal++) {
+                    const pageIndex = operationPages[ordinal];
+                    const operation = normalizeRecordedOperation(pages[pageIndex]?.p1?.operation);
+                    const source = replaySourceAtPage(pages, data.replayInitial?.p1 || data.replayInitial || {}, pageIndex);
+                    const scored = scoreRecordedOperation(
+                        pageIndex,
+                        source,
+                        operation,
+                        context,
+                        ordinal < startOrdinal ? 500 : nodeBudget,
+                        ordinal < startOrdinal ? 500 : detailNodeBudget,
+                        ordinal < startOrdinal ? Infinity : thresholdScore,
+                        ordinal < startOrdinal ? 1 : planLength
+                    );
+                    context = scored.nextContext;
+                    if (ordinal < startOrdinal) continue;
+                    results.push(scored.result);
+                    completed++;
+                    self.postMessage({ type: 'progress', runId: data.runId, completed, total, result: scored.result });
+                }
+                self.postMessage({ type: 'done', runId: data.runId, results, total });
+                return;
+            }
+
+            const lastMovePage = pages.length - 2;
         const startPage = Math.max(0, Math.min(lastMovePage, Number(data.startPage) || 0));
         const endPage = Math.max(startPage, Math.min(lastMovePage, Number(data.endPage) || lastMovePage));
         const total = endPage - startPage + 1;
-        const nodeBudget = Math.max(500, Math.floor(Number(data.nodeBudget) || 5000));
-        const detailNodeBudget = Math.max(nodeBudget, 15000);
-        const requestedThreshold = Number(data.thresholdScore);
-        const thresholdScore = Math.max(0, Number.isFinite(requestedThreshold) ? requestedThreshold : 1000);
-        const requestedPlanLength = Number(data.planLength);
-        const planLength = Math.max(1, Math.min(12,
-            Number.isFinite(requestedPlanLength) ? Math.floor(requestedPlanLength) : 6));
         const results = [];
         let context = { b2b: false, ren: -1 };
         let completed = 0;

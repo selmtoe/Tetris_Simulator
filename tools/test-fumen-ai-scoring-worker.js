@@ -136,6 +136,9 @@ function run(pages, runId, options = {}) {
         pages,
         startPage: options.startPage || 0,
         endPage: options.endPage === undefined ? pages.length - 2 : options.endPage,
+        replay: Boolean(options.replay),
+        operationPages: options.operationPages,
+        replayInitial: options.replayInitial,
         nodeBudget: options.nodeBudget === undefined ? 500 : options.nodeBudget,
         thresholdScore: options.thresholdScore === undefined ? 999999 : options.thresholdScore,
         planLength: options.planLength
@@ -312,6 +315,57 @@ const maxPlan = expectSingle([longSource, longTarget], 17, 'scored', { planLengt
 assert(maxPlan.aiPlan.length === 12, 'Plan length upper bound was not clamped to twelve known moves.');
 assert(maxPlan.nodes >= maxPlan.roughNodes, 'Final node count did not include PV branch expansion.');
 
+// Replay cases score the recorded operation on every operation page.  They do
+// not need a synthetic target page or a four-cell board delta between pages.
+function operationFromEdge(edge) {
+    return {
+        type: edge.placement.type,
+        x: edge.placement.type === 'I' ? edge.placement.x - 1 : edge.placement.x,
+        y: edge.placement.y,
+        rotation: ['spawn', 'right', 'reverse', 'left'][edge.placement.rotation],
+        holdUsed: Boolean(edge.hold)
+    };
+}
+const replayBoard0 = empty();
+const replaySearch0 = makeSearch(replayBoard0, 'T', ['I', 'O', 'L', 'J', 'S', 'Z']);
+const replayEdge0 = firstEdge(replaySearch0, edge => !edge.hold && edge.placement.type === 'T');
+const replayBoard1 = addEdge(replayBoard0, replayEdge0);
+const replaySearch1 = makeSearch(replayBoard1, 'I', ['O', 'L', 'J', 'S', 'Z']);
+const replayEdge1 = firstEdge(replaySearch1, edge => !edge.hold && edge.placement.type === 'I');
+const replayBoard2 = addEdge(replayBoard1, replayEdge1);
+const replaySearch2 = makeSearch(replayBoard2, 'O', ['L', 'J', 'S', 'Z']);
+const replayEdge2 = firstEdge(replaySearch2, edge => !edge.hold && edge.placement.type === 'O');
+const replayPages = [
+    { p1: { board: replayBoard0, hold: '', next: 'IOLJSZ', operation: operationFromEdge(replayEdge0) } },
+    { p1: { board: replayBoard1, hold: '', next: 'OLJSZ', operation: operationFromEdge(replayEdge1) } },
+    { p1: { board: replayBoard2, hold: '', next: 'LJSZ', operation: operationFromEdge(replayEdge2) } }
+];
+const replayResults = run(replayPages, 18, {
+    replay: true,
+    operationPages: [0, 1, 2],
+    endPage: 2,
+    replayInitial: { p1: { sequence: 'TIOLJSZ', hold: '' } }
+});
+assert(replayResults.length === 3, 'Replay scoring did not return every operation page.');
+assert(replayResults.every(result => result.status === 'scored'), 'Replay scoring skipped a recorded operation.');
+assert(replayResults.every(result => result.reconstruction === 'recorded-operation'), 'Replay scoring used the legacy page-delta path.');
+
+const holdReplaySearch0 = makeSearch(empty(), 'T', ['I', 'O', 'L', 'J', 'S', 'Z'], 'J');
+const holdReplayEdge0 = firstEdge(holdReplaySearch0, edge => edge.hold && edge.placement.type === 'J');
+const holdReplayBoard1 = addEdge(empty(), holdReplayEdge0);
+const holdReplaySearch1 = makeSearch(holdReplayBoard1, 'I', ['O', 'L', 'J', 'S', 'Z'], 'T');
+const holdReplayEdge1 = firstEdge(holdReplaySearch1, edge => !edge.hold && edge.placement.type === 'I');
+const holdReplayResults = run([
+    { p1: { board: empty(), hold: 'J', next: 'IOLJSZ', operation: operationFromEdge(holdReplayEdge0) } },
+    { p1: { board: holdReplayBoard1, hold: 'T', next: 'OLJSZ', operation: operationFromEdge(holdReplayEdge1) } }
+], 19, {
+    replay: true,
+    operationPages: [0, 1],
+    endPage: 1,
+    replayInitial: { p1: { sequence: 'TIOLJSZ', hold: 'J' } }
+});
+assert(holdReplayResults.length === 2 && holdReplayResults.every(result => result.status === 'scored'), 'Replay HOLD operation was not scored.');
+
 globalThis.self = originalSelf;
 console.log(JSON.stringify({
     passed: true,
@@ -320,5 +374,6 @@ console.log(JSON.stringify({
     clear: clearResults.map(result => result.status),
     garbage: { rows: [garbage.garbageRows, doubleGarbage.garbageRows], cells: garbage.actualMove.cells.length },
     detailed: { roughNodes: detailed.roughNodes, nodes: detailed.nodes, planLength: detailed.aiPlan.length },
-    requestedPlans: { short: shortPlan.aiPlan.length, max: maxPlan.aiPlan.length }
+    requestedPlans: { short: shortPlan.aiPlan.length, max: maxPlan.aiPlan.length },
+    replay: { operations: replayResults.length, holdOperations: holdReplayResults.length, statuses: replayResults.map(result => result.status) }
 }, null, 2));
