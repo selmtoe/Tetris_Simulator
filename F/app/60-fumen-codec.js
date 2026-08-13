@@ -658,9 +658,7 @@ function loadStateFromURL() {
             }
 
             if (data.v === 3) {
-                if (applyCollectionData(data)) {
-                    alert('Collection data loaded.');
-                }
+                applyCollectionData(data);
             } else if (data.v === 'f1' || data.v === 'f2') {
 
                 if (applyFumenData(data)) {       

@@ -246,24 +246,20 @@
 
     function drawComparisonMove(ctx, move, viewY, glow, cellsOnly = false) {
         if (!move || !move.piece) return;
-        ctx.save();
-        ctx.shadowColor = glow;
-        ctx.shadowBlur = 17;
         for (const [x, y] of moveBlocks(move, cellsOnly)) {
             if (x < 0 || x >= BOARD_WIDTH || y < viewY || y >= viewY + BOARD_VISIBLE_HEIGHT) continue;
             const px = x * BLOCK_SIZE;
             const py = (y - viewY) * BLOCK_SIZE;
             ctx.fillStyle = COLORS[move.piece] || '#fff';
-            ctx.globalAlpha = 0.96;
-            ctx.fillRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
             ctx.globalAlpha = 1;
-            ctx.strokeStyle = glow;
-            ctx.lineWidth = 3;
-            ctx.strokeRect(px + 1.5, py + 1.5, BLOCK_SIZE - 3, BLOCK_SIZE - 3);
-            ctx.fillStyle = 'rgba(255,255,255,0.2)';
-            ctx.fillRect(px + 3, py + 3, BLOCK_SIZE - 6, BLOCK_SIZE - 6);
+            ctx.fillRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
+            ctx.fillStyle = 'rgba(255,255,255,0.16)';
+            ctx.fillRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
         }
-        ctx.restore();
+        ctx.globalAlpha = 1;
     }
 
     function drawComparisonCanvas(canvas, before, move, glow, options = {}) {

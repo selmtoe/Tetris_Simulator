@@ -394,12 +394,12 @@ function drawEditorField(playerId) {
         ctx.fillStyle = color;
         ctx.fillRect(px, py, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
         if (inner) {
-            ctx.fillStyle = 'rgba(255,255,255,.24)';
-            ctx.fillRect(px + 4, py + 4, EDITOR_BLOCK_SIZE - 8, EDITOR_BLOCK_SIZE - 8);
+            ctx.fillStyle = 'rgba(255,255,255,.16)';
+            ctx.fillRect(px, py, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
         }
         ctx.strokeStyle = '#444';
         ctx.lineWidth = 1;
-        ctx.strokeRect(px + 1, py + 1, EDITOR_BLOCK_SIZE - 2, EDITOR_BLOCK_SIZE - 2);
+        ctx.strokeRect(px, py, EDITOR_BLOCK_SIZE, EDITOR_BLOCK_SIZE);
     };
     data.placementDraft.forEach(([x, y]) => drawCell(x, y, '#fff', false));
     const operation = operationForPage(data);

@@ -12,7 +12,9 @@ const PADDING = 20;
 const PLAYER_CANVAS_WIDTH = HOLD_AREA_WIDTH + PLAYFIELD_WIDTH + NEXT_AREA_WIDTH + PADDING * 2;
 const CANVAS_HEIGHT = (BOARD_VISIBLE_HEIGHT + 0.5) * BLOCK_SIZE;
 const PLAYFIELD_X_OFFSET = HOLD_AREA_WIDTH + PADDING;
-const COLORS = { 'I': '#00f0f0', 'O': '#f0f000', 'T': '#a000f0', 'L': '#f0a000', 'J': '#0000f0', 'S': '#00f000', 'Z': '#f00000', 'G': '#999999' };
+// Official tetris-fumen guideline palette (the original editor uses this
+// palette for the seven minos and gray garbage cells).
+const COLORS = { 'I': '#00ffff', 'O': '#ffff00', 'T': '#ff00ff', 'L': '#ff9900', 'J': '#0000ff', 'S': '#00ff00', 'Z': '#ff0000', 'G': '#cccccc' };
 const EDITOR_COLORS = {...COLORS, 'EMPTY': '#000000'};
 
 let gameMode = '1P';

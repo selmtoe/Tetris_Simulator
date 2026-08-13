@@ -156,11 +156,11 @@ if (playerData.board[boardY]?.[x]) {
                 const drawY = visibleY * BLOCK_SIZE;
                 viewerCtx.fillStyle = COLORS[operation.type] || '#fff';
                 viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
-                viewerCtx.fillStyle = 'rgba(255,255,255,.24)';
-                viewerCtx.fillRect(drawX + 3, drawY + 3, BLOCK_SIZE - 6, BLOCK_SIZE - 6);
+                viewerCtx.fillStyle = 'rgba(255,255,255,.16)';
+                viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
                 viewerCtx.strokeStyle = '#444';
                 viewerCtx.lineWidth = 0.5;
-                viewerCtx.strokeRect(drawX + 1, drawY + 1, BLOCK_SIZE - 2, BLOCK_SIZE - 2);
+                viewerCtx.strokeRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
             });
         }
         
