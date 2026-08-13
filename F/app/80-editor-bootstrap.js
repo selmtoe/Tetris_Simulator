@@ -98,7 +98,9 @@ viewerCanvas = document.getElementById('viewerCanvas');
             loadPage(currentPageIndex + 1);
         } else {
             pushHistory();
-            const newPage = JSON.parse(JSON.stringify(fumenPages[currentPageIndex]));
+            const newPage = typeof createPageAfterOperation === 'function'
+                ? createPageAfterOperation(fumenPages[currentPageIndex])
+                : JSON.parse(JSON.stringify(fumenPages[currentPageIndex]));
             fumenPages.push(newPage);
             loadPage(currentPageIndex + 1);
              updatePageControls();

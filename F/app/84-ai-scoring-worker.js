@@ -70,8 +70,18 @@ function pageState(page) {
     return {
         board: Array.isArray(p1.board) ? p1.board : [],
         hold: cleanPieces(p1.hold)[0] || null,
-        // In an F page NEXT[0] is the mino which is about to be placed.
-        next: cleanPieces(p1.next)
+        // New operation pages store the current lock explicitly. `next` is
+        // the queue after that lock and is derived from later operations.
+        next: cleanPieces(p1.next),
+        operation: p1.operation && typeof p1.operation === 'object' ? {
+            piece: cleanPieces(p1.operation.type || p1.operation.piece)[0] || null,
+            x: Number(p1.operation.x),
+            y: Number(p1.operation.y),
+            rotation: typeof p1.operation.rotation === 'number'
+                ? ((p1.operation.rotation % 4) + 4) % 4
+                : ({ spawn: 0, right: 1, reverse: 2, left: 3 }[String(p1.operation.rotation || 'spawn').toLowerCase()] ?? 0),
+            hold: Boolean(p1.operation.hold || p1.operation.holdUsed || p1.operation.useHold)
+        } : null
     };
 }
 
@@ -92,6 +102,14 @@ function normalizeLayout(layout) {
         }
     }
     return normalized;
+}
+
+function normalizeEngineBoard(board) {
+    if (board && board.rows && typeof board.rows.length === 'number') {
+        return Array.from({ length: BOARD_HEIGHT }, (_, y) =>
+            Array.from({ length: BOARD_WIDTH }, (_, x) => (board.rows[y] & (1 << x)) ? 'G' : null));
+    }
+    return normalizeLayout(board);
 }
 
 function cloneLayout(layout) {
@@ -308,6 +326,48 @@ function garbageRaisedBaseline(sourceBoard, targetBoard, rows) {
 function reconstructTransition(source, target, context) {
     const sourceBoard = normalizeLayout(source.board);
     const targetBoard = normalizeLayout(target.board);
+
+    if (source.operation && source.operation.piece && Number.isFinite(source.operation.x) && Number.isFinite(source.operation.y)) {
+        // The page itself is authoritative. Search is still used for the
+        // exact Cold Clear score, but the recorded operation selects the
+        // actual edge instead of reconstructing it from a four-cell delta.
+        const op = source.operation;
+        const searchSource = {
+            ...source,
+            next: op.hold ? (source.next.length ? source.next : [op.piece]) : [op.piece, ...source.next]
+        };
+        const search = createSearch(sourceBoard, searchSource, context);
+        if (search && search.root && Array.isArray(search.root.children)) {
+            const matches = search.root.children.filter(edge => {
+                const placement = edge.placement || {};
+                const move = publicMove(edge);
+                return move.piece === op.piece &&
+                    move.x === op.x && move.y === op.y &&
+                    move.rotation === op.rotation &&
+                    Boolean(edge.hold) === op.hold;
+            });
+            if (matches.length) {
+                const edge = matches[0];
+                const cells = publicMove(edge).cells;
+                const targetOperation = target.operation && target.operation.piece
+                    ? [target.operation.piece, ...target.next]
+                    : target.next;
+                const expected = expectedNext(search, edge.child.state);
+                const queue = queueEvidence(expected, targetOperation);
+                const holdExact = (edge.child.state.hold || null) === target.hold;
+                if (sameOccupancy(normalizeEngineBoard(edge.child.state.board), targetBoard) && queue.compatible && holdExact) {
+                    return {
+                        search,
+                        matches: [{ edge, state: { queue, holdExact } }],
+                        delta: { added: cells, removed: [], valid: true },
+                        preMoveBoard: sourceBoard,
+                        kind: 'recorded-operation',
+                        garbageRows: 0
+                    };
+                }
+            }
+        }
+    }
     const normal = tryReconstruction(sourceBoard, targetBoard, source, target, context, 'delta-4');
     if (normal) return normal;
 

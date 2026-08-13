@@ -49,12 +49,21 @@
         <div class="player-editors">
             <div class="editor-column" id="p1-editor-col">
                 <div class="edit-section next-editor">
-                    <h2>PLAYER 1 - NEXT</h2>
+                    <h2>PLAYER 1 - PLACEMENT</h2>
                     <div class="mino-icons" id="p1-next-icons"></div>
+                    <div class="operation-controls">
+                        <div class="operation-summary" id="p1-operation-summary">未配置</div>
+                        <button class="button" id="p1-operation-rotate-left" type="button">↺</button>
+                        <button class="button" id="p1-operation-rotate-right" type="button">↻</button>
+                        <label>X <input class="number-input operation-number" id="p1-operation-x" type="number" min="-2" max="11" value="4"></label>
+                        <label>Y <input class="number-input operation-number" id="p1-operation-y" type="number" min="0" max="39" value="20"></label>
+                        <label class="operation-check"><input id="p1-operation-hold" type="checkbox"> HOLD</label>
+                        <button class="button" id="p1-operation-place-mode" type="button">盤面クリック配置</button>
+                    </div>
                     <div class="next-queue-display" id="p1-next-queue"></div>
                     <div class="button-group" style="margin-top: 10px;">
-                        <button class="button" id="p1-next-delete-left">Delete</button>
-                        <button class="button" id="p1-next-clear">Clear</button>
+                        <button class="button" id="p1-next-delete-left">配置を解除</button>
+                        <button class="button" id="p1-next-clear">この手をクリア</button>
                     </div>
                 </div>
                 <div class="edit-section field-editor">
@@ -72,12 +81,21 @@
             </div>
             <div class="editor-column" id="p2-editor-col" style="display: none;">
                 <div class="edit-section next-editor">
-                    <h2>PLAYER 2 - NEXT</h2>
+                    <h2>PLAYER 2 - PLACEMENT</h2>
                     <div class="mino-icons" id="p2-next-icons"></div>
+                    <div class="operation-controls">
+                        <div class="operation-summary" id="p2-operation-summary">未配置</div>
+                        <button class="button" id="p2-operation-rotate-left" type="button">↺</button>
+                        <button class="button" id="p2-operation-rotate-right" type="button">↻</button>
+                        <label>X <input class="number-input operation-number" id="p2-operation-x" type="number" min="-2" max="11" value="4"></label>
+                        <label>Y <input class="number-input operation-number" id="p2-operation-y" type="number" min="0" max="39" value="20"></label>
+                        <label class="operation-check"><input id="p2-operation-hold" type="checkbox"> HOLD</label>
+                        <button class="button" id="p2-operation-place-mode" type="button">盤面クリック配置</button>
+                    </div>
                     <div class="next-queue-display" id="p2-next-queue"></div>
                     <div class="button-group" style="margin-top: 10px;">
-                        <button class="button" id="p2-next-delete-left">Delete</button>
-                        <button class="button" id="p2-next-clear">Clear</button>
+                        <button class="button" id="p2-next-delete-left">配置を解除</button>
+                        <button class="button" id="p2-next-clear">この手をクリア</button>
                     </div>
                 </div>
                 <div class="edit-section field-editor">
@@ -313,6 +331,7 @@ margin-top: 15px;">
 
 <script defer src="./app/00-debug-console.js"></script>
 <script defer src="./app/10-state.js"></script>
+<script defer src="./app/15-sequence.js"></script>
 <script defer src="./app/20-editor.js"></script>
 <script defer src="./app/30-viewer.js"></script>
 <script defer src="./app/40-history.js"></script>
