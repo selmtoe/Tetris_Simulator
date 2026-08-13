@@ -45,7 +45,7 @@ const SHAPES = {
         [[0, 0], [-1, 0], [1, 0], [-1, -1]],
         [[0, 0], [0, -1], [0, 1], [1, -1]],
         [[0, 0], [1, 0], [-1, 0], [1, 1]],
-        [[0, 0], [0, 1], [0, -1], [-1, -1]]
+        [[0, 0], [0, 1], [0, -1], [-1, 1]]
     ],
     L: [
         [[0, 0], [1, 0], [-1, 0], [1, -1]],
@@ -216,6 +216,15 @@ const heldSource = sourcePage(normalBoard, 'TIOLJSZ', 'J');
 const heldTarget = targetFromEdge(normalBoard, heldSearch, heldEdge);
 const held = expectSingle([heldSource, heldTarget], 8);
 assert(held.actualMove.hold && held.actualMove.piece === 'J', 'Nonempty HOLD action was not reconstructed.');
+
+// Regression: J rotation 3 must keep its foot below-left of the pivot.  This
+// catches a duplicated, mirrored cell map in the scoring worker even when the
+// other J rotations still reconstruct correctly.
+const jRotation3Edge = firstEdge(heldSearch, edge => edge.hold && edge.placement.type === 'J' && edge.placement.rotation === 3);
+const jRotation3Target = targetFromEdge(normalBoard, heldSearch, jRotation3Edge);
+const jRotation3 = expectSingle([heldSource, jRotation3Target], 18);
+assert(jRotation3.actualMove.rotation === 3, 'J rotation 3 was not preserved.');
+assert(sameCells(jRotation3.actualMove.cells, edgeCells(jRotation3Edge)), 'J rotation 3 cells do not match the simulator geometry.');
 
 const emptyHoldSearch = makeSearch(normalBoard, 'T', ['I', 'O', 'L', 'J', 'S', 'Z']);
 const emptyHoldEdge = firstEdge(emptyHoldSearch, edge => edge.hold && edge.placement.type === 'I');

@@ -48,7 +48,10 @@ const TETROMINO_CELLS = Object.freeze({
         [[0, 0], [-1, 0], [1, 0], [-1, -1]],
         [[0, 0], [0, -1], [0, 1], [1, -1]],
         [[0, 0], [1, 0], [-1, 0], [1, 1]],
-        [[0, 0], [0, 1], [0, -1], [-1, -1]]
+        // Rotation 3 is the clockwise-rotated spawn shape: the foot is
+        // below-left of the pivot.  Keep this aligned with the simulator
+        // and Cold Clear geometry.
+        [[0, 0], [0, 1], [0, -1], [-1, 1]]
     ],
     L: [
         [[0, 0], [1, 0], [-1, 0], [1, -1]],
