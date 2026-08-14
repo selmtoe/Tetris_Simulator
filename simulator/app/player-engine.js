@@ -12,7 +12,9 @@ class Player {
         
         if (this.isAi) {
             // AIタイプによって読み込むスクリプトを変える
-            this.aiWorker = new Worker('./simulator/workers/cold-clear-worker.js');
+            // Use the reference Cold Clear Standard core compiled to raw WASM.
+            // The legacy JS port remains available for compatibility tests.
+            this.aiWorker = new Worker('./simulator/workers/cold-clear-wasm-worker.js');
 
             this.aiWorker.onmessage = (e) => {
                 if (e.data && e.data.type === 'debug') {

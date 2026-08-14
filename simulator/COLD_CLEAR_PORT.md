@@ -1,59 +1,39 @@
-# Cold Clear Standard-mode port
+# Cold Clear Standard WASM integration
 
-`cold-clear-master.zip` is kept intact. The simulator does not load code from
-that archive. Instead, `workers/cold-clear-core.js` is a new JavaScript port of
-the algorithms needed for Cold Clear's normal/Standard mode.
+The simulator now runs the original Cold Clear Standard search core from
+`cold-clear-master.zip` through `simulator/workers/cold-clear.wasm`. The
+algorithmic source is kept under `third_party/cold-clear-reference/` and is
+licensed under MPL-2.0. The original archive remains intact.
 
-The reference archive is Cold Clear by MinusKelvin and is licensed under MPL-2.0.
-The port file carries the same license notice. This project does not contain a
-reference opening-book data file, so no opening book is forced.
+The reference modules used by the WASM build are:
 
-## Reference-to-port mapping
+- `libtetris`: `u16` bitboard rows, column heights, lock/clear accounting,
+  SRS kicks, T-spin detection, and placement search.
+- `bot/src/dag.rs`: the persistent generation-aware DAG and Monte Carlo leaf
+  selection.
+- `bot/src/evaluation/standard.rs`: the published Standard evaluator and
+  coefficients.
+- `bot/src/modes/normal.rs`: hold, 7-bag speculation, node expansion,
+  backpropagation, and move selection.
 
-| Reference source | Simulator port |
-| --- | --- |
-| `libtetris/src/board.rs`, `lock_data.rs` | `CCBoard`: bit rows, column heights, line clears, combo, B2B, perfect clear, and attack accounting |
-| `libtetris/src/piece.rs`, `moves.rs` | SRS movement search, kick-aware mini/full T-spin state, input-time tracking, and legal placements |
-| `bot/src/evaluation/standard.rs` | Standard default coefficients, `Value`/`Reward`, timed jeopardy, bag-aware T-slot cutouts, well/bumpiness/cavity/covered-cell evaluation |
-| `bot/src/dag.rs`, `modes/normal.rs` | Persistent transposition DAG, 7-bag unknown-piece branches, weighted random leaf selection, backpropagation, state reuse after a committed move |
+`simulator/workers/cold-clear-wasm-worker.js` preserves the existing Worker
+protocol (`analyze`, `commit`, `addNextPiece`, `reset`, `pause`). The Rust ABI
+keeps the DAG alive across pieces; the JS side only marshals board snapshots,
+previews, and move results. The simulator's top-to-bottom board coordinates
+are converted at the ABI boundary to libtetris' bottom-to-top coordinates.
 
-The Worker protocol mirrors the important lifecycle of the reference bot:
-
-```text
-analyze(snapshot) -> move -> think ahead in short Worker slices
-                   -> commit(played move) -> addNextPiece(revealed preview)
-                   -> analyze(next snapshot)
-```
-
-`addNextPiece` resolves the matching 7-bag chance branch just as
-`DagState::add_next_piece` does in the reference. A rolling NEXT preview is
-therefore not treated as a different board state. Only garbage, manual input,
-or a failed placement causes a safe reset. This is deliberately different from
-the old `start(snapshot) -> stop` pair, which stopped before meaningful
-thinking could occur.
-
-## Deliberate scope
-
-This port implements the normal `Standard` game AI. The archive's optional
-opening book has no data in this repository, and its PC-loop mode is disabled
-in the reference wasm build too; neither is replaced with a hand-written
-template. The old fixed templates were removed from the active AI path.
-
-The core currently runs in a dedicated JavaScript Worker. A pure WebAssembly
-build is not included because the supplied archive has no prebuilt wasm package
-and the workspace lacks the wasm Rust target/bindgen tooling. The Worker and
-server are structured for a later Rust/WASM core without changing the Player
-protocol. Do not substitute the original archive as a binary dependency: keep
-the port independent and preserve the MPL-2.0 notice.
-
-## Tests
-
-Run the core smoke test with Node.js:
+The WASM build is reproducible with:
 
 ```text
-node tools/test-cold-clear-core.js
-node tools/test-cold-clear-worker-background.js
+powershell -ExecutionPolicy Bypass -File tools/build-cold-clear-wasm.ps1
+cargo test --manifest-path simulator/cold-clear-wasm/Cargo.toml --test smoke
 ```
 
-It verifies legal moves for every tetromino, correct empty-hold transitions,
-rolling NEXT reuse after normal/hold moves, and cooperative background search.
+The browser benchmark is available at `tools/cold-clear-benchmark.html` when
+the local server is running. It compares the legacy JS port and the reference
+WASM on the same empty-field snapshot and reports retained DAG nodes, nodes/ms,
+and the WASM/JS node ratio. The Node.js equivalent is
+`tools/bench-cold-clear-wasm.js`.
+
+The old `workers/cold-clear-core.js` remains in the repository for regression
+comparison. It is no longer loaded by the simulator's active AI Worker.

@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cold Clear Worker smoke test</title>
+<pre id="output">Starting…</pre>
+<script>
+(async () => {
+    const output = document.getElementById('output');
+    const worker = new Worker('../simulator/workers/cold-clear-wasm-worker.js');
+    const board = Array.from({ length: 40 }, () => Array(10).fill(null));
+    const result = await new Promise(resolve => {
+        const timer = setTimeout(() => resolve({ passed: false, error: 'timeout' }), 10000);
+        worker.onmessage = event => {
+            const data = event.data || {};
+            if (data.type !== 'move' && data.type !== 'error') return;
+            clearTimeout(timer);
+            worker.terminate();
+            resolve(data.type === 'move' && data.piece
+                ? { passed: true, piece: data.piece, x: data.x, y: data.y, rotation: data.rotation }
+                : { passed: false, error: data.message || 'worker returned no move' });
+        };
+        worker.onerror = event => {
+            clearTimeout(timer);
+            worker.terminate();
+            resolve({ passed: false, error: event.message || 'worker error' });
+        };
+        worker.postMessage({
+            type: 'analyze',
+            requestId: 1,
+            board,
+            currentPiece: 'T',
+            nextQueue: ['I', 'O', 'L', 'J', 'S', 'Z', 'T', 'I'],
+            holdPiece: null,
+            canHold: true,
+            isB2B: false,
+            ren: -1,
+            incoming: 0,
+            thinkTimeMs: 20,
+            nodeLimit: 5000,
+            background: false,
+            weights: {}
+        });
+    });
+    output.textContent = JSON.stringify(result, null, 2);
+})();
+</script>

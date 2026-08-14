@@ -6,6 +6,9 @@ tetris_video_recovery/bin/
 tetris_video_recovery/third_party/
 tetris_video_recovery/data/exports/
 
+# Rust build output for the Cold Clear WASM bridge.
+simulator/cold-clear-wasm/target/
+
 # Local scratch files from the video recovery workflow.
 0.47
 0.81
