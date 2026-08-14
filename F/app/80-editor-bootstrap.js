@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // 隠し機能: cleanモード (URLパラメータに clean があればUIを隠す)
 
 
@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     currentCaseIndex = 0;
     setupEditors();
     loadPage(0);
-    loadStateFromURL();
+    await loadStateFromURL();
     if (Number.isInteger(requestedPageNumber) && fumenPages.length) {
         const requestedPageIndex = Math.max(0, Math.min(fumenPages.length - 1, requestedPageNumber - 1));
         loadPage(requestedPageIndex);

@@ -91,7 +91,37 @@ function encodeBase64Utf8(text) {
     return btoa(binary);
 }
 
-function decodeSharedStateText(value) {
+function encodeBase64UrlBytes(bytes) {
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function decodeBase64UrlBytes(text) {
+    let normalized = String(text || '').replace(/-/g, '+').replace(/_/g, '/');
+    while (normalized.length % 4) normalized += '=';
+    const binary = atob(normalized);
+    return Uint8Array.from(binary, value => value.charCodeAt(0));
+}
+
+async function encodeSharedStateHash(text) {
+    // The collection format contains every board on every page.  Plain
+    // Base64 makes a long 2P replay fragile when copied through a browser or
+    // chat application, so use a compact gzip hash when supported.
+    if (typeof CompressionStream === 'function') {
+        try {
+            const compressed = await new Response(
+                new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))
+            ).arrayBuffer();
+            return `z1.${encodeBase64UrlBytes(new Uint8Array(compressed))}`;
+        } catch (error) {
+            console.warn('Compressed share link unavailable; using plain Base64', error);
+        }
+    }
+    return encodeBase64Utf8(text);
+}
+
+async function decodeSharedStateText(value) {
     let text = String(value || '').trim().replace(/^\uFEFF/, '');
     if (!text) throw new Error('Empty shared data');
     const internetShortcut = text.match(/^\[InternetShortcut\]\s*URL=(\S+)/i);
@@ -108,6 +138,18 @@ function decodeSharedStateText(value) {
     }
     if (text.startsWith('#')) text = text.slice(1);
     text = decodeURIComponent(text).replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+
+    if (text.startsWith('z1.')) {
+        if (typeof DecompressionStream !== 'function') {
+            throw new Error('This browser cannot decompress shared replay links');
+        }
+        const compressed = decodeBase64UrlBytes(text.slice(3));
+        const decoded = await new Response(
+            new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'))
+        ).text();
+        return JSON.parse(decoded);
+    }
+
     while (text.length % 4) text += '=';
     const binaryString = atob(text);
     const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
@@ -627,10 +669,10 @@ function applyFumenData(data) {
     }
 }
     
-function generateAndDisplayLink() {
+async function generateAndDisplayLink() {
     const stateData = getCollectionDataForExport();
     const jsonString = JSON.stringify(stateData);
-    const base64Data = encodeBase64Utf8(jsonString);
+    const base64Data = await encodeSharedStateHash(jsonString);
     const url = new URL(window.location);
     url.hash = base64Data;
     document.getElementById('share-link-input').value = url.href;
@@ -641,15 +683,15 @@ function generateAndDisplayLink() {
     }
 }
 
-function openShareModal() {
-    generateAndDisplayLink();
+async function openShareModal() {
+    await generateAndDisplayLink();
     document.getElementById('share-modal').style.display = 'flex';
 }
 
-function loadStateFromURL() {
+async function loadStateFromURL() {
     if (window.location.hash) {
         try {
-            const decodedState = decodeSharedStateText(window.location.href);
+            const decodedState = await decodeSharedStateText(window.location.href);
             
             // テト譜判定 (URLハッシュの場合は ?d=v115@ 等が含まれる可能性があるが、
             // ここでのロードは自作形式のBase64デコード後なので、JSONパースを試みる)

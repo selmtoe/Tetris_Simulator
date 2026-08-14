@@ -152,6 +152,9 @@ struct QueueRecognitionSample {
     // this value; `observation` remains the raw evidence.
     QueueObservation decoded;
     bool sequenceCorrected = false;
+    // The raw Hold colour briefly changed, but the following NEXT transition
+    // proved that the change could not have been a legal hold state.
+    bool holdCorrected = false;
 };
 
 struct BoardObservation {

@@ -279,6 +279,19 @@ function operationForWorker(page) {
 }
 
 function replaySourceAtPage(pages, initial, pageIndex) {
+    const explicitPage = pages[pageIndex]?.p1 || {};
+    // Native replay exports already contain the authoritative state at every
+    // page. Replaying carried 2P operations here would apply the same P1 lock
+    // several times and shift HOLD/NEXT away from the page being scored.
+    if (Object.prototype.hasOwnProperty.call(explicitPage, 'active')) {
+        return {
+            board: Array.isArray(explicitPage.board) ? explicitPage.board : [],
+            current: cleanPieces(explicitPage.active)[0] || null,
+            hold: cleanPieces(explicitPage.hold)[0] || null,
+            next: cleanPieces(explicitPage.next),
+            explicitCurrent: true
+        };
+    }
     const seed = initial || {};
     const stream = cleanPieces(seed.sequence);
     let current = stream.shift() || null;
@@ -303,16 +316,21 @@ function replaySourceAtPage(pages, initial, pageIndex) {
         board: Array.isArray(page.board) ? page.board : [],
         current: current || cleanPieces(page.current)[0] || null,
         hold: hold || cleanPieces(page.hold)[0] || null,
-        next: cleanPieces(page.next)
+        next: cleanPieces(page.next),
+        explicitCurrent: false
     };
 }
 
-function recordedOperationMatches(search, operation) {
+function recordedOperationMatches(search, operation, source) {
     if (!search?.root?.children || !operation) return [];
     const cells = recordedOperationCells(operation);
     if (cells.length !== 4) return [];
+    // In the new replay format HOLD has already been resolved into
+    // `source.current`; holdUsed records provenance for the viewer and must
+    // not cause Cold Clear to press HOLD a second time.
+    const usesHoldAction = !source.explicitCurrent && operation.holdUsed;
     return search.root.children
-        .filter(edge => Boolean(edge.hold) === operation.holdUsed)
+        .filter(edge => Boolean(edge.hold) === usesHoldAction)
         .filter(edge => edge.placement.type === operation.type)
         .filter(edge => edge.placement.rotation === operation.rotation)
         .filter(edge => sameCells(publicMove(edge).cells, cells))
@@ -327,7 +345,7 @@ function recordedOperationMatches(search, operation) {
 }
 
 function edgeCanBeRecordedMove(edge, source) {
-    if (!edge.hold) return edge.placement.type === source.next[0];
+    if (!edge.hold) return edge.placement.type === (source.current || source.next[0]);
     // An empty HOLD would take NEXT[1], which is deliberately not a valid
     // reconstruction source for the editor's page format.
     return Boolean(source.hold) && edge.placement.type === source.hold;
@@ -618,7 +636,7 @@ function scoreRecordedOperation(pageIndex, source, operation, context, nodeBudge
     if (!search || operationCells.length !== 4) {
         return ignoredResult(pageIndex, 'invalid-recorded-operation', context, false);
     }
-    const matches = recordedOperationMatches(search, operation);
+    const matches = recordedOperationMatches(search, operation, source);
     if (!matches.length) {
         return ignoredResult(pageIndex, 'invalid-recorded-operation', context, false);
     }

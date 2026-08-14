@@ -104,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const data = typeof decodeSharedStateText === 'function'
-                ? decodeSharedStateText(text)
+                ? await decodeSharedStateText(text)
                 : JSON.parse(text);
 
             

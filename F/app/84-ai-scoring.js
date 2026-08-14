@@ -269,7 +269,7 @@
         canvas.height = CANVAS_HEIGHT * RESOLUTION_SCALE;
         ctx.setTransform(RESOLUTION_SCALE, 0, 0, RESOLUTION_SCALE, 0, 0);
         ctx.clearRect(0, 0, PLAYER_CANVAS_WIDTH, CANVAS_HEIGHT);
-        drawViewerUI(ctx, player, 0);
+        drawViewerUI(ctx, player, 0, player.next);
         const viewY = comparisonViewY(player.board, move, Boolean(options.cellsOnly));
         ctx.save();
         ctx.translate(PLAYFIELD_X_OFFSET, 0.5 * BLOCK_SIZE);
@@ -493,11 +493,24 @@
 
         let rangeWasOpened = false;
 
+        function sameReplayBoard(left, right) {
+            return JSON.stringify(left?.p1?.board || []) === JSON.stringify(right?.p1?.board || []);
+        }
+
+        function replayOperationIndices() {
+            return fumenPages.map((page, index) => {
+                if (!operationForPage(page?.p1)) return -1;
+                const nextPage = fumenPages[index + 1];
+                // 2P collection pages may carry P1's operation while only P2
+                // changes. Score the operation on the final carried page,
+                // where the following P1 board actually contains the lock.
+                return nextPage && sameReplayBoard(page, nextPage) ? -1 : index;
+            }).filter(index => index >= 0);
+        }
+
         function scoringPageIndices() {
             if (typeof currentCaseIsReplay === 'function' && currentCaseIsReplay()) {
-                return fumenPages.map((page, index) =>
-                    typeof operationForPage === 'function' && operationForPage(page?.p1) ? index : -1)
-                    .filter(index => index >= 0);
+                return replayOperationIndices();
             }
             return fumenPages.map((_, index) => index).slice(0, -1);
         }
@@ -575,7 +588,7 @@
 
             for (const result of blunders) {
                 const card = createScoreCard(run, result);
-                const openSourcePage = () => openSourcePageInEditor(run, result);
+                const openSourcePage = () => { void openSourcePageInEditor(run, result); };
                 const header = card.querySelector('.ai-score-card-header');
                 header.addEventListener('click', openSourcePage);
                 header.addEventListener('keydown', event => {
@@ -603,15 +616,15 @@
             return pages.length ? getFumenDataForExport(pages, lastRun.mode) : null;
         }
 
-        function editorOutputUrl() {
+        async function editorOutputUrl() {
             const data = editorOutputData();
             if (!data) return null;
             const url = new URL(window.location.href);
-            url.hash = base64FromUtf8(JSON.stringify(data));
+            url.hash = await encodeSharedStateHash(JSON.stringify(data));
             return url.href;
         }
 
-        function sourcePageEditorUrl(run, result) {
+        async function sourcePageEditorUrl(run, result) {
             const sourcePage = run?.pages?.[result?.pageIndex];
             if (!sourcePage) return null;
             const data = getFumenDataForExport([cleanClone(sourcePage)], run.mode);
@@ -619,12 +632,12 @@
             url.searchParams.delete('clean');
             url.searchParams.set('view', 'editor');
             url.searchParams.set('page', '1');
-            url.hash = base64FromUtf8(JSON.stringify(data));
+            url.hash = await encodeSharedStateHash(JSON.stringify(data));
             return url.href;
         }
 
-        function openSourcePageInEditor(run, result) {
-            const url = sourcePageEditorUrl(run, result);
+        async function openSourcePageInEditor(run, result) {
+            const url = await sourcePageEditorUrl(run, result);
             if (url) window.open(url, '_blank', 'noopener');
         }
 
@@ -723,12 +736,12 @@
             });
         });
 
-        openEditorButton.addEventListener('click', () => {
-            const url = editorOutputUrl();
+        openEditorButton.addEventListener('click', async () => {
+            const url = await editorOutputUrl();
             if (url) window.open(url, '_blank', 'noopener');
         });
-        copyEditorButton.addEventListener('click', () => {
-            const url = editorOutputUrl();
+        copyEditorButton.addEventListener('click', async () => {
+            const url = await editorOutputUrl();
             if (url) copyText(url, '悪手局面の譜面エディタリンクをコピーしました。');
         });
         copyMobileButton.addEventListener('click', () => {

@@ -215,6 +215,55 @@ int queueMismatchCount(const std::array<Cell, QueueWindowSize>& candidate,
     return mismatches;
 }
 
+struct HoldRun {
+    std::size_t first = 0;
+    std::size_t last = 0;
+    Cell hold = Cell::Empty;
+    std::vector<Cell> next;
+    bool manual = false;
+};
+
+std::vector<HoldRun> holdRunsFromSamples(const std::vector<QueueRecognitionSample>& samples,
+                                         std::size_t first) {
+    std::vector<HoldRun> runs;
+    for (std::size_t i = first; i < samples.size(); ++i) {
+        const auto& sample = samples[i];
+        const bool split = runs.empty() || sample.manuallyEdited || runs.back().manual ||
+                           sample.observation.hold != runs.back().hold ||
+                           !samePieces(sample.observation.next, runs.back().next);
+        if (split) {
+            runs.push_back({i, i, sample.observation.hold, sample.observation.next,
+                            sample.manuallyEdited});
+        } else {
+            runs.back().last = i;
+        }
+    }
+    return runs;
+}
+
+std::vector<std::pair<bool, Cell>> correctHoldBounces(
+    const std::vector<QueueRecognitionSample>& samples, std::size_t first) {
+    std::vector<std::pair<bool, Cell>> overrides(samples.size(), {false, Cell::Empty});
+    const auto runs = holdRunsFromSamples(samples, first);
+    for (std::size_t run = 2; run < runs.size(); ++run) {
+        const auto& before = runs[run - 2];
+        const auto& transient = runs[run - 1];
+        const auto& after = runs[run];
+        // A real hold swap may change HOLD while NEXT stays still, but when
+        // the next piece is subsequently consumed, the swapped-in HOLD must
+        // remain visible.  If it returns to the old value exactly at that
+        // queue transition, the middle value is a visual false positive.
+        if (before.manual || transient.manual || after.manual ||
+            before.hold == transient.hold || after.hold != before.hold ||
+            !samePieces(before.next, transient.next) ||
+            samePieces(transient.next, after.next)) continue;
+        for (std::size_t i = transient.first; i <= transient.last; ++i) {
+            overrides[i] = {true, before.hold};
+        }
+    }
+    return overrides;
+}
+
 bool initializeSevenBag(const std::array<Cell, QueueWindowSize>& window, int phase,
                         bool useSevenBag, std::uint8_t& nextOffset, std::uint8_t& mask) {
     nextOffset = 0;
@@ -293,6 +342,7 @@ void decodeQueueSequence(std::vector<QueueRecognitionSample>& samples, const Set
     for (auto& sample : samples) {
         sample.decoded = {};
         sample.sequenceCorrected = false;
+        sample.holdCorrected = false;
         sample.rejected = false;
     }
     const auto first = std::find_if(samples.begin(), samples.end(), [](const QueueRecognitionSample& sample) {
@@ -302,6 +352,7 @@ void decodeQueueSequence(std::vector<QueueRecognitionSample>& samples, const Set
     const std::size_t firstIndex = static_cast<std::size_t>(std::distance(samples.begin(), first));
     const auto runs = queueRunsFromSamples(samples, firstIndex);
     if (runs.empty()) return;
+    const auto holdOverrides = correctHoldBounces(samples, firstIndex);
 
     std::vector<QueueSequenceNode> seedCandidates;
     const auto initial = queueWindow(runs.front().observation);
@@ -432,6 +483,10 @@ void decodeQueueSequence(std::vector<QueueRecognitionSample>& samples, const Set
         for (std::size_t i = runs[event].first; i <= runs[event].last; ++i) {
             auto& sample = samples[i];
             sample.decoded = sample.observation;
+            if (i < holdOverrides.size() && holdOverrides[i].first) {
+                sample.decoded.hold = holdOverrides[i].second;
+                sample.holdCorrected = true;
+            }
             sample.decoded.next = correctedNext;
             sample.sequenceCorrected = !samePieces(sample.observation.next, correctedNext);
             const int mismatchLimit = runs[event].manual ? 0 : 1;
@@ -905,6 +960,7 @@ void writeQueueRecognitionJson(std::ostream& out, const std::vector<QueueRecogni
             << "\",\"stable\":" << (sample.stable ? "true" : "false")
             << ",\"manual\":" << (sample.manuallyEdited ? "true" : "false")
             << ",\"sequenceCorrected\":" << (sample.sequenceCorrected ? "true" : "false")
+            << ",\"holdCorrected\":" << (sample.holdCorrected ? "true" : "false")
             << ",\"rejected\":" << (sample.rejected ? "true" : "false") << '}';
     }
     out << ']';

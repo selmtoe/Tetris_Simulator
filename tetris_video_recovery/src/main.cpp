@@ -1249,6 +1249,7 @@ std::wstring queueLogRowText(const tr::QueueRecognitionSample& sample) {
                               : (sample.sequenceCorrected ? L"  [補正:全履歴/7-bag]"
                                                           : (sample.stable ? L"  [確定]" : L"  [保留]")))
          << (sample.manuallyEdited ? L"  [手動]" : L"");
+    if (sample.holdCorrected) text << L"  [Hold補正]";
     return text.str();
 }
 

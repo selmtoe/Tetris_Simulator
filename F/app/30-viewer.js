@@ -33,7 +33,7 @@ function drawViewerPiece(ctx, s, x, y, p, alpha) {
     });
 }
 
-function drawViewerUI(ctx, playerPageData, offsetX) {
+function drawViewerUI(ctx, playerPageData, offsetX, nextOverride) {
     ctx.save();
     ctx.translate(offsetX, 0);
     
@@ -55,9 +55,11 @@ function drawViewerUI(ctx, playerPageData, offsetX) {
     const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
     ctx.fillStyle = '#FFF';
 ctx.fillText('NEXT', rX, 40);
-    const nextQueue = (typeof displayNextForPage === 'function'
-        ? displayNextForPage(offsetX === 0 ? 'p1' : 'p2')
-        : String(playerPageData.next || '')).split('');
+    const nextQueue = (typeof nextOverride === 'string'
+        ? nextOverride
+        : (typeof displayNextForPage === 'function'
+            ? displayNextForPage(offsetX === 0 ? 'p1' : 'p2')
+            : String(playerPageData.next || ''))).split('');
     for (let i = 0; i < nextQueue.length; i++) {
         const pT = nextQueue[i];
         if (!pT) continue;

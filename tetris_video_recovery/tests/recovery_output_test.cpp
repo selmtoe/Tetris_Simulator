@@ -383,6 +383,50 @@ TimelineStep placed = activeT;
         }
     }
 
+    // A HOLD redraw can briefly show the current O as the stored piece.  In
+    // this sequence the value returns to L exactly when NEXT advances; if O
+    // had really been held, the new page would still contain O in HOLD.
+    // Correct the derived state while retaining the raw O observation.
+    RecoveryOutput holdBounceFixture;
+    holdBounceFixture.videoDurationSeconds = .20;
+    const auto addHoldBounceSample = [&](double time, Cell active, Cell hold, const std::string& next) {
+        QueueRecognitionSample sample;
+        sample.timeSeconds = time;
+        sample.active = active;
+        sample.observation = queueFromText(next, hold);
+        sample.stable = true;
+        holdBounceFixture.queueObservationsP1.push_back(sample);
+        BoardObservation board;
+        board.timeSeconds = time;
+        holdBounceFixture.boardObservationsP1.push_back(board);
+    };
+    addHoldBounceSample(.00, Cell::Empty, Cell::L, "OISJT");
+    addHoldBounceSample(.01, Cell::Empty, Cell::L, "OISJT");
+    addHoldBounceSample(.02, Cell::O, Cell::L, "ISJTZ");
+    addHoldBounceSample(.03, Cell::O, Cell::L, "ISJTZ");
+    addHoldBounceSample(.04, Cell::O, Cell::O, "ISJTZ");
+    addHoldBounceSample(.05, Cell::L, Cell::O, "ISJTZ");
+    addHoldBounceSample(.06, Cell::L, Cell::L, "SJTZL");
+    addHoldBounceSample(.07, Cell::I, Cell::L, "SJTZL");
+    holdBounceFixture.originalQueueObservationsP1 = holdBounceFixture.queueObservationsP1;
+    if (!reanalyzeQueueObservations(reanalysisSettings, holdBounceFixture, reanalysisError)) {
+        std::cerr << "hold bounce could not be reanalyzed: " << reanalysisError << '\n';
+        return 1;
+    }
+    const auto correctedHold = std::find_if(holdBounceFixture.queueObservationsP1.begin(),
+                                            holdBounceFixture.queueObservationsP1.end(),
+                                            [](const QueueRecognitionSample& sample) {
+                                                return sample.observation.hold == Cell::O &&
+                                                       sample.decoded.hold == Cell::L &&
+                                                       sample.holdCorrected;
+                                            });
+    if (correctedHold == holdBounceFixture.queueObservationsP1.end() ||
+        std::any_of(holdBounceFixture.rawP1.begin(), holdBounceFixture.rawP1.end(),
+                    [](const TimelineStep& step) { return step.action == "hold"; })) {
+        std::cerr << "impossible HOLD bounce was promoted to a hold action\n";
+        return 1;
+    }
+
     // Match opening behaviour in VID_20260812_221204: the queue first
     // advances, then the first active T is put into an empty hold slot, and
     // the delayed visual queue slide exposes Z.  Z must survive as the
