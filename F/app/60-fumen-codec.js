@@ -690,8 +690,16 @@ async function openShareModal() {
 
 async function loadStateFromURL() {
     if (window.location.hash) {
+        // Keep the source URL for decoding, then remove the very long hash
+        // before any async gzip work or page normalization.  This prevents a
+        // valid compressed replay from being left in the address bar while
+        // the 128-page collection is being applied, and also avoids retrying
+        // a malformed link on every reload.
+        const sharedUrl = window.location.href;
+        const cleanUrl = window.location.pathname + window.location.search;
+        history.replaceState('', document.title, cleanUrl);
         try {
-            const decodedState = await decodeSharedStateText(window.location.href);
+            const decodedState = await decodeSharedStateText(sharedUrl);
             
             // テト譜判定 (URLハッシュの場合は ?d=v115@ 等が含まれる可能性があるが、
             // ここでのロードは自作形式のBase64デコード後なので、JSONパースを試みる)

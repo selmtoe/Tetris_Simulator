@@ -344,6 +344,30 @@ function recordedOperationMatches(search, operation, source) {
         }));
 }
 
+function forcedRecordedOperationEdge(search, source, operation) {
+    // A replay operation is authoritative even when the zero-gravity move
+    // enumerator cannot reproduce its input path (most commonly a left-wall
+    // I/S/Z placement after a garbage rise).  The board delta still proves
+    // the four locked cells, so score that exact placement instead of
+    // dropping the hand from the run.
+    if (!search?.root?.state?.board || !source?.explicitCurrent ||
+        source.current !== operation.type) return null;
+    const rotation = operation.rotation;
+    const placement = {
+        type: operation.type,
+        // Cold Clear uses the SRS anchor for I; replay operations use the
+        // simulator's visible-cell anchor.  The other pieces share anchors.
+        x: operation.type === 'I' ? operation.x + 1 : operation.x,
+        y: operation.y,
+        rotation,
+        tspin: 0,
+        time: 0,
+        inputs: []
+    };
+    if (!search.root.state.board.valid(placement)) return null;
+    return search.makeEdge(search.root, search.root.state, placement, false);
+}
+
 function edgeCanBeRecordedMove(edge, source) {
     if (!edge.hold) return edge.placement.type === (source.current || source.next[0]);
     // An empty HOLD would take NEXT[1], which is deliberately not a valid
@@ -636,7 +660,22 @@ function scoreRecordedOperation(pageIndex, source, operation, context, nodeBudge
     if (!search || operationCells.length !== 4) {
         return ignoredResult(pageIndex, 'invalid-recorded-operation', context, false);
     }
-    const matches = recordedOperationMatches(search, operation, source);
+    let matches = recordedOperationMatches(search, operation, source);
+    let forced = false;
+    if (!matches.length) {
+        const edge = forcedRecordedOperationEdge(search, source, operation);
+        if (edge) {
+            matches = [{
+                edge,
+                state: {
+                    holdExact: true,
+                    queue: { count: 0, exact: true, compatible: true },
+                    valid: true
+                }
+            }];
+            forced = true;
+        }
+    }
     if (!matches.length) {
         return ignoredResult(pageIndex, 'invalid-recorded-operation', context, false);
     }
@@ -670,7 +709,7 @@ function scoreRecordedOperation(pageIndex, source, operation, context, nodeBudge
     const result = {
         pageIndex,
         status: 'scored',
-        reconstruction: 'recorded-operation',
+        reconstruction: forced ? 'forced-recorded-operation' : 'recorded-operation',
         sourceConvention: 'operation',
         targetConvention: 'operation',
         sourceBoardVariant: 'raw',
