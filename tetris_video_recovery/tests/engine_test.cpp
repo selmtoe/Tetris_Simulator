@@ -38,6 +38,27 @@ int main() {
             int occupied = 0;
             for (Cell cell : move.fullBoard) if (cell != Cell::Empty) ++occupied;
             if (occupied != 4) { std::cerr << "bad source block count for " << cellChar(piece) << '\n'; return 1; }
+
+            // The source-compatible generator may use legacy shape anchors,
+            // but exported operation coordinates must describe the same cells
+            // with the simulator's current shape table.
+            const auto canonical = TetrisEngine::shape(move.piece, move.rotation);
+            std::array<std::array<int, 2>, 4> canonicalCells{};
+            for (std::size_t cellIndex = 0; cellIndex < canonical.cells.size(); ++cellIndex) {
+                canonicalCells[cellIndex] = {
+                    move.x + canonical.cells[cellIndex][0],
+                    move.y + canonical.cells[cellIndex][1]
+                };
+            }
+            auto sortedSourceCells = move.cells;
+            auto sortedCanonicalCells = canonicalCells;
+            std::sort(sortedSourceCells.begin(), sortedSourceCells.end());
+            std::sort(sortedCanonicalCells.begin(), sortedCanonicalCells.end());
+            if (sortedSourceCells != sortedCanonicalCells) {
+                std::cerr << "source operation anchor does not match simulator cells for "
+                          << cellChar(piece) << '\n';
+                return 1;
+            }
         }
     }
 
@@ -163,6 +184,36 @@ int main() {
     if (garbageChoices.empty() || !garbageChoices.front().garbage.manuallySpecified ||
         garbageChoices.front().garbage.lines != 2 || garbageChoices.front().garbage.holeMasks != manualRise.holeMasks) {
         std::cerr << "manual garbage rise did not feed legal candidate generation\n";
+        return 1;
+    }
+
+    // Garbage arrives after a lock.  Use a visible pre-existing block so the
+    // shift detector can identify a four-row rise, then verify that the
+    // exported O coordinate remains the pre-rise lock coordinate while the
+    // resulting board contains the shifted O.
+    Board riseBefore{};
+    riseBefore[index(0, 30)] = Cell::T;
+    GarbageRise fourRows;
+    fourRows.lines = 4;
+    fourRows.holeMasks = {static_cast<std::uint16_t>(1u << 1), static_cast<std::uint16_t>(1u << 3),
+                          static_cast<std::uint16_t>(1u << 5), static_cast<std::uint16_t>(1u << 7)};
+    const auto oRiseMoves = TetrisEngine::originalLegalMoves(riseBefore, Cell::O);
+    if (oRiseMoves.empty()) { std::cerr << "missing O rise fixture move\n"; return 1; }
+    const CandidateMove expectedORise = oRiseMoves.front();
+    const Board riseAfter = TetrisEngine::applyGarbageRise(expectedORise.board, fourRows);
+    std::vector<TimelineStep> riseRaw(2);
+    riseRaw[0].observed = riseBefore;
+    riseRaw[0].board = riseBefore;
+    riseRaw[0].fullBoard = riseBefore;
+    riseRaw[0].piece = Cell::O;
+    riseRaw[1].observed = riseAfter;
+    riseRaw[1].board = riseAfter;
+    riseRaw[1].fullBoard = riseAfter;
+    const auto riseSolved = TetrisEngine::beamSearch(riseRaw, settings);
+    if (riseSolved.size() != riseRaw.size() || riseSolved[1].garbage.lines != 4 ||
+        riseSolved[1].placementY != expectedORise.y || riseSolved[1].fullBoard != expectedORise.fullBoard ||
+        riseSolved[1].board != riseAfter) {
+        std::cerr << "garbage rise was applied before the O placement\n";
         return 1;
     }
 

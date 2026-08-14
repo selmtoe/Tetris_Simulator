@@ -828,8 +828,11 @@ void refreshBoardViews() {
     const auto& solved = reviewSolved();
     if (raw.empty() || g_review.phase >= raw.size()) return;
 
+    // The placement sketch is drawn in the pre-rise coordinate system.  The
+    // selected active piece locks first; the incoming garbage belongs to the
+    // resulting observed board, not to this placement preview.
     g_previousBoard.board = g_review.phase > 0 && g_review.phase - 1 < solved.size()
-        ? tr::TetrisEngine::applyGarbageRise(solved[g_review.phase - 1].board, g_review.garbageEditor)
+        ? solved[g_review.phase - 1].board
         : tr::Board{};
     g_previousBoard.overlay.fill(tr::Cell::Empty);
     g_previousBoard.marked.fill(false);

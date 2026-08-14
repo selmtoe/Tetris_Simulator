@@ -200,6 +200,10 @@ struct TimelineStep {
     double score = 0;
     bool uncertain = false;
     bool manuallyFixed = false;
+    // The active piece was obtained by pressing HOLD before this phase.  The
+    // flag belongs to the page state, while the operation for the page is the
+    // lock that produces the following state.
+    bool holdUsed = false;
     // The queue/hold fields were explicitly corrected in the review UI.
     // This is separate from manuallyFixed, which means a legal board move.
     bool queueManuallyFixed = false;

@@ -129,6 +129,9 @@ struct QueuePhase {
     Cell active = Cell::Empty;
     std::string action;
     bool queueManuallyFixed = false;
+    // The active piece came from HOLD.  This is separate from `action` because
+    // the queue/hold animation can be visible several scans before the lock.
+    bool holdUsed = false;
 };
 
 constexpr std::size_t QueueWindowSize = 5;
@@ -423,6 +426,7 @@ public:
             active_ = Cell::Empty;
             phases_.push_back({0, time, Cell::Empty, observed.next, Cell::Empty, "init", false});
             currentStart_ = time;
+            activeFromHold_ = false;
             firstDetected_ = true;
             return;
         }
@@ -435,21 +439,47 @@ public:
                 phases_.push_back({time, time, lastStable_.hold, intermediate.next,
                                    lastStable_.next[0], "spawn_skipped", false});
                 active_ = lastStable_.next[1];
+                activeFromHold_ = false;
+            } else if (transition.action == "first_hold") {
+                // The current piece went into an empty HOLD slot.  The queue
+                // has advanced, so the newly controlled piece is now the
+                // first item of the observed queue.
+                active_ = observed.next.empty() ? Cell::Empty : observed.next[0];
+                activeFromHold_ = true;
+            } else if (activeFromHold_) {
+                // Some videos show the HOLD change one scan before the queue
+                // advances.  In that case lastStable_.next[0] is still the
+                // newly spawned piece; keep the pending HOLD provenance when
+                // it becomes active.
+                active_ = lastStable_.next.empty() ? Cell::Empty : lastStable_.next[0];
             } else {
                 active_ = lastStable_.next[0];
+                activeFromHold_ = false;
             }
         } else if (transition.action == "hold") {
-            active_ = lastStable_.hold;
+            // An empty HOLD slot does not provide a replacement active piece
+            // yet.  Keep the hold provenance pending until the delayed queue
+            // slide exposes the next active piece.
+            active_ = lastStable_.hold == Cell::Empty ? Cell::Empty : lastStable_.hold;
+            activeFromHold_ = true;
         } else if (transition.action == "place" || transition.action == "place_and_hold") {
-            phases_.push_back({currentStart_, time, lastStable_.hold, lastStable_.next, active_, transition.action, false});
+            phases_.push_back({currentStart_, time, lastStable_.hold, lastStable_.next, active_, transition.action,
+                               false, activeFromHold_ || transition.action == "place_and_hold"});
             currentStart_ = time;
             if (transition.slideCount >= 2 && lastStable_.next.size() >= 2) {
                 const QueueObservation intermediate = intermediateQueueAfterOneSlide(lastStable_, observed);
                 phases_.push_back({time, time, lastStable_.hold, intermediate.next,
                                    lastStable_.next[0], "place_skipped", false});
                 active_ = lastStable_.next[1];
+                activeFromHold_ = false;
+            } else if (transition.action == "place_and_hold") {
+                // The queue head was moved into HOLD while the old active
+                // piece was locked.  The old HOLD piece is now active.
+                active_ = lastStable_.hold;
+                activeFromHold_ = true;
             } else {
                 active_ = lastStable_.next[0];
+                activeFromHold_ = false;
             }
         }
         // This update intentionally happens even when a changed hold/next
@@ -464,7 +494,8 @@ public:
     std::vector<QueuePhase> finish(double duration) const {
         auto phases = phases_;
         if (currentStart_ < duration) {
-            phases.push_back({currentStart_, duration, lastStable_.hold, lastStable_.next, active_, "end", false});
+            phases.push_back({currentStart_, duration, lastStable_.hold, lastStable_.next, active_, "end", false,
+                              activeFromHold_});
         }
         for (auto& phase : phases) {
             phase.queueManuallyFixed = std::any_of(rawSamples_.begin(), rawSamples_.end(), [&](const QueueRecognitionSample& sample) {
@@ -483,6 +514,7 @@ private:
     int pendingCount_ = 0;
     QueueObservation lastStable_;
     Cell active_ = Cell::Empty;
+    bool activeFromHold_ = false;
     double currentStart_ = 0;
     bool firstDetected_ = false;
     std::vector<QueuePhase> phases_;
@@ -726,6 +758,7 @@ std::vector<TimelineStep> buildRawTimeline(const std::vector<QueuePhase>& phases
         step.action = phases[i].action;
         step.hold = phases[i].hold;
         step.next = phases[i].next;
+        step.holdUsed = phases[i].holdUsed;
         step.queueManuallyFixed = phases[i].queueManuallyFixed;
         step.confidence = voted.confidence;
         step.observed = cleanUpBoard(voted.board);
@@ -780,6 +813,7 @@ std::vector<TimelineStep> buildRawTimelineFromFlatBoards(const std::vector<Queue
 struct PageEntry {
     double time = 0;
     std::string board;
+    std::string activePiece;
     std::string hold;
     std::string next;
     std::string operationPiece;
@@ -852,6 +886,7 @@ std::vector<PageEntry> pageEntries(const std::vector<TimelineStep>& timeline) {
         PageEntry entry;
         entry.time = time;
         entry.board = boardString(board);
+        entry.activePiece = sanitizePiece(queueStep.piece);
         entry.hold = sanitizePiece(queueStep.hold);
         entry.next = simulatorQueueForStep(queueStep);
         if (operationStep && isPiece(operationStep->placedPiece)) {
@@ -859,7 +894,7 @@ std::vector<PageEntry> pageEntries(const std::vector<TimelineStep>& timeline) {
             entry.operationX = operationStep->placementX;
             entry.operationY = operationStep->placementY;
             entry.operationRotation = operationStep->placementRotation;
-            entry.operationHold = queueStep.action.find("hold") != std::string::npos;
+            entry.operationHold = queueStep.holdUsed;
         }
         entries.push_back(std::move(entry));
         lastTime = time;
@@ -956,6 +991,7 @@ std::string singlePagesJson(const std::vector<PageEntry>& pages) {
                 << "\",\"rotation\":\"" << operationRotationName(page.operationRotation)
                 << "\",\"x\":" << page.operationX
                 << ",\"y\":" << page.operationY;
+            out << ",\"coordinateSpace\":\"simulator\"";
             if (page.operationHold) out << ",\"hold\":true";
             out << '}';
         }
@@ -1006,6 +1042,7 @@ std::string combinedPagesJson(const std::vector<PageEntry>& p1, const std::vecto
             out << ",\"o\":{\"type\":\"" << a.operationPiece
                 << "\",\"rotation\":\"" << operationRotationName(a.operationRotation)
                 << "\",\"x\":" << a.operationX << ",\"y\":" << a.operationY;
+            out << ",\"coordinateSpace\":\"simulator\"";
             if (a.operationHold) out << ",\"hold\":true";
             out << '}';
         }
@@ -1016,6 +1053,7 @@ std::string combinedPagesJson(const std::vector<PageEntry>& p1, const std::vecto
             out << ",\"o\":{\"type\":\"" << b.operationPiece
                 << "\",\"rotation\":\"" << operationRotationName(b.operationRotation)
                 << "\",\"x\":" << b.operationX << ",\"y\":" << b.operationY;
+            out << ",\"coordinateSpace\":\"simulator\"";
             if (b.operationHold) out << ",\"hold\":true";
             out << '}';
         }
@@ -1048,25 +1086,28 @@ std::string boardMatrixJson(const std::string& board) {
 
 std::string replaySequence(const std::vector<PageEntry>& pages) {
     std::string sequence;
-    std::string previousQueue;
+    std::string previousVisibleQueue;
     for (const auto& page : pages) {
         if (page.next.empty()) continue;
+        const std::string active = page.activePiece;
+        const std::string visible = active.empty() ? page.next
+            : (page.next.rfind(active, 0) == 0 ? page.next.substr(active.size()) : page.next);
         if (sequence.empty()) {
-            sequence = page.next;
-            previousQueue = page.next;
+            sequence = active + visible;
+            previousVisibleQueue = visible;
             continue;
         }
         std::size_t overlap = 0;
-        const std::size_t maxOverlap = std::min(previousQueue.size(), page.next.size());
+        const std::size_t maxOverlap = std::min(previousVisibleQueue.size(), visible.size());
         for (std::size_t candidate = maxOverlap; candidate > 0; --candidate) {
-            if (previousQueue.compare(previousQueue.size() - candidate, candidate,
-                                      page.next, 0, candidate) == 0) {
+            if (previousVisibleQueue.compare(previousVisibleQueue.size() - candidate, candidate,
+                                             visible, 0, candidate) == 0) {
                 overlap = candidate;
                 break;
             }
         }
-        if (overlap < page.next.size()) sequence += page.next.substr(overlap);
-        previousQueue = page.next;
+        if (overlap < visible.size()) sequence += visible.substr(overlap);
+        previousVisibleQueue = visible;
     }
     return sequence;
 }
@@ -1077,14 +1118,24 @@ void writeOperationJson(std::ostringstream& out, const PageEntry& page) {
         << "\",\"rotation\":\"" << operationRotationName(page.operationRotation)
         << "\",\"x\":" << page.operationX
         << ",\"y\":" << page.operationY;
+    out << ",\"coordinateSpace\":\"simulator\"";
     if (page.operationHold) out << ",\"holdUsed\":true";
     out << '}';
 }
 
+std::string visibleNextForPage(const PageEntry& page) {
+    if (page.activePiece.empty()) return page.next;
+    return page.next.rfind(page.activePiece, 0) == 0
+        ? page.next.substr(page.activePiece.size())
+        : page.next;
+}
+
 void writeReplayPageJson(std::ostringstream& out, const PageEntry& page, bool includeOperation = true) {
+    const std::string visibleNext = visibleNextForPage(page);
     out << "{\"board\":" << boardMatrixJson(page.board)
+        << ",\"active\":\"" << jsonEscape(page.activePiece) << "\""
         << ",\"hold\":\"" << jsonEscape(page.hold)
-        << "\",\"next\":\"" << jsonEscape(page.next)
+        << "\",\"next\":\"" << jsonEscape(visibleNext)
         << "\",\"n\":\"" << jsonEscape(page.next) << "\"";
     if (includeOperation) writeOperationJson(out, page);
     out << '}';
@@ -1136,9 +1187,12 @@ std::string collectionSimulatorJson(const std::vector<PageEntry>& p1,
             const auto& a = p1[p1Index];
             const auto& b = p2[p2Index];
             json << "{\"p1\":";
-            writeReplayPageJson(json, a, a.time == time);
+            // A carried page is still the same simulator state. Its
+            // highlighted lock must survive a page update belonging only to
+            // the other player; otherwise 2P replay makes minos flicker.
+            writeReplayPageJson(json, a, true);
             json << ",\"p2\":";
-            writeReplayPageJson(json, b, b.time == time);
+            writeReplayPageJson(json, b, true);
             json << '}';
         }
     }
@@ -1184,12 +1238,14 @@ void writeGarbageJson(std::ostringstream& out, const GarbageRise& garbage) {
         << ",\"manual\":" << (garbage.manuallySpecified ? "true" : "false") << '}';
 }
 
-void writePlacementJson(std::ostringstream& out, const TimelineStep& step) {
+void writePlacementJson(std::ostringstream& out, const TimelineStep& step, bool holdUsed) {
     out << "{\"piece\":\"" << sanitizePiece(step.placedPiece)
         << "\",\"x\":" << step.placementX
         << ",\"y\":" << step.placementY
         << ",\"rotation\":" << step.placementRotation
-        << ",\"clearedLines\":" << step.clearedLines << '}';
+        << ",\"clearedLines\":" << step.clearedLines
+        << ",\"coordinateSpace\":\"simulator\""
+        << ",\"holdUsed\":" << (holdUsed ? "true" : "false") << '}';
 }
 
 void writeTimelineJson(std::ostringstream& out, const std::vector<TimelineStep>& timeline) {
@@ -1209,7 +1265,10 @@ void writeTimelineJson(std::ostringstream& out, const std::vector<TimelineStep>&
             << ",\"garbage\":";
         writeGarbageJson(out, step.garbage);
         out << ",\"placement\":";
-        writePlacementJson(out, step);
+        // The placement stored on this row is the lock of the previous
+        // timeline state.  Carry that state's HOLD flag with the placement so
+        // the standalone recovery JSON remains replayable too.
+        writePlacementJson(out, step, i > 0 && timeline[i - 1].holdUsed);
         out
             << ",\"score\":" << step.score
             << ",\"manual\":" << (step.manuallyFixed ? "true" : "false")

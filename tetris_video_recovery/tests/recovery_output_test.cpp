@@ -80,8 +80,9 @@ int wmain(int argc, wchar_t** argv) {
     activeT.hold = Cell::I;
     activeT.next = {Cell::S, Cell::Z, Cell::O, Cell::L, Cell::J};
     activeT.action = "place";
+    activeT.holdUsed = true;
 
-    TimelineStep placed = activeT;
+TimelineStep placed = activeT;
     placed.startSeconds = .6;
     placed.timeSeconds = .8;
     placed.piece = Cell::S;
@@ -97,10 +98,19 @@ int wmain(int argc, wchar_t** argv) {
     placed.clearedLines = moves.front().clearedLines;
     placed.manuallyFixed = true;
 
+    // The second player changes state while P1 is still on the same
+    // highlighted-placement page. The combined replay must carry P1's
+    // operation through that intermediate timestamp.
+    TimelineStep p2Change = initial;
+    p2Change.startSeconds = .4;
+    p2Change.timeSeconds = .5;
+    p2Change.piece = Cell::O;
+    p2Change.next = {Cell::I, Cell::J, Cell::L, Cell::S, Cell::Z};
+
     Settings settings;
     RecoveryOutput output;
     output.p1 = {initial, activeT, placed};
-    output.p2 = {initial};
+    output.p2 = {initial, p2Change};
     QueueRecognitionSample queueSample;
     queueSample.timeSeconds = .123;
     queueSample.active = Cell::T;
@@ -138,7 +148,8 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (!contains(output.jsonPath, "\"garbage\"") || !contains(output.jsonPath, "\"placement\"") ||
         !contains(output.jsonPath, "\"queueObservations\"") ||
-        !contains(output.jsonPath, "\"simulatorData\":{\"v\":3")) {
+        !contains(output.jsonPath, "\"simulatorData\":{\"v\":3") ||
+        !contains(output.jsonPath, "\"holdUsed\":true")) {
         std::cerr << "recovery JSON is missing structural labels\n";
         return 1;
     }
@@ -151,11 +162,26 @@ int wmain(int argc, wchar_t** argv) {
         ? std::string()
         : decodeBase64(output.p1Url.substr(marker + 1));
     if (marker == std::string::npos || simulatorJson.find("\"v\":3") == std::string::npos ||
-        simulatorJson.find("\"kind\":\"replay\"") == std::string::npos ||
-        simulatorJson.find("\"o\":{\"type\":\"T\"") == std::string::npos ||
-        simulatorJson.find("\"sequence\":\"TSZOLJ") == std::string::npos ||
+         simulatorJson.find("\"kind\":\"replay\"") == std::string::npos ||
+         simulatorJson.find("\"o\":{\"type\":\"T\"") == std::string::npos ||
+         simulatorJson.find("\"holdUsed\":true") == std::string::npos ||
+         simulatorJson.find("\"sequence\":\"TSZOLJ") == std::string::npos ||
         simulatorJson.find("\"n\":\"TSZOLJ\"") == std::string::npos) {
         std::cerr << "simulator queue does not start with the active mino\n";
+        return 1;
+    }
+    const auto combinedMarker = output.combinedUrl.find('#');
+    const std::string combinedJson = combinedMarker == std::string::npos
+        ? std::string()
+        : decodeBase64(output.combinedUrl.substr(combinedMarker + 1));
+    std::size_t coordinateMarkerCount = 0;
+    for (std::size_t offset = 0;
+         (offset = combinedJson.find("\"coordinateSpace\":\"simulator\"", offset)) != std::string::npos;
+         offset += 1) {
+        ++coordinateMarkerCount;
+    }
+    if (coordinateMarkerCount < 2) {
+        std::cerr << "2P carried placement was dropped at the other player's page update\n";
         return 1;
     }
 
@@ -285,12 +311,19 @@ int wmain(int argc, wchar_t** argv) {
         {0.09, Cell::O, opening3, true, false},
     };
     openingFixture.originalQueueObservationsP1 = openingFixture.queueObservationsP1;
-    if (!reanalyzeQueueObservations(reanalysisSettings, openingFixture, reanalysisError) ||
-        !std::any_of(openingFixture.rawP1.begin(), openingFixture.rawP1.end(),
-                     [](const TimelineStep& step) { return step.piece == Cell::Z; })) {
+    if (!reanalyzeQueueObservations(reanalysisSettings, openingFixture, reanalysisError)) {
+        std::cerr << "opening hold transition could not be reanalyzed: " << reanalysisError << '\n';
+        return 1;
+    }
+    const auto heldZ = std::find_if(openingFixture.rawP1.begin(), openingFixture.rawP1.end(),
+                                    [](const TimelineStep& step) { return step.piece == Cell::Z; });
+    if (heldZ == openingFixture.rawP1.end() || !heldZ->holdUsed || heldZ->hold != Cell::T) {
         std::cerr << "opening hold transition lost Z:";
         for (const auto& step : openingFixture.rawP1) {
-            std::cerr << ' ' << cellChar(step.piece) << '@' << step.timeSeconds;
+            std::cerr << ' ' << cellChar(step.piece) << '@' << step.timeSeconds
+                      << (step.holdUsed ? ":hold" : "")
+                      << ":stored=" << cellChar(step.hold)
+                      << ":action=" << step.action;
         }
         std::cerr << '\n';
         return 1;

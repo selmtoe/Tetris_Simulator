@@ -42,6 +42,9 @@ std::vector<OriginalShape> originalShapes(Cell piece) {
         return {originalShape({{1,-1},{-1,0},{0,0},{1,0}}), originalShape({{0,-1},{0,0},{0,1},{1,1}}),
                 originalShape({{-1,0},{0,0},{1,0},{-1,1}}), originalShape({{-1,-1},{0,-1},{0,0},{0,1}})};
     case Cell::O:
+        // Keep the source-compatible candidate cells. canonicalAnchor() below
+        // converts their anchor to the browser/simulator shape convention
+        // before the placement is exported.
         return {originalShape({{0,0},{1,0},{0,1},{1,1}})};
     case Cell::S:
         return {originalShape({{0,-1},{1,-1},{-1,0},{0,0}}), originalShape({{0,-1},{0,0},{1,0},{1,1}})};
@@ -53,6 +56,37 @@ std::vector<OriginalShape> originalShapes(Cell piece) {
     default:
         return {};
     }
+}
+
+bool sameCells(const std::array<std::array<int, 2>, 4>& left,
+               const std::array<std::array<int, 2>, 4>& right) {
+    auto sorted = [](auto cells) {
+        std::sort(cells.begin(), cells.end());
+        return cells;
+    };
+    return sorted(left) == sorted(right);
+}
+
+std::optional<std::array<int, 2>> canonicalAnchor(
+    Cell piece, int rotation, const std::array<std::array<int, 2>, 4>& cells) {
+    // originalLegalMoves intentionally retains the old browser's candidate
+    // set, but its x/y values are exported to the current simulator/editor.
+    // Find the anchor in the shared simulator shape that describes the exact
+    // same four board cells. This matters for I (anchor differs by rotation)
+    // and keeps the conversion correct if a legacy shape table drifts again.
+    const TetrisEngine::Shape canonical = TetrisEngine::shape(piece, rotation);
+    for (const auto& target : cells) {
+        for (const auto& shapeCell : canonical.cells) {
+            const int x = target[0] - shapeCell[0];
+            const int y = target[1] - shapeCell[1];
+            std::array<std::array<int, 2>, 4> translated{};
+            for (std::size_t i = 0; i < canonical.cells.size(); ++i) {
+                translated[i] = {x + canonical.cells[i][0], y + canonical.cells[i][1]};
+            }
+            if (sameCells(translated, cells)) return std::array<int, 2>{x, y};
+        }
+    }
+    return std::nullopt;
 }
 
 BoardShift sourceBoardShift(const Board& previous, const Board& observed, double threshold) {
@@ -378,6 +412,11 @@ std::vector<CandidateMove> TetrisEngine::originalLegalMoves(const Board& board, 
                     ++move.cellCount;
                 }
 
+                if (const auto anchor = canonicalAnchor(piece, rotation, move.cells)) {
+                    move.x = (*anchor)[0];
+                    move.y = (*anchor)[1];
+                }
+
                 int write = BoardHeight - 1;
                 for (int row = BoardHeight - 1; row >= 0; --row) {
                     bool full = true;
@@ -513,13 +552,16 @@ std::vector<CorrectionCandidate> TetrisEngine::correctionCandidates(const std::v
     const TimelineStep& currentRaw = raw[index];
     const BoardShift shift = sourceBoardShift(solved[index - 1].board, currentRaw.observed, settings.shiftThreshold);
     GarbageRise rise = automaticGarbageRise(currentRaw.observed, shift);
-    Board base = sourceShiftedBoard(solved[index - 1].board, currentRaw.observed, shift.lines);
+    // Incoming garbage is applied after the preceding active piece locks.
+    // Generate the lock from the pre-rise board so its exported coordinates
+    // remain in the frame where the player actually placed the piece.
+    Board base = solved[index - 1].board;
     if (overrideGarbage.has_value()) {
         rise = *overrideGarbage;
         rise.lines = std::clamp(rise.lines, 0, BoardHeight);
         rise.manuallySpecified = true;
         if (rise.holeMasks.size() > static_cast<std::size_t>(rise.lines)) rise.holeMasks.resize(rise.lines);
-        base = boardWithManualGarbage(solved[index - 1].board, rise);
+        base = solved[index - 1].board;
     }
 
     // A step represents the state after placing the preceding active mino.
@@ -538,8 +580,10 @@ std::vector<CorrectionCandidate> TetrisEngine::correctionCandidates(const std::v
     if (!isPiece(piece)) return candidates;
 
     for (CandidateMove move : originalLegalMoves(base, piece)) {
-        const double score = sourceScore(move.board, currentRaw.observed, settings.weights);
-        candidates.push_back({std::move(move), rise, score});
+        CandidateMove result = move;
+        result.board = boardWithManualGarbage(move.board, rise);
+        const double score = sourceScore(result.board, currentRaw.observed, settings.weights);
+        candidates.push_back({std::move(result), rise, score});
     }
     std::stable_sort(candidates.begin(), candidates.end(), [](const CorrectionCandidate& left, const CorrectionCandidate& right) {
         return left.observationScore > right.observationScore;
@@ -616,11 +660,17 @@ std::vector<TimelineStep> runSourceBeam(const std::vector<TimelineStep>& raw,
         } else {
             for (int parentIndex : beam) {
                 const SourceBeamNode& parent = nodes[parentIndex];
-                const Board base = sourceShiftedBoard(parent.board, item.observed, shift.lines);
+                const GarbageRise rise = automaticGarbageRise(item.observed, shift);
+                // A rise belongs to the state after this transition.  Keep
+                // legal-move generation on the pre-rise parent board, then
+                // shift only the locked/cleared board.  Otherwise every
+                // exported placement coordinate is spuriously lifted.
+                const Board base = parent.board;
 
                 if (skipPlacement) {
-                    candidates.push_back({base, base, parent.score + sourceScore(base, item.observed, settings.weights),
-                                          parentIndex, step, automaticGarbageRise(item.observed, shift), noPlacement(base)});
+                    const Board shifted = boardWithManualGarbage(base, rise);
+                    candidates.push_back({shifted, shifted, parent.score + sourceScore(shifted, item.observed, settings.weights),
+                                          parentIndex, step, rise, noPlacement(shifted)});
                     continue;
                 }
 
@@ -628,9 +678,12 @@ std::vector<TimelineStep> runSourceBeam(const std::vector<TimelineStep>& raw,
                     // This is deliberately the same candidate universe as
                     // 動画解析.html, not a looser image-only correction.
                     for (const CandidateMove& move : TetrisEngine::originalLegalMoves(base, piece)) {
-                        candidates.push_back({move.board, move.fullBoard,
-                                              parent.score + sourceScore(move.board, item.observed, settings.weights),
-                                              parentIndex, step, automaticGarbageRise(item.observed, shift), move});
+                        const Board shifted = boardWithManualGarbage(move.board, rise);
+                        CandidateMove placement = move;
+                        placement.board = shifted;
+                        candidates.push_back({shifted, move.fullBoard,
+                                              parent.score + sourceScore(shifted, item.observed, settings.weights),
+                                              parentIndex, step, rise, placement});
                     }
                 }
             }

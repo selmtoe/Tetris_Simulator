@@ -38,7 +38,8 @@ function normalizeOperation(value) {
         y: Math.round(y),
         lock: value.lock !== false,
         holdUsed: Boolean(value.holdUsed || value.hold || value.source === 'hold'),
-        source: value.source === 'hold' ? 'hold' : 'next'
+        source: value.source === 'hold' ? 'hold' : 'next',
+        coordinateSpace: String(value.coordinateSpace || '')
     };
 }
 
@@ -46,6 +47,51 @@ function operationForPage(playerData) {
     // `operation` is the editor's in-memory name; `o` is the compact key
     // used by native video exports and the fumen-compatible payload.
     return normalizeOperation(playerData?.operation || playerData?.o || playerData?.placement);
+}
+
+// Older native recovery exports used the candidate generator's anchor for I
+// and O. The browser/editor uses the simulator shape table instead. The four
+// occupied cells are identical; only the stored anchor differs. New native
+// exports carry coordinateSpace=simulator, while an unmarked replay
+// operation is treated as the legacy native form during import.
+const LEGACY_NATIVE_OPERATION_SHAPES = {
+    I: {
+        spawn: [[-1, 0], [0, 0], [1, 0], [2, 0]],
+        right: [[0, -1], [0, 0], [0, 1], [0, 2]]
+    },
+    O: { spawn: [[0, 0], [1, 0], [0, 1], [1, 1]] }
+};
+
+function canonicalizeLegacyNativeOperation(operation) {
+    const normalized = normalizeOperation(operation);
+    if (!normalized || normalized.coordinateSpace || typeof getShape !== 'function') return normalized;
+    const legacyShape = LEGACY_NATIVE_OPERATION_SHAPES[normalized.type]?.[normalized.rotation];
+    if (!legacyShape) return { ...normalized, coordinateSpace: 'simulator' };
+    const target = legacyShape.map(([x, y]) => [normalized.x + x, normalized.y + y]);
+    const shape = getShape(normalized.type, rotationIndex(normalized.rotation))
+        .map(([x, y]) => [Math.round(x), Math.round(y)]);
+    for (const [targetX, targetY] of target) {
+        for (const [shapeX, shapeY] of shape) {
+            const x = targetX - shapeX;
+            const y = targetY - shapeY;
+            const translated = shape.map(([dx, dy]) => [x + dx, y + dy]);
+            if (cellSet(translated) === cellSet(target)) {
+                return { ...normalized, x, y, coordinateSpace: 'simulator' };
+            }
+        }
+    }
+    return { ...normalized, coordinateSpace: 'simulator' };
+}
+
+function normalizeReplayOperationCoordinates(caseData) {
+    if (!caseData || caseData.kind !== 'replay') return;
+    caseData.pages.forEach(page => {
+        ['p1', 'p2'].forEach(playerId => {
+            const player = page[playerId];
+            if (!player?.operation || player.operation.coordinateSpace) return;
+            player.operation = canonicalizeLegacyNativeOperation(player.operation);
+        });
+    });
 }
 
 function cloneBoard(board) {
@@ -94,6 +140,13 @@ function normalizeCase(caseData) {
                 normalizedPage[playerId].hold = normalizePieceType(normalizedPage[playerId].hold);
                 normalizedPage[playerId].next = String(normalizedPage[playerId].next || '')
                     .toUpperCase().split('').filter(piece => PIECE_TYPES.includes(piece)).join('');
+                // Native video replay pages carry the active piece separately
+                // (their compact active+queue form is retained in `n`). Keep
+                // the property absent for old hand-authored replay cases,
+                // which use `next` as visible queue only.
+                if (Object.prototype.hasOwnProperty.call(normalizedPage[playerId], 'active')) {
+                    normalizedPage[playerId].active = normalizePieceType(normalizedPage[playerId].active);
+                }
                 normalizedPage[playerId].operation = operationForPage(normalizedPage[playerId]);
                 normalizedPage[playerId].placementDraft = Array.isArray(normalizedPage[playerId].placementDraft)
                     ? normalizedPage[playerId].placementDraft.map(cell => [Number(cell[0]), Number(cell[1])])
@@ -104,7 +157,10 @@ function normalizeCase(caseData) {
             return normalizedPage;
         })
         : [createBlankPage()];
-    if (normalized.kind === 'replay') normalizeReplayCase(normalized);
+    if (normalized.kind === 'replay') {
+        normalizeReplayOperationCoordinates(normalized);
+        normalizeReplayCase(normalized);
+    }
     return normalized;
 }
 
@@ -243,6 +299,7 @@ function fumenOperationToEditor(operation) {
         ...operation,
         type,
         rotation,
+        coordinateSpace: 'simulator',
         x: anchor?.x ?? Number(operation.x),
         y: anchor?.y ?? (39 - Number(operation.y))
     });
@@ -282,7 +339,13 @@ function detectOperationFromDraft(board, draft) {
             const shape = getShape(type, rotation).map(([x, y]) => [Math.round(x), Math.round(y)]);
             for (const [anchorX, anchorY] of draft) {
                 const [shapeX, shapeY] = shape[0];
-                const operation = { type, rotation, x: Math.round(anchorX) - shapeX, y: Math.round(anchorY) - shapeY };
+                const operation = {
+                    type,
+                    rotation,
+                    x: Math.round(anchorX) - shapeX,
+                    y: Math.round(anchorY) - shapeY,
+                    coordinateSpace: 'simulator'
+                };
                 const actual = operationCells(operation).map(([x, y]) => `${x},${y}`).sort().join('|');
                 if (actual !== target || !canLockOperation(board, operation)) continue;
                 candidates.push({ ...operation, rotation: OPERATION_ROTATIONS[rotation] });
@@ -303,7 +366,17 @@ function replayStateAtPage(caseData, playerId, pageIndex) {
     const state = { current: sequence.shift() || '', queue: sequence, hold: normalizePieceType(initial.hold) };
     const pages = caseData.pages || [];
     for (let index = 0; index <= pageIndex; index++) {
-        const operation = operationForPage(pages[index]?.[playerId]);
+        const player = pages[index]?.[playerId] || {};
+        const operation = operationForPage(player);
+        if (Object.prototype.hasOwnProperty.call(player, 'active')) {
+            state.current = normalizePieceType(player.active);
+            state.queue = String(player.next || '').toUpperCase().split('')
+                .filter(piece => PIECE_TYPES.includes(piece));
+            state.hold = normalizePieceType(player.hold);
+            if (index === pageIndex) return state;
+            if (operation) state.current = state.queue.shift() || '';
+            continue;
+        }
         if (operation?.holdUsed) {
             if (state.hold) {
                 const previousCurrent = state.current;
@@ -330,6 +403,20 @@ function normalizeReplayCase(caseData) {
         caseData.pages.forEach(page => {
             const player = page[playerId];
             const operation = operationForPage(player);
+            if (Object.prototype.hasOwnProperty.call(player, 'active')) {
+                // Native video exports provide the already-resolved state for
+                // every page.  Use it as the authority: reconstructing HOLD
+                // from the global sequence loses a swapped-in HOLD piece and
+                // causes the two players' merged timelines to drift.
+                state.current = normalizePieceType(player.active);
+                state.queue = String(player.next || '').toUpperCase().split('')
+                    .filter(piece => PIECE_TYPES.includes(piece));
+                state.hold = normalizePieceType(player.hold);
+                player.hold = state.hold;
+                player.next = state.queue.join('');
+                if (operation) state.current = state.queue.shift() || '';
+                return;
+            }
             if (operation?.holdUsed) {
                 if (state.hold) {
                     const previousCurrent = state.current;
@@ -453,25 +540,27 @@ function recoveryOperationForEntry(entry) {
 
 function recoverySequence(entries) {
     let sequence = '';
-    let previousQueue = '';
+    let previousVisibleQueue = '';
     entries.forEach(entry => {
         const queue = recoveryQueueForEntry(entry);
         if (!queue) return;
+        const active = normalizePieceType(entry?.active);
+        const visible = active && queue.startsWith(active) ? queue.slice(1) : queue;
         if (!sequence) {
-            sequence = queue;
-            previousQueue = queue;
+            sequence = active + visible;
+            previousVisibleQueue = visible;
             return;
         }
         let overlap = 0;
-        const maxOverlap = Math.min(previousQueue.length, queue.length);
+        const maxOverlap = Math.min(previousVisibleQueue.length, visible.length);
         for (let length = maxOverlap; length > 0; length--) {
-            if (previousQueue.slice(-length) === queue.slice(0, length)) {
+            if (previousVisibleQueue.slice(-length) === visible.slice(0, length)) {
                 overlap = length;
                 break;
             }
         }
-        sequence += queue.slice(overlap);
-        previousQueue = queue;
+        sequence += visible.slice(overlap);
+        previousVisibleQueue = visible;
     });
     return sequence;
 }
@@ -489,8 +578,12 @@ function recoveryPlayerCaseData(entries) {
         const page = createBlankPage();
         const player = page.p1;
         player.board = recoveryBoardToEditorBoard(entry.board || entry.fullBoard);
+        player.active = normalizePieceType(entry.active);
         player.hold = normalizePieceType(entry.hold);
-        player.next = recoveryQueueForEntry(entry);
+        const recoveryQueue = recoveryQueueForEntry(entry);
+        player.next = player.active && recoveryQueue.startsWith(player.active)
+            ? recoveryQueue.slice(1)
+            : recoveryQueue;
         // In the native timeline, placement[i] is the lock that produces
         // board[i]. The page exported by the simulator therefore shows the
         // placement stored on the next timeline state.
