@@ -34,7 +34,7 @@
 
     const frame = document.createElement('iframe');
     frame.hidden = true;
-    frame.src = '../F/index.html?transfer-smoke=1';
+    frame.src = `../F/index.html?transfer-smoke=1&build=${Date.now()}`;
     document.body.appendChild(frame);
     let simulatorFrame = null;
 
