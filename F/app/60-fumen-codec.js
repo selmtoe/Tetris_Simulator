@@ -676,11 +676,6 @@ async function generateAndDisplayLink() {
     const url = new URL(window.location);
     url.hash = base64Data;
     document.getElementById('share-link-input').value = url.href;
-    const openLink = document.getElementById('share-link-open');
-    if (openLink) {
-        openLink.href = url.href;
-        openLink.hidden = false;
-    }
 }
 
 async function openShareModal() {
