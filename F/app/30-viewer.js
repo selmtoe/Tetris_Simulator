@@ -214,8 +214,20 @@ function sendToSimulator() {
     }
 
     const jsonString = JSON.stringify(stateData);
-    const uint8Array = new TextEncoder().encode(jsonString);
-    const base64Data = btoa(String.fromCharCode.apply(null, uint8Array));
+    // Do not pass a full replay-sized Uint8Array to Function#apply.  A
+    // 2P/replay collection is large enough to overflow the JavaScript call
+    // stack; the shared codec already has a chunked UTF-8 Base64 encoder.
+    const base64Data = typeof encodeBase64Utf8 === 'function'
+        ? encodeBase64Utf8(jsonString)
+        : (() => {
+            const bytes = new TextEncoder().encode(jsonString);
+            let binary = '';
+            const chunkSize = 0x8000;
+            for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+                binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+            }
+            return btoa(binary);
+        })();
     
     let simulatorURL = '../index.html';
     try {
