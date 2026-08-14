@@ -256,6 +256,27 @@ fn rotation_number(rotation: RotationState) -> u8 {
     }
 }
 
+/// Convert a libtetris FallingPiece anchor to the simulator's Player anchor.
+///
+/// Both engines describe the same SRS rotation point, but their I-piece
+/// anchors are not the same: libtetris places the north I cells at x-1..x+2,
+/// while Player.getShape() places them at x..x+3.  The south I orientation
+/// also has a one-row difference because Player's rotated shape is expressed
+/// in top-down coordinates.  A single `x - 1, 39 - y` conversion therefore
+/// only works for some orientations.
+fn simulator_anchor(piece: Piece, rotation: RotationState, x: i32, y: i32) -> (i32, i32) {
+    let x_offset = match (piece, rotation) {
+        (Piece::I, RotationState::North) | (Piece::I, RotationState::West) => -1,
+        (Piece::I, RotationState::East) | (Piece::I, RotationState::South) => -2,
+        _ => 0,
+    };
+    let y_offset = match (piece, rotation) {
+        (Piece::I, RotationState::South) | (Piece::I, RotationState::West) => -1,
+        _ => 0,
+    };
+    (x + x_offset, 39 - y + y_offset)
+}
+
 fn movement_byte(movement: PieceMovement) -> u8 {
     match movement {
         PieceMovement::Left => b'L',
@@ -276,9 +297,14 @@ fn output_move(result: &mut CcMove, mv: &Move, info: &Info) {
         TspinStatus::Mini => 1,
         TspinStatus::Full => 2,
     };
-    // Source coordinates are bottom-up. The simulator uses top-down rows.
-    result.x = mv.expected_location.x - (mv.expected_location.kind.0 == Piece::I) as i32;
-    result.y = 39 - mv.expected_location.y;
+    // Source coordinates are bottom-up and use libtetris' rotation-point
+    // anchor. The simulator uses top-down rows and a different I anchor.
+    (result.x, result.y) = simulator_anchor(
+        mv.expected_location.kind.0,
+        mv.expected_location.kind.1,
+        mv.expected_location.x,
+        mv.expected_location.y,
+    );
     result.movement_count = mv.inputs.len().min(32) as u8;
     for (i, &movement) in mv.inputs.iter().take(32).enumerate() {
         result.movements[i] = movement_byte(movement);
@@ -511,4 +537,73 @@ pub unsafe extern "C" fn cc_dealloc(ptr: *mut u8, size: usize) {
 #[no_mangle]
 pub extern "C" fn cc_move_size() -> usize {
     std::mem::size_of::<CcMove>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn simulator_shape(piece: Piece, rotation: RotationState) -> [(i32, i32); 4] {
+        use Piece::*;
+        use RotationState::*;
+        if piece == I {
+            return match rotation {
+                North => [(0, 0), (1, 0), (2, 0), (3, 0)],
+                East => [(2, -1), (2, 0), (2, 1), (2, 2)],
+                South => [(0, 1), (1, 1), (2, 1), (3, 1)],
+                West => [(1, -1), (1, 0), (1, 1), (1, 2)],
+            };
+        }
+        let mut shape = match piece {
+            O => [(0, 0), (1, 0), (0, -1), (1, -1)],
+            T => [(0, 0), (-1, 0), (0, -1), (1, 0)],
+            L => [(-1, 0), (0, 0), (1, 0), (1, -1)],
+            J => [(0, 0), (-1, 0), (1, 0), (-1, -1)],
+            S => [(1, -1), (-1, 0), (0, 0), (0, -1)],
+            Z => [(0, 0), (1, 0), (0, -1), (-1, -1)],
+            I => unreachable!(),
+        };
+        for _ in 0..rotation_number(rotation) {
+            for (x, y) in &mut shape {
+                (*x, *y) = (-*y, *x);
+            }
+        }
+        shape
+    }
+
+    #[test]
+    fn simulator_anchor_preserves_reference_cells() {
+        use Piece::*;
+        use RotationState::*;
+
+        let mut cases = Vec::new();
+        for piece in [I, T, L, J, S, Z] {
+            for rotation in [North, East, South, West] {
+                cases.push((piece, rotation));
+            }
+        }
+        cases.push((O, North));
+
+        for (piece, rotation) in cases {
+            let reference = FallingPiece {
+                kind: PieceState(piece, rotation),
+                x: 4,
+                y: 19,
+                tspin: TspinStatus::None,
+            };
+            let (sim_x, sim_y) = simulator_anchor(piece, rotation, reference.x, reference.y);
+            let mut reference_cells = reference
+                .cells()
+                .iter()
+                .map(|&(x, y)| (x, 39 - y))
+                .collect::<Vec<_>>();
+            let mut simulator_cells = simulator_shape(piece, rotation)
+                .iter()
+                .map(|&(x, y)| (sim_x + x, sim_y + y))
+                .collect::<Vec<_>>();
+            reference_cells.sort_unstable();
+            simulator_cells.sort_unstable();
+            assert_eq!(simulator_cells, reference_cells, "{piece:?} {rotation:?}");
+        }
+    }
 }
