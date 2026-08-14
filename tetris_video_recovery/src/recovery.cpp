@@ -135,6 +135,7 @@ struct QueuePhase {
 };
 
 constexpr std::size_t QueueWindowSize = 5;
+constexpr double SpeculativeSeedPenalty = 25.0;
 
 bool hasFullQueue(const QueueObservation& queue) {
     return queue.next.size() >= QueueWindowSize &&
@@ -177,6 +178,10 @@ struct QueueSequenceNode {
     int event = -1;
     int advance = 0;
     int totalAdvance = 0;
+    // A seed that differs from the first visible queue is only a hypothesis.
+    // It becomes trustworthy after a later scan shows the whole hypothesis
+    // exactly; otherwise a redraw glitch must not reinforce it.
+    bool speculativeSeed = false;
 };
 
 double queueEmissionScore(const std::array<Cell, QueueWindowSize>& candidate,
@@ -198,6 +203,16 @@ double queueEmissionScore(const std::array<Cell, QueueWindowSize>& candidate,
         }
     }
     return score;
+}
+
+int queueMismatchCount(const std::array<Cell, QueueWindowSize>& candidate,
+                       const QueueRun& run) {
+    const std::size_t observed = std::min<std::size_t>(QueueWindowSize, run.observation.next.size());
+    int mismatches = 0;
+    for (std::size_t i = 0; i < observed; ++i) {
+        if (isPiece(run.observation.next[i]) && candidate[i] != run.observation.next[i]) ++mismatches;
+    }
+    return mismatches;
 }
 
 bool initializeSevenBag(const std::array<Cell, QueueWindowSize>& window, int phase,
@@ -234,7 +249,7 @@ bool appendQueuePiece(QueueSequenceNode& node, Cell piece, bool useSevenBag) {
 
 bool sameQueueNodeState(const QueueSequenceNode& a, const QueueSequenceNode& b) {
     return a.window == b.window && a.nextBagOffset == b.nextBagOffset &&
-           a.currentBagMask == b.currentBagMask;
+           a.currentBagMask == b.currentBagMask && a.speculativeSeed == b.speculativeSeed;
 }
 
 bool betterQueueNode(const QueueSequenceNode& a, const QueueSequenceNode& b) {
@@ -299,8 +314,14 @@ void decodeQueueSequence(std::vector<QueueRecognitionSample>& samples, const Set
                 node.window = candidate;
                 if (!initializeSevenBag(node.window, phase, settings.queueUseSevenBag,
                                         node.nextBagOffset, node.currentBagMask)) continue;
-                node.score = queueEmissionScore(node.window, runs.front());
+                // Do not let a one-slot correction of the first trusted
+                // window become a second, self-reinforcing history.  Without
+                // this cost, a later redraw glitch can make that speculative
+                // seed outscore the exact first observation and permanently
+                // move the whole beam onto a different queue.
+                node.score = queueEmissionScore(node.window, runs.front()) - edits * SpeculativeSeedPenalty;
                 node.event = 0;
+                node.speculativeSeed = edits > 0;
                 seedCandidates.push_back(node);
             }
             return;
@@ -349,6 +370,15 @@ void decodeQueueSequence(std::vector<QueueRecognitionSample>& samples, const Set
                     if (frontier.empty()) break;
                 }
                 for (auto& state : frontier) {
+                    // A bag correction may repair a single bad colour class,
+                    // but it must not replace most of a visible queue with a
+                    // hypothetical 7-bag continuation.  That is how a short
+                    // visual effect such as SIIIO used to turn the stable
+                    // SJTZL queue into an unrelated TZLIO path.
+                    const int mismatchLimit = runs[event].manual ? 0 : 1;
+                    if (state.speculativeSeed &&
+                        !samePieces(queuePieces(state.window), runs[event].observation.next)) continue;
+                    if (queueMismatchCount(state.window, runs[event]) > mismatchLimit) continue;
                     state.parent = parentIndex;
                     state.event = static_cast<int>(event);
                     state.advance = advance;
@@ -358,8 +388,25 @@ void decodeQueueSequence(std::vector<QueueRecognitionSample>& samples, const Set
                     // four/five overlapping slots support a slide.
                     state.score = parent.score + queueEmissionScore(state.window, runs[event])
                                   - (advance == 1 ? .75 : advance == 2 ? 2.25 : 0.0);
+                    if (state.speculativeSeed &&
+                        samePieces(queuePieces(state.window), runs[event].observation.next)) {
+                        state.speculativeSeed = false;
+                    }
                     candidates.push_back(std::move(state));
                 }
+            }
+            if (!runs[event].manual) {
+                // Keep the last trusted queue when this scan cannot be
+                // explained by a legal 0/1/2-slide transition with at most
+                // one visual correction. A later clean scan can still resume
+                // the normal transition path.
+                QueueSequenceNode fallback = parent;
+                fallback.parent = parentIndex;
+                fallback.event = static_cast<int>(event);
+                fallback.advance = 0;
+                fallback.totalAdvance = parent.totalAdvance;
+                fallback.score = parent.score + queueEmissionScore(parent.window, runs[event]) - 20.0;
+                candidates.push_back(std::move(fallback));
             }
         }
         pruneQueueBeam(candidates, settings.queueBeamWidth);
@@ -387,7 +434,9 @@ void decodeQueueSequence(std::vector<QueueRecognitionSample>& samples, const Set
             sample.decoded = sample.observation;
             sample.decoded.next = correctedNext;
             sample.sequenceCorrected = !samePieces(sample.observation.next, correctedNext);
-            sample.rejected = !validQueue(sample.observation);
+            const int mismatchLimit = runs[event].manual ? 0 : 1;
+            sample.rejected = !validQueue(sample.observation) ||
+                              queueMismatchCount(decoded[event], runs[event]) > mismatchLimit;
         }
     }
 }

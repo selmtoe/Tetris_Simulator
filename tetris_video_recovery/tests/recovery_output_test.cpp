@@ -279,6 +279,110 @@ TimelineStep placed = activeT;
         return 1;
     }
 
+    // A real capture briefly changes several NEXT colours while the queue is
+    // being redrawn.  The old global 7-bag beam treated those frames as a
+    // genuine queue transition and drifted from the stable SJTZL window to
+    // TZLIO/LIOIJ/OIJTZ.  A short visual glitch may correct one slot, but it
+    // must not replace most of an otherwise continuously visible queue.
+    const auto queueFromText = [](const std::string& text, Cell hold) {
+        QueueObservation result;
+        result.hold = hold;
+        for (const char value : text) {
+            switch (value) {
+            case 'I': result.next.push_back(Cell::I); break;
+            case 'L': result.next.push_back(Cell::L); break;
+            case 'O': result.next.push_back(Cell::O); break;
+            case 'Z': result.next.push_back(Cell::Z); break;
+            case 'T': result.next.push_back(Cell::T); break;
+            case 'J': result.next.push_back(Cell::J); break;
+            case 'S': result.next.push_back(Cell::S); break;
+            default: break;
+            }
+        }
+        return result;
+    };
+    RecoveryOutput noisyQueueFixture;
+    noisyQueueFixture.videoDurationSeconds = .60;
+    const auto addNoisyQueueSample = [&](double time, Cell active, Cell hold, const std::string& next) {
+        QueueRecognitionSample sample;
+        sample.timeSeconds = time;
+        sample.active = active;
+        sample.observation = queueFromText(next, hold);
+        sample.stable = true;
+        noisyQueueFixture.queueObservationsP1.push_back(sample);
+        BoardObservation board;
+        board.timeSeconds = time;
+        noisyQueueFixture.boardObservationsP1.push_back(board);
+    };
+    addNoisyQueueSample(.00, Cell::I, Cell::L, "SJTZL");
+    addNoisyQueueSample(.01, Cell::I, Cell::L, "SJTZL");
+    addNoisyQueueSample(.18, Cell::I, Cell::L, "SJOZL");
+    addNoisyQueueSample(.19, Cell::I, Cell::L, "SJOZL");
+    addNoisyQueueSample(.22, Cell::I, Cell::L, "SJIZO");
+    addNoisyQueueSample(.23, Cell::I, Cell::L, "SJIZO");
+    addNoisyQueueSample(.26, Cell::I, Cell::L, "SIIIO");
+    addNoisyQueueSample(.27, Cell::I, Cell::L, "SIIIO");
+    addNoisyQueueSample(.30, Cell::I, Cell::L, "SIIIO");
+    addNoisyQueueSample(.38, Cell::J, Cell::O, "SIIII");
+    addNoisyQueueSample(.39, Cell::J, Cell::O, "SIIII");
+    addNoisyQueueSample(.42, Cell::J, Cell::O, "SIITO");
+    addNoisyQueueSample(.43, Cell::J, Cell::O, "SIITO");
+    addNoisyQueueSample(.46, Cell::J, Cell::L, "SJTZL");
+    addNoisyQueueSample(.47, Cell::J, Cell::L, "SJTZL");
+    noisyQueueFixture.originalQueueObservationsP1 = noisyQueueFixture.queueObservationsP1;
+    if (!reanalyzeQueueObservations(reanalysisSettings, noisyQueueFixture, reanalysisError)) {
+        std::cerr << "noisy queue could not be reanalyzed: " << reanalysisError << '\n';
+        return 1;
+    }
+    const std::vector<Cell> trustedQueue = queueFromText("SJTZL", Cell::L).next;
+    const std::vector<std::string> driftingQueues{"TZLIO", "LIOIJ", "OIJTZ", "JTZLS", "ZLSOL"};
+    for (const auto& sample : noisyQueueFixture.queueObservationsP1) {
+        if (sample.observation.next == queueFromText("SJOZL", Cell::L).next ||
+            sample.observation.next == queueFromText("SJIZO", Cell::L).next ||
+            sample.observation.next == queueFromText("SIIIO", Cell::L).next ||
+            sample.observation.next == queueFromText("SIIII", Cell::O).next ||
+            sample.observation.next == queueFromText("SIITO", Cell::O).next) {
+            if (sample.decoded.next != trustedQueue) {
+                std::cerr << "noisy queue drifted from the last trusted window to "
+                          << pieceString(sample.decoded.next) << '\n';
+                return 1;
+            }
+            const bool isSingleSlotCorrection = sample.observation.next == queueFromText("SJOZL", Cell::L).next;
+            if (sample.rejected == isSingleSlotCorrection) {
+                std::cerr << "noisy queue rejection flag is wrong for "
+                          << pieceString(sample.observation.next) << '\n';
+                return 1;
+            }
+        }
+        if (sample.observation.next == trustedQueue &&
+            (sample.decoded.next != trustedQueue || sample.rejected)) {
+            std::cerr << "a later clean queue did not restore the trusted window\n";
+            return 1;
+        }
+        if (sample.observation.next == queueFromText("SJOZL", Cell::L).next &&
+            !sample.sequenceCorrected) {
+            std::cerr << "the one-slot redraw correction was not recorded\n";
+            return 1;
+        }
+        if (sample.observation.next == queueFromText("SJIZO", Cell::L).next && !sample.rejected) {
+            // This is a two-slot visual corruption, unlike SJOZL, and must
+            // remain visible to the reviewer instead of being promoted.
+            std::cerr << "the multi-slot redraw corruption was not rejected\n";
+            return 1;
+        }
+        if (sample.observation.next == queueFromText("SJIZO", Cell::L).next &&
+            sample.decoded.next != trustedQueue) {
+            std::cerr << "the multi-slot redraw corruption changed the trusted queue\n";
+            return 1;
+        }
+        if (std::find(driftingQueues.begin(), driftingQueues.end(), pieceString(sample.decoded.next)) !=
+            driftingQueues.end()) {
+            std::cerr << "noisy queue produced a speculative 7-bag path: "
+                      << pieceString(sample.decoded.next) << '\n';
+            return 1;
+        }
+    }
+
     // Match opening behaviour in VID_20260812_221204: the queue first
     // advances, then the first active T is put into an empty hold slot, and
     // the delayed visual queue slide exposes Z.  Z must survive as the
