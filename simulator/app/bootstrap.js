@@ -98,6 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     rotation: operation.rotation,
                     x: operation.x,
                     y: operation.y,
+                    coordinateSpace: 'simulator',
                     lock: true,
                     ...(operation.holdUsed ? { holdUsed: true } : {})
                 } : null

@@ -1,0 +1,91 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fumen simulator transfer smoke test</title>
+<pre id="output">running...</pre>
+<script>
+(() => {
+    const output = document.getElementById('output');
+    const emptyBoard = () => Array.from({ length: 40 }, () => Array(10).fill(null));
+    const page0Board = emptyBoard();
+    const page1Board = emptyBoard();
+    page1Board[39][0] = 'T';
+    const collection = {
+        v: 3,
+        m: '1P',
+        currentCase: 0,
+        cases: [{
+            id: 'transfer-smoke',
+            name: 'Transfer smoke',
+            kind: 'replay',
+            gameMode: '1P',
+            initial: { p1: { board: emptyBoard(), hold: '', sequence: 'IOLJSZ' } },
+            pages: [
+                { p1: { board: page0Board, hold: '', next: '', operation: {
+                    type: 'I', rotation: 'spawn', x: 3, y: 39,
+                    coordinateSpace: 'simulator', lock: true
+                } } },
+                { p1: { board: page1Board, hold: '', next: '', operation: {
+                    type: 'O', rotation: 'spawn', x: 4, y: 38,
+                    coordinateSpace: 'simulator', lock: true
+                } } }
+            ]
+        }]
+    };
+
+    const frame = document.createElement('iframe');
+    frame.hidden = true;
+    frame.src = '../F/index.html?transfer-smoke=1';
+    document.body.appendChild(frame);
+    let simulatorFrame = null;
+
+    const result = { passed: false };
+    const finish = value => { result.passed = Boolean(value); output.textContent = JSON.stringify(result, null, 2); };
+    window.addEventListener('message', event => {
+        if (event.data?.target !== 'sim' || event.data?.type !== 'loadState') return;
+        const state = event.data.data || {};
+        const board = state.p1?.b || '';
+        result.sentVersion = state.v;
+        result.currentBoardPreserved = board.length === 400 && board[390] === 'T';
+        result.currentNextPreserved = state.p1?.n === 'OLJSZ';
+        if (!(result.sentVersion === 2 && result.currentBoardPreserved && result.currentNextPreserved && result.iCellsCorrect)) {
+            finish(false);
+            return;
+        }
+        const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(state))));
+        simulatorFrame = document.createElement('iframe');
+        simulatorFrame.hidden = true;
+        simulatorFrame.src = `../index.html#${encoded}`;
+        simulatorFrame.addEventListener('load', () => {
+            setTimeout(() => {
+                try {
+                    const applied = simulatorFrame.contentWindow.getGameStateForExport();
+                    result.simulatorBoardPreserved = applied?.p1?.b === state.p1.b;
+                    result.simulatorNextPreserved = applied?.p1?.n === state.p1.n;
+                    finish(result.simulatorBoardPreserved && result.simulatorNextPreserved);
+                } catch (error) {
+                    result.error = error.message;
+                    finish(false);
+                }
+            }, 300);
+        }, { once: true });
+        document.body.appendChild(simulatorFrame);
+    });
+
+    frame.addEventListener('load', () => {
+        try {
+            const win = frame.contentWindow;
+            if (!win.applyCollectionData(collection)) throw new Error('applyCollectionData failed');
+            win.loadPage(0);
+            const iOperation = win.operationForPage(win.currentCase().pages[0].p1);
+            result.iCoordinateSpace = iOperation?.coordinateSpace;
+            result.iCells = win.operationCells(iOperation);
+            result.iCellsCorrect = JSON.stringify(result.iCells) === JSON.stringify([[3, 39], [4, 39], [5, 39], [6, 39]]);
+            win.loadPage(1);
+            win.document.getElementById('viewer-simulator-btn').click();
+        } catch (error) {
+            result.error = error.message;
+            finish(false);
+        }
+    }, { once: true });
+})();
+</script>

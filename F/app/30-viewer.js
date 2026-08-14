@@ -178,39 +178,46 @@ function viewerLoop() {
 
 function sendToSimulator() {
     const currentPage = fumenPages[currentPageIndex];
+    const sanitize = (str) => String(str || '').replace(/[^IOTLSJZ]/gi, '');
 
-    // A replay case owns the complete starting sequence. Keep that v3
-    // collection intact so the simulator receives every remaining NEXT,
-    // instead of only the currently visible page's short preview.
-    const replayCollection = typeof collectionData === 'function' &&
-        typeof currentCaseIsReplay === 'function' && currentCaseIsReplay()
-        ? collectionData()
-        : null;
-    
-    const sanitize = (str) => str.replace(/[^IOTLSJZ]/gi, '');
-    const p1Hold = sanitize(currentPage.p1.hold || '');
-    const p1Next = sanitize(typeof displayNextForPage === 'function' ? displayNextForPage('p1') : currentPage.p1.next || '');
-    const p1Operation = typeof operationForPage === 'function' ? operationForPage(currentPage.p1) : null;
+    // Always export the page currently shown in the viewer.  Exporting the
+    // whole replay collection here restarted the simulator from page 0, so
+    // terrain and NEXT appeared to be lost when the user transferred a later
+    // page.  replayStateAtPage resolves the active piece, queue, and HOLD for
+    // that exact page, including HOLD swaps.
+    const playerStateForSimulator = playerId => {
+        const page = currentPage?.[playerId] || {};
+        const pageNext = sanitize(typeof displayNextForPage === 'function'
+            ? displayNextForPage(playerId, currentPageIndex)
+            : page.next || '');
+        const operation = typeof operationForPage === 'function' ? operationForPage(page) : null;
+        let sequence = `${operation?.type || ''}${pageNext}`;
+        let hold = page.hold || '';
 
-    const stateData = replayCollection || {
+        if (typeof currentCaseIsReplay === 'function' && currentCaseIsReplay() &&
+            typeof replayStateAtPage === 'function') {
+            const replayState = replayStateAtPage(currentCase(), playerId, currentPageIndex);
+            if (replayState?.current) {
+                sequence = `${replayState.current}${(replayState.queue || []).join('')}`;
+                hold = replayState.hold || hold;
+            }
+        }
+
+        return {
+            b: boardToString(page.board),
+            n: sanitize(sequence),
+            h: sanitize(hold)
+        };
+    };
+
+    const stateData = {
         v: 2,
         m: gameMode,
-        p1: {
-            b: boardToString(currentPage.p1.board),
-            n: (p1Operation ? p1Operation.type : '') + p1Next,
-            h: p1Hold
-        },
+        p1: playerStateForSimulator('p1')
     };
 
     if (gameMode === '2P') {
-        const p2Hold = sanitize(currentPage.p2.hold || '');
-        const p2Next = sanitize(typeof displayNextForPage === 'function' ? displayNextForPage('p2') : currentPage.p2.next || '');
-        const p2Operation = typeof operationForPage === 'function' ? operationForPage(currentPage.p2) : null;
-        stateData.p2 = {
-            b: boardToString(currentPage.p2.board),
-            n: (p2Operation ? p2Operation.type : '') + p2Next,
-            h: p2Hold
-        };
+        stateData.p2 = playerStateForSimulator('p2');
     }
 
     const jsonString = JSON.stringify(stateData);

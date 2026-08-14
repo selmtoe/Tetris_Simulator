@@ -874,7 +874,7 @@ async function scoreRecordedOperation(pageIndex, source, operation, context, nod
                 5000,
                 Number.isFinite(requestedDetailNodeBudget)
                     ? Math.min(200000, Math.floor(requestedDetailNodeBudget))
-                    : 15000
+                    : 50000
             );
             const requestedThreshold = Number(data.thresholdScore);
             const thresholdScore = Math.max(0, Number.isFinite(requestedThreshold) ? requestedThreshold : 1000);
