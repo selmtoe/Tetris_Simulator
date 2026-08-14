@@ -257,6 +257,14 @@ margin-top: 15px;">
 
         <section class="ai-score-setting">
             <div class="ai-score-setting-head">
+                <label for="ai-score-detail-nodes">AIの詳細探索量</label>
+                <output id="ai-score-detail-nodes-label" for="ai-score-detail-nodes"></output>
+            </div>
+            <input id="ai-score-detail-nodes" class="ai-score-slider" type="range" min="5000" max="100000" step="5000" value="15000">
+        </section>
+
+        <section class="ai-score-setting">
+            <div class="ai-score-setting-head">
                 <label for="ai-score-plan-length">AIの予定表示手数</label>
                 <output id="ai-score-plan-length-label" for="ai-score-plan-length"></output>
             </div>
@@ -350,6 +358,6 @@ margin-top: 15px;">
 <script defer src="./app/81-export-controls.js?v=app-v18"></script>
 <script defer src="./app/82-code-generator.js?v=app-v18"></script>
 <script defer src="./app/83-share-controls.js?v=app-v18"></script>
-<script defer src="./app/84-ai-scoring.js?v=app-v18"></script>
+<script defer src="./app/84-ai-scoring.js?v=app-v19"></script>
 </body>
 </html>

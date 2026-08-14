@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fumen AI scoring WASM benchmark</title>
+<pre id="output">running...</pre>
+<script>
+(() => {
+    const output = document.getElementById('output');
+    const emptyBoard = () => Array.from({ length: 40 }, () => Array(10).fill(null));
+    const sourceBoard = emptyBoard();
+    const targetBoard = emptyBoard();
+    for (let x = 3; x < 7; x++) targetBoard[39][x] = 'I';
+    const pages = [
+        { p1: { board: sourceBoard, hold: '', next: 'IOLJSZ' } },
+        { p1: { board: targetBoard, hold: '', next: 'OLJSZ' } }
+    ];
+
+    function runOnce(useWasm) {
+        return new Promise((resolve, reject) => {
+            const worker = new Worker('../F/app/84-ai-scoring-worker.js');
+            const started = performance.now();
+            const timeout = setTimeout(() => {
+                worker.terminate();
+                reject(new Error('worker timeout'));
+            }, 30000);
+            worker.onmessage = event => {
+                if (event.data?.type === 'error') {
+                    clearTimeout(timeout);
+                    worker.terminate();
+                    reject(new Error(event.data.message));
+                    return;
+                }
+                if (event.data?.type !== 'done') return;
+                clearTimeout(timeout);
+                worker.terminate();
+                resolve({
+                    milliseconds: performance.now() - started,
+                    result: event.data.results?.[0] || {}
+                });
+            };
+            worker.onerror = event => {
+                clearTimeout(timeout);
+                worker.terminate();
+                reject(new Error(event.message || 'worker error'));
+            };
+            worker.postMessage({
+                type: 'score',
+                runId: `benchmark-${useWasm ? 'wasm' : 'js'}`,
+                pages,
+                startPage: 0,
+                endPage: 0,
+                nodeBudget: 500,
+                detailNodeBudget: 15000,
+                thresholdScore: 1,
+                planLength: 2,
+                useWasm
+            });
+        });
+    }
+
+    async function measure(useWasm) {
+        await runOnce(useWasm);
+        const runs = [];
+        for (let index = 0; index < 3; index++) runs.push(await runOnce(useWasm));
+        const times = runs.map(run => run.milliseconds).sort((a, b) => a - b);
+        const middle = times[1];
+        return {
+            medianMs: Math.round(middle),
+            runsMs: runs.map(run => Math.round(run.milliseconds)),
+            nodes: runs[runs.length - 1].result.nodes,
+            detailNodes: runs[runs.length - 1].result.detailNodes,
+            searchEngine: runs[runs.length - 1].result.searchEngine
+        };
+    }
+
+    (async () => {
+        try {
+            const wasm = await measure(true);
+            const javascript = await measure(false);
+            output.textContent = JSON.stringify({
+                passed: wasm.searchEngine === 'wasm' && javascript.searchEngine === 'javascript',
+                wasm,
+                javascript,
+                speedup: `${(javascript.medianMs / Math.max(1, wasm.medianMs)).toFixed(2)}x`
+            }, null, 2);
+        } catch (error) {
+            output.textContent = JSON.stringify({ passed: false, error: error.message }, null, 2);
+        }
+    })();
+})();
+</script>

@@ -3,7 +3,7 @@ use libtetris::{Board, LockResult, Piece};
 use crate::dag::MoveCandidate;
 
 mod standard;
-pub use self::standard::Standard;
+pub use self::standard::{Standard, Value};
 pub mod changed;
 
 pub trait Evaluator: Send + Sync {

@@ -16,6 +16,7 @@ mod normal;
 
 pub use libtetris::*;
 pub use normal::{BotState, ThinkResult, Thinker};
+use normal::CandidateScore;
 use opening_book::Book;
 use serde::{Deserialize, Serialize};
 use std::slice;
@@ -156,6 +157,18 @@ pub struct CcMove {
     pub movements: [u8; 32],
     pub nodes: u32,
     pub depth: u32,
+}
+
+#[repr(C)]
+pub struct CcCandidate {
+    pub piece: u8,
+    pub hold: u8,
+    pub rotation: u8,
+    pub tspin: u8,
+    pub x: i32,
+    pub y: i32,
+    pub value: i32,
+    pub spike: i32,
 }
 
 impl Default for CcMove {
@@ -313,6 +326,25 @@ fn output_move(result: &mut CcMove, mv: &Move, info: &Info) {
         result.nodes = normal.nodes;
         result.depth = normal.depth;
     }
+}
+
+fn output_candidate(result: &mut CcCandidate, candidate: &CandidateScore) {
+    result.piece = piece_to_byte(candidate.mv.kind.0);
+    result.hold = candidate.hold as u8;
+    result.rotation = rotation_number(candidate.mv.kind.1);
+    result.tspin = match candidate.mv.tspin {
+        TspinStatus::None => 0,
+        TspinStatus::Mini => 1,
+        TspinStatus::Full => 2,
+    };
+    (result.x, result.y) = simulator_anchor(
+        candidate.mv.kind.0,
+        candidate.mv.kind.1,
+        candidate.mv.x,
+        candidate.mv.y,
+    );
+    result.value = candidate.value;
+    result.spike = candidate.spike;
 }
 
 fn make_options(max_nodes: u32) -> Options {
@@ -537,6 +569,48 @@ pub unsafe extern "C" fn cc_dealloc(ptr: *mut u8, size: usize) {
 #[no_mangle]
 pub extern "C" fn cc_move_size() -> usize {
     std::mem::size_of::<CcMove>()
+}
+
+#[no_mangle]
+pub extern "C" fn cc_candidate_size() -> usize {
+    std::mem::size_of::<CcCandidate>()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn cc_candidate_count(bot: *const CcBot) -> u32 {
+    if bot.is_null() {
+        0
+    } else {
+        (*bot).state.candidate_scores().len() as u32
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn cc_write_candidates(
+    bot: *const CcBot,
+    output: *mut CcCandidate,
+    capacity: u32,
+) -> u32 {
+    if bot.is_null() || output.is_null() || capacity == 0 {
+        return 0;
+    }
+    let candidates = (*bot).state.candidate_scores();
+    let written = candidates.len().min(capacity as usize);
+    for (index, candidate) in candidates.iter().take(written).enumerate() {
+        let mut result = CcCandidate {
+            piece: 0,
+            hold: 0,
+            rotation: 0,
+            tspin: 0,
+            x: 0,
+            y: 0,
+            value: 0,
+            spike: 0,
+        };
+        output_candidate(&mut result, candidate);
+        *output.add(index) = result;
+    }
+    written as u32
 }
 
 #[cfg(test)]

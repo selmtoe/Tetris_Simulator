@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fumen AI scoring WASM smoke test</title>
+<pre id="output">running...</pre>
+<script>
+(() => {
+    const output = document.getElementById('output');
+    const emptyBoard = () => Array.from({ length: 40 }, () => Array(10).fill(null));
+    const sourceBoard = emptyBoard();
+    const targetBoard = emptyBoard();
+    for (let x = 3; x < 7; x++) targetBoard[39][x] = 'I';
+    const worker = new Worker('../F/app/84-ai-scoring-worker.js');
+    worker.onmessage = event => {
+        const message = event.data || {};
+        if (message.type === 'error') {
+            output.textContent = JSON.stringify({ passed: false, error: message.message }, null, 2);
+            return;
+        }
+        if (message.type !== 'done') return;
+        const result = message.results?.[0] || {};
+        output.textContent = JSON.stringify({
+            passed: message.results?.length === 1 && result.status === 'scored',
+            status: result.status,
+            searchEngine: result.searchEngine,
+            roughNodes: result.roughNodes,
+            detailNodeBudget: result.detailNodeBudget,
+            detailNodes: result.detailNodes,
+            bestMove: result.bestMove
+        }, null, 2);
+        worker.terminate();
+    };
+    worker.postMessage({
+        type: 'score',
+        runId: 'wasm-smoke',
+        pages: [
+            { p1: { board: sourceBoard, hold: '', next: 'IOLJSZ' } },
+            { p1: { board: targetBoard, hold: '', next: 'OLJSZ' } }
+        ],
+        startPage: 0,
+        endPage: 0,
+        nodeBudget: 500,
+        detailNodeBudget: 5000,
+        thresholdScore: 1,
+        planLength: 2
+    });
+})();
+</script>

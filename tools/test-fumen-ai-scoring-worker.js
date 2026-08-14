@@ -140,6 +140,7 @@ function run(pages, runId, options = {}) {
         operationPages: options.operationPages,
         replayInitial: options.replayInitial,
         nodeBudget: options.nodeBudget === undefined ? 500 : options.nodeBudget,
+        detailNodeBudget: options.detailNodeBudget,
         thresholdScore: options.thresholdScore === undefined ? 999999 : options.thresholdScore,
         planLength: options.planLength
     }});
@@ -294,8 +295,12 @@ const poorEdge = [...normalSearch.root.children]
         return a - b;
     })[0];
 const poorTarget = targetFromEdge(normalBoard, normalSearch, poorEdge);
-const detailed = expectSingle([normalSource, poorTarget], 15, 'scored', { nodeBudget: 500, thresholdScore: 1 });
-assert(detailed.detailed && detailed.detailNodes >= 15000, 'Flagged move did not receive a 15,000-node detailed pass.');
+const detailed = expectSingle([normalSource, poorTarget], 15, 'scored', {
+    nodeBudget: 500,
+    detailNodeBudget: 18000,
+    thresholdScore: 1
+});
+assert(detailed.detailed && detailed.detailNodes >= 18000, 'Configured detailed node budget was not applied.');
 assert(detailed.nodes === detailed.detailNodes && detailed.nodes >= detailed.roughNodes, 'Detailed search did not extend the rough DAG.');
 assert(Array.isArray(detailed.aiPlan) && detailed.aiPlan.length >= 1, 'AI plan is missing.');
 assert(detailed.aiPlan.every(move => move.stateAfter && typeof move.stateAfter.hold === 'string' && typeof move.stateAfter.next === 'string'), 'AI plan does not synchronize HOLD/NEXT state.');

@@ -4,11 +4,20 @@
 // search implementation is the same Cold Clear port, but each page pair owns
 // a scratch DAG in this worker.
 importScripts('../../simulator/workers/cold-clear-core.js');
+importScripts('../../simulator/workers/cold-clear-wasm.js');
 
 const { Search } = self.ColdClearSimulatorCore;
 const PIECES = Object.freeze(['I', 'O', 'T', 'L', 'J', 'S', 'Z']);
 const BOARD_WIDTH = 10;
 const BOARD_HEIGHT = 40;
+let wasmBridgePromise = null;
+
+function loadWasmBridge() {
+    if (!wasmBridgePromise) {
+        wasmBridgePromise = ColdClearWasmBridge.load('../../simulator/workers/cold-clear.wasm');
+    }
+    return wasmBridgePromise;
+}
 
 // These cells use exactly the simulator's top-origin public geometry.  They
 // are used both to verify a recorded board delta and to draw the observed
@@ -220,6 +229,31 @@ function createSearch(preMoveBoard, source, context) {
     });
     search.expand(search.root);
     return search;
+}
+
+async function createWasmSearch(preMoveBoard, source, context, nodeLimit) {
+    const currentPiece = source.current || source.next[0];
+    const nextQueue = source.current ? source.next : source.next.slice(1);
+    if (!currentPiece) return null;
+    const bridge = await loadWasmBridge();
+    const handle = bridge.create({
+        board: preMoveBoard,
+        currentPiece,
+        nextQueue,
+        holdPiece: source.hold,
+        canHold: true,
+        isB2B: Boolean(context.b2b),
+        ren: Number.isFinite(context.ren) ? context.ren : -1,
+        nodeLimit: Math.max(1, nodeLimit | 0)
+    });
+    return { bridge, handle };
+}
+
+function destroyWasmSearch(wasmSearch) {
+    if (wasmSearch?.bridge && wasmSearch.handle) {
+        wasmSearch.bridge.destroy(wasmSearch.handle);
+        wasmSearch.handle = 0;
+    }
 }
 
 const SIMULATOR_SHAPES = Object.freeze({
@@ -526,13 +560,60 @@ function principalVariation(search, firstEdge, limit = 4) {
     return moves;
 }
 
-function scorePair(search, actualEdge) {
+function scorePairLegacy(search, actualEdge) {
     const bestEdge = search.best(0) || actualEdge;
     const actual = staticEdgeValue(search, actualEdge);
     const best = staticEdgeValue(search, bestEdge);
     const scoreGap = Number.isFinite(actual.value) && Number.isFinite(best.value)
         ? Math.max(0, best.value - actual.value) : 0;
     return { actual, best, bestEdge, scoreGap };
+}
+
+function sameScoredMove(left, right) {
+    return left && right && left.piece === right.piece &&
+        Boolean(left.hold) === Boolean(right.hold) &&
+        Number(left.rotation) === Number(right.rotation) &&
+        Number(left.x) === Number(right.x) &&
+        Number(left.y) === Number(right.y);
+}
+
+function candidatePublicMove(candidate) {
+    const shape = TETROMINO_CELLS[candidate.piece]?.[candidate.rotation] || [];
+    return {
+        piece: candidate.piece,
+        x: candidate.x,
+        y: candidate.y,
+        rotation: candidate.rotation,
+        tspin: candidate.tspin,
+        hold: Boolean(candidate.hold),
+        cells: shape
+            .map(([dx, dy]) => [candidate.x + dx, candidate.y + dy])
+            .filter(([x, y]) => x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT)
+    };
+}
+
+async function scorePair(search, actualEdge, wasmSearch) {
+    if (!wasmSearch) return scorePairLegacy(search, actualEdge);
+    const candidates = wasmSearch.bridge.candidates(wasmSearch.handle);
+    const actualMove = publicMove(actualEdge);
+    const actualCandidate = candidates.find(candidate => sameScoredMove(candidate, actualMove));
+    if (!actualCandidate || !candidates.length) return scorePairLegacy(search, actualEdge);
+
+    const bestCandidate = [...candidates].sort((left, right) =>
+        right.value - left.value || right.spike - left.spike
+    )[0];
+    const bestMove = candidatePublicMove(bestCandidate);
+    const bestEdge = search.root.children.find(edge => sameScoredMove(publicMove(edge), bestMove)) || actualEdge;
+    const actual = { value: actualCandidate.value, spike: actualCandidate.spike };
+    const best = { value: bestCandidate.value, spike: bestCandidate.spike };
+    return {
+        actual,
+        best,
+        bestEdge,
+        bestMove,
+        scoreGap: Math.max(0, best.value - actual.value),
+        wasm: true
+    };
 }
 
 function meetsThreshold(scoreGap, thresholdScore) {
@@ -569,7 +650,7 @@ function observedMove(search, edge, addedCells) {
     return move;
 }
 
-function scoreTransition(pageIndex, source, target, context, nodeBudget, detailNodeBudget, thresholdScore, planLength) {
+async function scoreTransition(pageIndex, source, target, context, nodeBudget, detailNodeBudget, thresholdScore, planLength, useWasm = true) {
     if (sameSnapshot(source, target)) return ignoredResult(pageIndex, 'unchanged-snapshot', context, true);
 
     const reconstructed = reconstructTransition(source, target, context);
@@ -577,21 +658,35 @@ function scoreTransition(pageIndex, source, target, context, nodeBudget, detailN
         return ignoredResult(pageIndex, 'invalid-page-delta', context, passiveBoardTransition(source, target));
     }
 
-    const { search, matches, delta } = reconstructed;
-    search.thinkNodes(nodeBudget, 3000);
+    const { search, matches, delta, preMoveBoard } = reconstructed;
+    let wasmSearch = null;
+    if (useWasm) {
+        try {
+            wasmSearch = await createWasmSearch(preMoveBoard, source, context, detailNodeBudget);
+        } catch (_) {
+            // Keep the old JS path as a compatibility fallback if the static WASM
+            // asset is unavailable (for example in an offline editor export).
+        }
+    }
+    if (wasmSearch) wasmSearch.bridge.think(wasmSearch.handle, 3000, nodeBudget);
+    else search.thinkNodes(nodeBudget, 3000);
     const actualMatch = selectMatchingEdge(search, matches);
-    if (!actualMatch) return ignoredResult(pageIndex, 'invalid-page-delta', context, false);
+    if (!actualMatch) {
+        destroyWasmSearch(wasmSearch);
+        return ignoredResult(pageIndex, 'invalid-page-delta', context, false);
+    }
 
     const actualEdge = actualMatch.edge;
-    const roughNodes = search.nodeCount;
-    const rough = scorePair(search, actualEdge);
+    const roughNodes = wasmSearch ? wasmSearch.bridge.nodeCount(wasmSearch.handle) : search.nodeCount;
+    const rough = await scorePair(search, actualEdge, wasmSearch);
     let final = rough;
     let detailed = false;
     if (meetsThreshold(rough.scoreGap, thresholdScore)) {
         // `thinkNodes` takes a total-DAG target, so this extends rather than
         // restarts the rough search.
-        search.thinkNodes(detailNodeBudget, 10000);
-        final = scorePair(search, actualEdge);
+        if (wasmSearch) wasmSearch.bridge.think(wasmSearch.handle, 10000, detailNodeBudget);
+        else search.thinkNodes(detailNodeBudget, 10000);
+        final = await scorePair(search, actualEdge, wasmSearch);
         detailed = true;
     }
 
@@ -599,18 +694,19 @@ function scoreTransition(pageIndex, source, target, context, nodeBudget, detailN
     // expand a few deterministic child nodes, so refresh the values and the
     // best edge before publishing both the plan and the final node count.
     let aiPlan = principalVariation(search, final.bestEdge, planLength);
-    final = scorePair(search, actualEdge);
+    final = await scorePair(search, actualEdge, wasmSearch);
     aiPlan = principalVariation(search, final.bestEdge, planLength);
-    final = scorePair(search, actualEdge);
+    final = await scorePair(search, actualEdge, wasmSearch);
     // A small PV expansion can surface a rough-threshold gap that was not
     // visible at the original frontier. Finish it with the same detailed DAG
     // pass rather than emitting a partially searched blunder.
     if (!detailed && meetsThreshold(final.scoreGap, thresholdScore)) {
-        search.thinkNodes(detailNodeBudget, 10000);
+        if (wasmSearch) wasmSearch.bridge.think(wasmSearch.handle, 10000, detailNodeBudget);
+        else search.thinkNodes(detailNodeBudget, 10000);
         detailed = true;
-        final = scorePair(search, actualEdge);
+        final = await scorePair(search, actualEdge, wasmSearch);
         aiPlan = principalVariation(search, final.bestEdge, planLength);
-        final = scorePair(search, actualEdge);
+        final = await scorePair(search, actualEdge, wasmSearch);
     }
 
     const { actual: actualScore, best: bestScore, bestEdge, scoreGap } = final;
@@ -622,6 +718,7 @@ function scoreTransition(pageIndex, source, target, context, nodeBudget, detailN
         targetConvention: 'next-first',
         sourceBoardVariant: reconstructed.kind === 'garbage-rise' ? 'garbage-baseline' : 'raw',
         targetBoardVariant: 'raw',
+        searchEngine: wasmSearch ? 'wasm' : 'javascript',
         displayBoard: cloneLayout(reconstructed.preMoveBoard),
         sourceBoard: cloneLayout(reconstructed.preMoveBoard),
         garbageRows: reconstructed.garbageRows || 0,
@@ -632,12 +729,13 @@ function scoreTransition(pageIndex, source, target, context, nodeBudget, detailN
         queueExact: actualMatch.state.queue.exact,
         holdExact: actualMatch.state.holdExact,
         thresholdScore,
+        detailNodeBudget,
         roughNodes,
-        nodes: search.nodeCount,
+        nodes: wasmSearch ? wasmSearch.bridge.nodeCount(wasmSearch.handle) : search.nodeCount,
         detailed,
-        detailNodes: detailed ? search.nodeCount : null,
+        detailNodes: detailed ? (wasmSearch ? wasmSearch.bridge.nodeCount(wasmSearch.handle) : search.nodeCount) : null,
         actualMove: observedMove(search, actualEdge, delta.added),
-        bestMove: publicMove(bestEdge),
+        bestMove: final.bestMove || publicMove(bestEdge),
         actualScore: actualScore.value,
         actualSpike: actualScore.spike,
         bestScore: bestScore.value,
@@ -650,10 +748,11 @@ function scoreTransition(pageIndex, source, target, context, nodeBudget, detailN
         scoreReliable: true,
         blunder: meetsThreshold(scoreGap, thresholdScore)
     };
+    destroyWasmSearch(wasmSearch);
     return { result, nextContext: contextFromEdge(actualEdge) };
 }
 
-function scoreRecordedOperation(pageIndex, source, operation, context, nodeBudget, detailNodeBudget, thresholdScore, planLength) {
+async function scoreRecordedOperation(pageIndex, source, operation, context, nodeBudget, detailNodeBudget, thresholdScore, planLength, useWasm = true) {
     const preMoveBoard = normalizeLayout(source.board);
     const search = createSearch(preMoveBoard, source, context);
     const operationCells = recordedOperationCells(operation);
@@ -679,30 +778,44 @@ function scoreRecordedOperation(pageIndex, source, operation, context, nodeBudge
     if (!matches.length) {
         return ignoredResult(pageIndex, 'invalid-recorded-operation', context, false);
     }
-    search.thinkNodes(nodeBudget, 3000);
+    let wasmSearch = null;
+    if (useWasm) {
+        try {
+            wasmSearch = await createWasmSearch(preMoveBoard, source, context, detailNodeBudget);
+        } catch (_) {
+            // Fall back to the legacy JS search when the WASM asset is unavailable.
+        }
+    }
+    if (wasmSearch) wasmSearch.bridge.think(wasmSearch.handle, 3000, nodeBudget);
+    else search.thinkNodes(nodeBudget, 3000);
     const actualMatch = selectMatchingEdge(search, matches);
-    if (!actualMatch) return ignoredResult(pageIndex, 'invalid-recorded-operation', context, false);
+    if (!actualMatch) {
+        destroyWasmSearch(wasmSearch);
+        return ignoredResult(pageIndex, 'invalid-recorded-operation', context, false);
+    }
 
     const actualEdge = actualMatch.edge;
-    const roughNodes = search.nodeCount;
-    const rough = scorePair(search, actualEdge);
+    const roughNodes = wasmSearch ? wasmSearch.bridge.nodeCount(wasmSearch.handle) : search.nodeCount;
+    const rough = await scorePair(search, actualEdge, wasmSearch);
     let final = rough;
     let detailed = false;
     if (meetsThreshold(rough.scoreGap, thresholdScore)) {
-        search.thinkNodes(detailNodeBudget, 10000);
-        final = scorePair(search, actualEdge);
+        if (wasmSearch) wasmSearch.bridge.think(wasmSearch.handle, 10000, detailNodeBudget);
+        else search.thinkNodes(detailNodeBudget, 10000);
+        final = await scorePair(search, actualEdge, wasmSearch);
         detailed = true;
     }
     let aiPlan = principalVariation(search, final.bestEdge, planLength);
-    final = scorePair(search, actualEdge);
+    final = await scorePair(search, actualEdge, wasmSearch);
     aiPlan = principalVariation(search, final.bestEdge, planLength);
-    final = scorePair(search, actualEdge);
+    final = await scorePair(search, actualEdge, wasmSearch);
     if (!detailed && meetsThreshold(final.scoreGap, thresholdScore)) {
-        search.thinkNodes(detailNodeBudget, 10000);
+        if (wasmSearch) wasmSearch.bridge.think(wasmSearch.handle, 10000, detailNodeBudget);
+        else search.thinkNodes(detailNodeBudget, 10000);
         detailed = true;
-        final = scorePair(search, actualEdge);
+        final = await scorePair(search, actualEdge, wasmSearch);
         aiPlan = principalVariation(search, final.bestEdge, planLength);
-        final = scorePair(search, actualEdge);
+        final = await scorePair(search, actualEdge, wasmSearch);
     }
 
     const { actual: actualScore, best: bestScore, bestEdge, scoreGap } = final;
@@ -724,12 +837,13 @@ function scoreRecordedOperation(pageIndex, source, operation, context, nodeBudge
         queueExact: true,
         holdExact: true,
         thresholdScore,
+        detailNodeBudget,
         roughNodes,
-        nodes: search.nodeCount,
+        nodes: wasmSearch ? wasmSearch.bridge.nodeCount(wasmSearch.handle) : search.nodeCount,
         detailed,
-        detailNodes: detailed ? search.nodeCount : null,
+        detailNodes: detailed ? (wasmSearch ? wasmSearch.bridge.nodeCount(wasmSearch.handle) : search.nodeCount) : null,
         actualMove: observedMove(search, actualEdge, operationCells),
-        bestMove: publicMove(bestEdge),
+        bestMove: final.bestMove || publicMove(bestEdge),
         actualScore: actualScore.value,
         actualSpike: actualScore.spike,
         bestScore: bestScore.value,
@@ -738,20 +852,30 @@ function scoreRecordedOperation(pageIndex, source, operation, context, nodeBudge
         roughActualScore: rough.actual.value,
         roughBestScore: rough.best.value,
         roughScoreGap: rough.scoreGap,
+        searchEngine: wasmSearch ? 'wasm' : 'javascript',
         aiPlan,
         scoreReliable: true,
         blunder: meetsThreshold(scoreGap, thresholdScore)
     };
+    destroyWasmSearch(wasmSearch);
     return { result, nextContext: contextFromEdge(actualEdge) };
 }
 
-self.onmessage = event => {
+ self.onmessage = async event => {
         const data = event.data || {};
         if (data.type !== 'score') return;
         try {
             const pages = Array.isArray(data.pages) ? data.pages : [];
             const nodeBudget = Math.max(500, Math.floor(Number(data.nodeBudget) || 5000));
-            const detailNodeBudget = Math.max(nodeBudget, 15000);
+            const useWasm = data.useWasm !== false;
+            const requestedDetailNodeBudget = Number(data.detailNodeBudget);
+            const detailNodeBudget = Math.max(
+                nodeBudget,
+                5000,
+                Number.isFinite(requestedDetailNodeBudget)
+                    ? Math.min(200000, Math.floor(requestedDetailNodeBudget))
+                    : 15000
+            );
             const requestedThreshold = Number(data.thresholdScore);
             const thresholdScore = Math.max(0, Number.isFinite(requestedThreshold) ? requestedThreshold : 1000);
             const requestedPlanLength = Number(data.planLength);
@@ -777,7 +901,7 @@ self.onmessage = event => {
                     const pageIndex = operationPages[ordinal];
                     const operation = normalizeRecordedOperation(pages[pageIndex]?.p1?.operation);
                     const source = replaySourceAtPage(pages, data.replayInitial?.p1 || data.replayInitial || {}, pageIndex);
-                    const scored = scoreRecordedOperation(
+                    const scored = await scoreRecordedOperation(
                         pageIndex,
                         source,
                         operation,
@@ -785,7 +909,8 @@ self.onmessage = event => {
                         ordinal < startOrdinal ? 500 : nodeBudget,
                         ordinal < startOrdinal ? 500 : detailNodeBudget,
                         ordinal < startOrdinal ? Infinity : thresholdScore,
-                        ordinal < startOrdinal ? 1 : planLength
+                        ordinal < startOrdinal ? 1 : planLength,
+                        useWasm
                     );
                     context = scored.nextContext;
                     if (ordinal < startOrdinal) continue;
@@ -816,12 +941,12 @@ self.onmessage = event => {
             const source = pageState(pages[pageIndex]);
             const target = pageState(pages[pageIndex + 1]);
             if (pageIndex < startPage) {
-                const primed = scoreTransition(pageIndex, source, target, context, 500, 500, Infinity, 1);
+                const primed = await scoreTransition(pageIndex, source, target, context, 500, 500, Infinity, 1, useWasm);
                 context = primed.nextContext;
                 continue;
             }
 
-            const scored = scoreTransition(pageIndex, source, target, context, nodeBudget, detailNodeBudget, thresholdScore, planLength);
+            const scored = await scoreTransition(pageIndex, source, target, context, nodeBudget, detailNodeBudget, thresholdScore, planLength, useWasm);
             context = scored.nextContext;
             results.push(scored.result);
             completed++;

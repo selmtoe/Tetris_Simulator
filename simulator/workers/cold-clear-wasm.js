@@ -10,6 +10,7 @@ class ColdClearWasmBridge {
         this.exports = instance.exports;
         this.memory = this.exports.memory;
         this.moveSize = this.exports.cc_move_size ? this.exports.cc_move_size() : COLD_CLEAR_MOVE_SIZE;
+        this.candidateSize = this.exports.cc_candidate_size ? this.exports.cc_candidate_size() : 20;
         if (!this.memory || !this.exports.cc_create || !this.exports.cc_alloc) {
             throw new Error('Cold Clear WASM ABI is incomplete.');
         }
@@ -73,6 +74,35 @@ class ColdClearWasmBridge {
 
     nodeCount(handle) {
         return this.exports.cc_node_count(handle) >>> 0;
+    }
+
+    candidates(handle) {
+        if (!this.exports.cc_candidate_count || !this.exports.cc_write_candidates) return [];
+        const count = this.exports.cc_candidate_count(handle) >>> 0;
+        if (!count) return [];
+        const ptr = this.exports.cc_alloc(count * this.candidateSize);
+        if (!ptr) throw new Error('Cold Clear WASM candidate allocation failed.');
+        try {
+            const written = Math.min(count, this.exports.cc_write_candidates(handle, ptr, count) >>> 0);
+            const view = new DataView(this.memory.buffer, ptr, written * this.candidateSize);
+            const candidates = [];
+            for (let index = 0; index < written; index++) {
+                const offset = index * this.candidateSize;
+                candidates.push({
+                    piece: String.fromCharCode(view.getUint8(offset)),
+                    hold: view.getUint8(offset + 1) !== 0,
+                    rotation: view.getUint8(offset + 2),
+                    tspin: view.getUint8(offset + 3) === 2 ? 'full' : (view.getUint8(offset + 3) === 1 ? 'mini' : null),
+                    x: view.getInt32(offset + 4, true),
+                    y: view.getInt32(offset + 8, true),
+                    value: view.getInt32(offset + 12, true),
+                    spike: view.getInt32(offset + 16, true)
+                });
+            }
+            return candidates;
+        } finally {
+            this.exports.cc_dealloc(ptr, count * this.candidateSize);
+        }
     }
 
     think(handle, milliseconds, nodeLimit) {

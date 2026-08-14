@@ -688,6 +688,12 @@ pub struct Value {
     spike: i32,
 }
 
+impl Value {
+    pub fn components(self) -> (i32, i32) {
+        (self.value, self.spike)
+    }
+}
+
 impl std::ops::Add for Value {
     type Output = Self;
     fn add(self, rhs: Self) -> Self {

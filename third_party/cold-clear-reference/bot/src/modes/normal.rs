@@ -15,6 +15,14 @@ pub struct BotState<E: Evaluator> {
     pub outstanding_thinks: u32,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct CandidateScore {
+    pub mv: FallingPiece,
+    pub hold: bool,
+    pub value: i32,
+    pub spike: i32,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Thinker {
     node: NodeId,
@@ -202,6 +210,24 @@ impl<E: Evaluator> BotState<E> {
 
     pub fn force_analysis_line(&mut self, path: Vec<FallingPiece>) {
         self.forced_analysis_lines.push(path);
+    }
+}
+
+impl BotState<crate::evaluation::Standard> {
+    pub fn candidate_scores(&self) -> Vec<CandidateScore> {
+        self.tree
+            .get_next_candidates()
+            .into_iter()
+            .map(|candidate| {
+                let (value, spike) = candidate.evaluation.components();
+                CandidateScore {
+                    mv: candidate.mv,
+                    hold: candidate.hold,
+                    value,
+                    spike,
+                }
+            })
+            .collect()
     }
 }
 

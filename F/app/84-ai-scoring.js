@@ -478,6 +478,8 @@
         const rangeLabel = byId('ai-score-range-label');
         const nodeInput = byId('ai-score-nodes');
         const nodeLabel = byId('ai-score-nodes-label');
+        const detailNodeInput = byId('ai-score-detail-nodes');
+        const detailNodeLabel = byId('ai-score-detail-nodes-label');
         const planLengthInput = byId('ai-score-plan-length');
         const planLengthLabel = byId('ai-score-plan-length-label');
         const thresholdInput = byId('ai-score-threshold');
@@ -546,6 +548,7 @@
 
         function updateControls() {
             nodeLabel.textContent = `${Number(nodeInput.value).toLocaleString()} nodes / 手（候補抽出）`;
+            detailNodeLabel.textContent = `${Math.max(Number(nodeInput.value), Number(detailNodeInput.value)).toLocaleString()} nodes / 手（詳細探索）`;
             planLengthLabel.textContent = `${Number(planLengthInput.value)}手`;
             thresholdLabel.textContent = `${Number(thresholdInput.value).toLocaleString()}点以上の差を悪手にする`;
         }
@@ -669,6 +672,7 @@
         startInput.addEventListener('input', () => updateRange('start'));
         endInput.addEventListener('input', () => updateRange('end'));
         nodeInput.addEventListener('input', updateControls);
+        detailNodeInput.addEventListener('input', updateControls);
         planLengthInput.addEventListener('input', updateControls);
         thresholdInput.addEventListener('input', updateControls);
         stopButton.addEventListener('click', () => stopScoring('AI採点を中止しました。'));
@@ -731,6 +735,7 @@
                 operationPages,
                 replayInitial,
                 nodeBudget: Number(nodeInput.value),
+                detailNodeBudget: Number(detailNodeInput.value),
                 planLength: Number(planLengthInput.value),
                 thresholdScore: Number(thresholdInput.value)
             });
