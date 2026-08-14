@@ -85,11 +85,22 @@ function canonicalizeLegacyNativeOperation(operation) {
 
 function normalizeReplayOperationCoordinates(caseData) {
     if (!caseData || caseData.kind !== 'replay') return;
+    // Simulator recordings created before coordinateSpace was added already
+    // stored the browser's top-origin coordinates.  Their stable collection
+    // id/name lets us migrate those old records without changing the legacy
+    // native-recovery import path below.
+    const isSimulatorReplay = /^simulator-replay-/i.test(String(caseData.id || '')) ||
+        /simulator recorded replay/i.test(String(caseData.name || ''));
     caseData.pages.forEach(page => {
         ['p1', 'p2'].forEach(playerId => {
             const player = page[playerId];
             if (!player?.operation || player.operation.coordinateSpace) return;
-            player.operation = canonicalizeLegacyNativeOperation(player.operation);
+            if (isSimulatorReplay) {
+                const operation = normalizeOperation(player.operation);
+                player.operation = operation ? { ...operation, coordinateSpace: 'simulator' } : null;
+            } else {
+                player.operation = canonicalizeLegacyNativeOperation(player.operation);
+            }
         });
     });
 }
