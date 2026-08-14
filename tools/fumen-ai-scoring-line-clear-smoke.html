@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fumen AI scoring line-clear smoke test</title>
+<pre id="output">running...</pre>
+<script>
+(() => {
+    const output = document.getElementById('output');
+    const emptyBoard = () => Array.from({ length: 40 }, () => Array(10).fill(null));
+    const sourceBoard = emptyBoard();
+    for (let x = 0; x < 6; x++) sourceBoard[39][x] = 'G';
+    const targetBoard = emptyBoard();
+    const worker = new Worker('../F/app/84-ai-scoring-worker.js?line-smoke-v2');
+    worker.onmessage = event => {
+        const message = event.data || {};
+        if (message.type === 'error') {
+            output.textContent = JSON.stringify({ passed: false, error: message.message }, null, 2);
+            worker.terminate();
+            return;
+        }
+        if (message.type !== 'done') return;
+        const result = message.results?.[0] || {};
+        output.textContent = JSON.stringify({
+            passed: message.results?.length === 1 && result.status === 'scored' &&
+                result.reconstruction === 'lock-result' && result.actualMove?.cells?.length === 4,
+            status: result.status,
+            reconstruction: result.reconstruction,
+            actualCells: result.actualMove?.cells,
+            searchEngine: result.searchEngine
+        }, null, 2);
+        worker.terminate();
+    };
+    worker.postMessage({
+        type: 'score',
+        runId: 'line-clear-smoke',
+        pages: [
+            { p1: { board: sourceBoard, hold: '', next: 'ITOLJSZ' } },
+            { p1: { board: targetBoard, hold: '', next: 'TOLJSZ' } }
+        ],
+        startPage: 0,
+        endPage: 0,
+        nodeBudget: 500,
+        detailNodeBudget: 5000,
+        thresholdScore: 1,
+        planLength: 2
+    });
+})();
+</script>

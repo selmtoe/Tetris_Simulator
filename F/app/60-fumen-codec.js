@@ -195,7 +195,7 @@ const FumenCodec = {
     },
 
     // 1ページ分のエンコード
-    encodePage: function(prevField, currentField, operation) {
+    encodePage: function(prevField, currentField, operation, colorize = true) {
         let data = '';
 
         // 1. フィールド (Diff + RLE)
@@ -242,9 +242,9 @@ const FumenCodec = {
         const hasQuiz = false;
         const flag_comment = 0;
         const flag_lock = 1; // 接着済みとして扱う
-        // tetris-fumen's `colorize` flag must be true (1). With 0, the
-        // official viewer renders operation cells with a fallback color.
-        const flag_color = 1;
+        // Follow tetris-fumen's default page flags: the first page is
+        // colorized, and later pages inherit their field colours.
+        const flag_color = colorize ? 1 : 0;
         const flag_mirror = 0;
         const flag_raise = 0;
         
@@ -391,24 +391,6 @@ const FumenCodec = {
                 }
             }
 
-            const nextPrevField = Array(240).fill(0);
-            let writeRow = 22;
-            for (let y = 22; y >= 0; y--) {
-                let isFull = true;
-                for (let x = 0; x < 10; x++) {
-                    if (currentField[y * 10 + x] === 0) {
-                        isFull = false;
-                        break;
-                    }
-                }
-                if (!isFull) {
-                    for (let x = 0; x < 10; x++) {
-                        nextPrevField[writeRow * 10 + x] = currentField[y * 10 + x];
-                    }
-                    writeRow--;
-                }
-            }
-            prevField = nextPrevField;
             const minoVal = this.poll(str, idx, 3);
             idx += 3;
             
@@ -490,10 +472,45 @@ const FumenCodec = {
                     : { ...officialOperation, y: 39 - fumenY };
             }
 
+            // A Fumen page stores the field before its operation.  The field
+            // used as the diff base for the next page is therefore obtained
+            // only after applying this page's locked mino and line clear.
+            // The old decoder advanced `prevField` before parsing the action,
+            // which made every following page drift (and changed colours).
+            const pageField = [...currentField];
+            if (operation?.lock !== false && operation && typeof operationCells === 'function') {
+                const fumenPiece = this.TYPE_TO_FUMEN[operation.type] || 0;
+                for (const [x, y] of operationCells(operation)) {
+                    const fieldRow = y - 17;
+                    if (x >= 0 && x < 10 && fieldRow >= 0 && fieldRow < 23) {
+                        currentField[fieldRow * 10 + x] = fumenPiece;
+                    }
+                }
+            }
+
+            const nextPrevField = Array(240).fill(0);
+            let writeRow = 22;
+            for (let y = 22; y >= 0; y--) {
+                let isFull = true;
+                for (let x = 0; x < 10; x++) {
+                    if (currentField[y * 10 + x] === 0) {
+                        isFull = false;
+                        break;
+                    }
+                }
+                if (!isFull) {
+                    for (let x = 0; x < 10; x++) {
+                        nextPrevField[writeRow * 10 + x] = currentField[y * 10 + x];
+                    }
+                    writeRow--;
+                }
+            }
+            prevField = nextPrevField;
+
             const customBoard = Array.from({length: 40}, () => Array(10).fill(null));
             for(let y=0; y<23; y++) {
                 for(let x=0; x<10; x++) {
-                    const fVal = currentField[y * 10 + x];
+                    const fVal = pageField[y * 10 + x];
                     customBoard[17 + y][x] = this.FUMEN_TO_TYPE[fVal] || null;
                 }
             }
@@ -512,7 +529,8 @@ const FumenCodec = {
         let str = 'v115@';
         let prevField = Array(240).fill(0); // Fumen starts with empty field
 
-        for (const page of pages) {
+        for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+            const page = pages[pageIndex];
             const pData = page[playerId];
             // Convert Custom Board to Fumen Field (240 ints)
             const currentField = Array(240).fill(0);
@@ -523,14 +541,17 @@ const FumenCodec = {
                 const srcY = 17 + y;
                 if (srcY < 40) {
                     for (let x = 0; x < 10; x++) {
-                        const cell = pData.board[srcY][x];
+                        const cell = pData.board?.[srcY]?.[x];
                         // ガベージライン(Fumen 230-239)は無視して0のまま
                         currentField[y * 10 + x] = this.TYPE_TO_FUMEN[cell] || 0;
                     }
                 }
             }
             
-            str += this.encodePage(prevField, currentField, pData.operation);
+            // Match the official tetris-fumen default: only the first page
+            // explicitly colorizes the locked operation; later pages inherit
+            // their field colours through the normal Fumen state update.
+            str += this.encodePage(prevField, currentField, pData.operation, pageIndex === 0);
             
             // --- 後処理 (Post Processing) ---
             // 次のページの差分計算のために、現在ページでライン消去が発生した場合、
@@ -543,9 +564,14 @@ const FumenCodec = {
             if (operation && typeof operationCells === 'function') {
                 const fumenPiece = this.TYPE_TO_FUMEN[operation.type] || 0;
                 for (const [x, y] of operationCells(operation)) {
-                    const fumenY = 39 - y;
-                    if (x >= 0 && x < 10 && fumenY >= 0 && fumenY < 23) {
-                        currentField[fumenY * 10 + x] = fumenPiece;
+                    // `currentField` is kept in the same top-to-bottom order
+                    // used by the official encoder's field diff.  The Fumen
+                    // operation coordinate is bottom-origin, so indexing it
+                    // directly (39 - y) writes the mino to the opposite row.
+                    // Convert back to the 23-row field index instead.
+                    const fieldRow = y - 17;
+                    if (x >= 0 && x < 10 && fieldRow >= 0 && fieldRow < 23) {
+                        currentField[fieldRow * 10 + x] = fumenPiece;
                     }
                 }
             }

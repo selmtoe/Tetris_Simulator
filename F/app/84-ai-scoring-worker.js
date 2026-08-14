@@ -416,12 +416,32 @@ function targetStateEvidence(search, edge, target) {
     return { holdExact, queue, valid: holdExact && queue.compatible };
 }
 
+function sameColdClearBoard(board, target) {
+    if (!board || !target || typeof board.occupied !== 'function') return false;
+    for (let y = 0; y < BOARD_HEIGHT; y++) {
+        for (let x = 0; x < BOARD_WIDTH; x++) {
+            if (Boolean(board.occupied(x, y)) !== occupied(target[y][x])) return false;
+        }
+    }
+    return true;
+}
+
 function matchingEdges(search, source, target, delta) {
     if (!search || !search.root || !search.root.children) return [];
+    const targetBoard = normalizeLayout(target?.board);
     const matches = [];
     for (const edge of search.root.children) {
         if (!edgeCanBeRecordedMove(edge, source)) continue;
-        if (!sameCells(publicMove(edge).cells, delta.added)) continue;
+        // A normal snapshot exposes the four locked cells directly.  A native
+        // Fumen page, however, stores the next page after line clear, so old
+        // cells can disappear and the four new cells are no longer a literal
+        // delta.  In that case compare the authoritative Cold Clear child
+        // board instead of trying to reverse-engineer the cleared rows.
+        if (delta.valid) {
+            if (!sameCells(publicMove(edge).cells, delta.added)) continue;
+        } else if (!sameColdClearBoard(edge.child?.state?.board, targetBoard)) {
+            continue;
+        }
         const state = targetStateEvidence(search, edge, target);
         if (!state.valid) continue;
         matches.push({ edge, state });
@@ -446,12 +466,18 @@ function selectMatchingEdge(search, matches) {
 
 function tryReconstruction(preMoveBoard, targetBoard, source, target, context, kind, garbageRows = 0) {
     const delta = strictDelta(preMoveBoard, targetBoard);
-    if (!delta.valid) return null;
     const search = createSearch(preMoveBoard, source, context);
     if (!search) return null;
     const matches = matchingEdges(search, source, target, delta);
     if (!matches.length) return null;
-    return { search, matches, delta, preMoveBoard, kind, garbageRows };
+    return {
+        search,
+        matches,
+        delta,
+        preMoveBoard,
+        kind: !delta.valid && kind === 'delta-4' ? 'lock-result' : kind,
+        garbageRows
+    };
 }
 
 function canonicalGarbageBaseRow(row) {
@@ -642,11 +668,14 @@ function ignoredResult(pageIndex, reconstruction, context, preserveContext) {
     };
 }
 
-function observedMove(search, edge, addedCells) {
+function observedMove(search, edge, addedCells, reconstructionKind) {
     const move = planMove(search, edge);
-    // This is deliberately the literal page-to-page delta, never a visual
-    // reconstruction from the edge.  The equality was checked before here.
-    move.cells = addedCells.map(([x, y]) => [x, y]);
+    // For a plain transition this is deliberately the literal page-to-page
+    // delta.  For a line-clear transition the delta is not the locked mino,
+    // so the matched Cold Clear edge is the authoritative four-cell shape.
+    move.cells = reconstructionKind !== 'lock-result' && addedCells.length === 4
+        ? addedCells.map(([x, y]) => [x, y])
+        : publicMove(edge).cells.map(([x, y]) => [x, y]);
     return move;
 }
 
@@ -717,7 +746,7 @@ async function scoreTransition(pageIndex, source, target, context, nodeBudget, d
         sourceConvention: 'next-first',
         targetConvention: 'next-first',
         sourceBoardVariant: reconstructed.kind === 'garbage-rise' ? 'garbage-baseline' : 'raw',
-        targetBoardVariant: 'raw',
+        targetBoardVariant: reconstructed.kind === 'lock-result' ? 'post-lock' : 'raw',
         searchEngine: wasmSearch ? 'wasm' : 'javascript',
         displayBoard: cloneLayout(reconstructed.preMoveBoard),
         sourceBoard: cloneLayout(reconstructed.preMoveBoard),
@@ -734,7 +763,7 @@ async function scoreTransition(pageIndex, source, target, context, nodeBudget, d
         nodes: wasmSearch ? wasmSearch.bridge.nodeCount(wasmSearch.handle) : search.nodeCount,
         detailed,
         detailNodes: detailed ? (wasmSearch ? wasmSearch.bridge.nodeCount(wasmSearch.handle) : search.nodeCount) : null,
-        actualMove: observedMove(search, actualEdge, delta.added),
+        actualMove: observedMove(search, actualEdge, delta.added, reconstructed.kind),
         bestMove: final.bestMove || publicMove(bestEdge),
         actualScore: actualScore.value,
         actualSpike: actualScore.spike,

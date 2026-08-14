@@ -578,15 +578,27 @@
             destroyPlanAnimations();
             const scored = run.results.filter(result => result.status === 'scored' || result.status === 'inferred');
             const blunders = scored.filter(result => result.blunder);
+            const ignored = run.results.filter(result => result.status === 'ignored');
             resultPanel.hidden = false;
             resultList.replaceChildren();
             const attempted = run.results.length;
             resultSummary.textContent = `${scored.length}/${attempted} 手を採点（${blunders.length} 件を要確認）`;
-            if (!blunders.length) {
+            if (ignored.length) {
+                const reasons = [...new Set(ignored.map(result => result.reconstruction).filter(Boolean))];
+                resultSummary.textContent += ` / 未採点 ${ignored.length}手: ${reasons.join(', ')}`;
+            }
+            if (!blunders.length && !ignored.length) {
                 const empty = document.createElement('p');
                 empty.className = 'ai-score-empty';
                 empty.textContent = '設定した閾値を超える悪手はありませんでした。';
                 resultList.appendChild(empty);
+            }
+
+            if (ignored.length) {
+                const note = document.createElement('p');
+                note.className = 'ai-score-empty';
+                note.textContent = '未採点のページは結果から消さず、理由を表示しています。';
+                resultList.appendChild(note);
             }
 
             for (const result of blunders) {
@@ -694,7 +706,7 @@
             stopButton.hidden = false;
             status.textContent = 'Cold Clear で局面を復元しています…';
 
-            scoreWorker = new Worker('./app/84-ai-scoring-worker.js');
+            scoreWorker = new Worker('./app/84-ai-scoring-worker.js?v=app-v21');
             scoreWorker.onmessage = event => {
                 const message = event.data || {};
                 if (message.runId !== runId) return;

@@ -1,0 +1,80 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fumen codec round-trip smoke test</title>
+<pre id="output">running...</pre>
+<script src="../F/app/10-state.js"></script>
+<script src="../F/app/30-viewer.js"></script>
+<script src="../F/app/15-sequence.js"></script>
+<script src="../F/app/60-fumen-codec.js?smoke-v8"></script>
+<script>
+(() => {
+    const output = document.getElementById('output');
+    const empty = () => Array.from({ length: 40 }, () => Array(10).fill(null));
+    const clone = board => board.map(row => [...row]);
+    const cells = (board) => board.flatMap((row, y) => row
+        .map((piece, x) => piece ? `${x},${y}:${piece}` : null)
+        .filter(Boolean));
+    const page0 = empty();
+    const page1 = empty();
+    page1[39][3] = 'I';
+    page1[39][4] = 'I';
+    page1[39][5] = 'I';
+    page1[39][6] = 'I';
+    const page2 = clone(page1);
+    page2[38][4] = 'O';
+    page2[38][5] = 'O';
+    page2[37][4] = 'O';
+    page2[37][5] = 'O';
+    const clearBefore = empty();
+    for (let x = 0; x < 6; x++) clearBefore[39][x] = ['I', 'L', 'O', 'Z', 'T', 'J'][x];
+    const pages = [
+        { p1: { board: page0, operation: { type: 'I', rotation: 'spawn', x: 3, y: 39 } } },
+        { p1: { board: page1, operation: { type: 'O', rotation: 'spawn', x: 4, y: 38 } } },
+        { p1: { board: page2, operation: null } },
+        { p1: { board: clearBefore, operation: { type: 'I', rotation: 'spawn', x: 6, y: 39 } } },
+        { p1: { board: empty(), operation: null } }
+    ];
+    const code = FumenCodec.export(pages, 'p1');
+    const decoded = FumenCodec.decode(code);
+    const rotationCases = ['I', 'O', 'T', 'L', 'J', 'S', 'Z'].flatMap(type =>
+        ['spawn', 'right', 'reverse', 'left'].map(rotation => ({
+            type, rotation, x: 4, y: 30, lock: true
+        })));
+    const rotationPages = rotationCases.map(operation => ({
+        p1: { board: empty(), operation }
+    }));
+    const rotationDecoded = FumenCodec.decode(FumenCodec.export(rotationPages, 'p1'));
+    const rotationRoundTrip = rotationDecoded.length === rotationCases.length &&
+        rotationDecoded.every((page, index) => {
+            const operation = page.operation;
+            const expected = rotationCases[index];
+            return operation?.type === expected.type && operation?.rotation === expected.rotation &&
+                operation?.x === expected.x && operation?.y === expected.y;
+        });
+    const boardRoundTrip = decoded.length === pages.length && decoded.every((page, index) =>
+        JSON.stringify(cells(page.board)) === JSON.stringify(cells(pages[index].p1.board)));
+    const boardDiffs = decoded.map((page, index) => ({
+        index,
+        expected: cells(pages[index].p1.board),
+        actual: cells(page.board)
+    })).filter(item => JSON.stringify(item.expected) !== JSON.stringify(item.actual));
+    const operationRoundTrip = decoded[0]?.operation?.type === 'I' &&
+        decoded[0]?.operation?.x === 3 && decoded[0]?.operation?.y === 39 &&
+        decoded[1]?.operation?.type === 'O' && decoded[1]?.operation?.x === 4 &&
+        decoded[1]?.operation?.y === 38 &&
+        decoded[3]?.operation?.type === 'I' && decoded[3]?.operation?.x === 6 &&
+        decoded[3]?.operation?.y === 39;
+    output.textContent = JSON.stringify({
+        passed: boardRoundTrip && operationRoundTrip && rotationRoundTrip,
+        pageCount: decoded.length,
+        boardRoundTrip,
+        boardDiffs,
+        operationRoundTrip,
+        rotationRoundTrip,
+        operations: decoded.map(page => page.operation),
+        prefixes: Array.from({ length: pages.length }, (_, index) =>
+            FumenCodec.export(pages.slice(0, index + 1), 'p1')),
+        code
+    }, null, 2);
+})();
+</script>

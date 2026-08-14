@@ -249,6 +249,13 @@ assert(clearResults[0].status === 'scored', 'The lock-before-clear +4 page was n
 assert(clearResults[1].status === 'ignored', 'The following clear-only page was not excluded.');
 assert(sameCells(clearResults[0].actualMove.cells, edgeCells(clearEdge)), 'Pre-clear highlight did not use the observed four cells.');
 
+// Official Fumen pages normally omit the simulator's transient pre-clear
+// frame.  The next page is therefore the post-lock board, and scoring must
+// match Cold Clear's child board even though the literal delta has removals.
+const directClear = expectSingle([clearSource, postClearTarget], 20);
+assert(directClear.reconstruction === 'lock-result', 'A direct line-clear Fumen transition was not reconstructed from the lock result.');
+assert(sameCells(directClear.actualMove.cells, edgeCells(clearEdge)), 'Direct line-clear highlight did not use the locked four cells.');
+
 // One unmistakable garbage rise: source shifts upward, a Gx9 bottom row is
 // inserted, and an I fills the garbage hole.  The worker scores on that
 // virtual pre-move board and exposes it to the renderer.
