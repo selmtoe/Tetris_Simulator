@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const video = $("video");
 const canvas = $("frame");
 const ctx = canvas.getContext("2d", { willReadFrequently: true });
-const RELEASE = "f2ffa62";
+const RELEASE = "0c05973";
 const state = { file: null, module: null, session: null, running: false, cancel: false, framePtr: 0, frameBytes: 0, holdPtr: 0, nextPtr: 0, colorsPtr: 0, featurePtr: 0, labelPtr: 0 };
 
 function log(message) { $("log").textContent += "\n" + message; $("log").scrollTop = $("log").scrollHeight; }
@@ -25,6 +25,7 @@ function wasmCString(value) {
 }
 function cancelled() { if (state.cancel) throw new Error("解析をキャンセルしました"); }
 function frameSize() { return video.videoWidth * video.videoHeight * 4; }
+function yieldToBrowser() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
 async function loadWasm() {
   if (state.module) return state.module;
@@ -210,6 +211,7 @@ async function boardPass(requests, duration) {
       module.HEAPU8.set(labels, state.labelPtr);
       if (!module._tr_board_finish(request.player, state.framePtr, rgba.byteLength, request.time, state.labelPtr, 200)) throw new Error(wasmError());
       status("Pass 2/3: 盤面ONNX " + index + "/" + requests.length, 40 + index / Math.max(1, requests.length) * 42);
+      await yieldToBrowser();
     }
     if (mediaTime >= duration - 0.0001 && index < requests.length) break;
   }
@@ -283,7 +285,9 @@ async function analyze() {
     log("C++が生成した盤面要求: P1 " + p1Count + " / P2 " + p2Count);
     await boardPass(requests, duration);
     status("Pass 3/3: C++合法手ビーム探索", 86);
+    await yieldToBrowser();
     if (!module._tr_recover()) throw new Error(wasmError());
+    await yieldToBrowser();
     const outputDir = "/output/" + (safeName.replace(/\.[^.]*$/, "") || "video");
     try { module.FS.mkdir(outputDir); } catch (_) {}
     const inputPtr = wasmCString(inputPath);
