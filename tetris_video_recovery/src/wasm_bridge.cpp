@@ -2,6 +2,7 @@
 
 #include "recovery.hpp"
 #include "onnx_model.hpp"
+#include "tetris_engine.hpp"
 #include "vision.hpp"
 
 #include <emscripten/emscripten.h>
@@ -10,6 +11,8 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <sstream>
+#include <iomanip>
 #include <string>
 #include <utility>
 #include <vector>
@@ -45,6 +48,8 @@ struct Runtime {
     RecoveryOutput output;
     std::string error;
     std::string outputPath;
+    std::string reviewJson;
+    std::string candidateJson;
 };
 
 Runtime runtime;
@@ -63,6 +68,161 @@ void copyString(const std::string& value, char* destination, int capacity) {
     const std::size_t count = std::min<std::size_t>(value.size(), static_cast<std::size_t>(capacity - 1));
     std::memcpy(destination, value.data(), count);
     destination[count] = '\0';
+}
+
+std::string jsonEscape(const std::string& value) {
+    std::string result;
+    result.reserve(value.size() + 8);
+    for (const unsigned char ch : value) {
+        switch (ch) {
+        case '\\': result += "\\\\"; break;
+        case '"': result += "\\\""; break;
+        case '\n': result += "\\n"; break;
+        case '\r': result += "\\r"; break;
+        case '\t': result += "\\t"; break;
+        default:
+            if (ch < 0x20) {
+                std::ostringstream escaped;
+                escaped << "\\u" << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(ch);
+                result += escaped.str();
+            } else {
+                result.push_back(static_cast<char>(ch));
+            }
+        }
+    }
+    return result;
+}
+
+std::string cellString(Cell cell) {
+    return std::string(1, tr::cellChar(cell));
+}
+
+std::string piecesString(const std::vector<Cell>& pieces) {
+    return tr::pieceString(pieces);
+}
+
+std::string boardString(const tr::Board& board) {
+    std::string result;
+    result.reserve(board.size());
+    for (const Cell cell : board) result.push_back(tr::cellChar(cell));
+    return result;
+}
+
+void writeGarbage(std::ostringstream& out, const tr::GarbageRise& garbage) {
+    out << "{\"lines\":" << garbage.lines << ",\"holeMasks\":[";
+    for (std::size_t i = 0; i < garbage.holeMasks.size(); ++i) {
+        if (i) out << ',';
+        out << garbage.holeMasks[i];
+    }
+    out << "],\"matchRatio\":" << std::fixed << std::setprecision(4) << garbage.matchRatio
+        << ",\"manual\":" << (garbage.manuallySpecified ? "true" : "false") << '}';
+}
+
+void writeTimeline(std::ostringstream& out, const std::vector<tr::TimelineStep>& timeline) {
+    out << '[';
+    for (std::size_t i = 0; i < timeline.size(); ++i) {
+        if (i) out << ',';
+        const auto& step = timeline[i];
+        out << "{\"start\":" << std::fixed << std::setprecision(3) << step.startSeconds
+            << ",\"time\":" << step.timeSeconds
+            << ",\"piece\":\"" << tr::cellChar(step.piece)
+            << "\",\"action\":\"" << jsonEscape(step.action)
+            << "\",\"hold\":\"" << tr::cellChar(step.hold)
+            << "\",\"next\":\"" << jsonEscape(piecesString(step.next))
+            << "\",\"observed\":\"" << boardString(step.observed)
+            << "\",\"board\":\"" << boardString(step.board)
+            << "\",\"fullBoard\":\"" << boardString(step.fullBoard)
+            << "\",\"garbage\":";
+        writeGarbage(out, step.garbage);
+        out << ",\"placedPiece\":\"" << tr::cellChar(step.placedPiece)
+            << "\",\"x\":" << step.placementX
+            << ",\"y\":" << step.placementY
+            << ",\"rotation\":" << step.placementRotation
+            << ",\"clearedLines\":" << step.clearedLines
+            << ",\"score\":" << step.score
+            << ",\"uncertain\":" << (step.uncertain ? "true" : "false")
+            << ",\"manual\":" << (step.manuallyFixed ? "true" : "false")
+            << ",\"holdUsed\":" << (step.holdUsed ? "true" : "false")
+            << ",\"queueManual\":" << (step.queueManuallyFixed ? "true" : "false") << '}';
+    }
+    out << ']';
+}
+
+void writeQueue(std::ostringstream& out, const std::vector<tr::QueueRecognitionSample>& samples) {
+    out << '[';
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        if (i) out << ',';
+        const auto& sample = samples[i];
+        out << "{\"time\":" << std::fixed << std::setprecision(3) << sample.timeSeconds
+            << ",\"active\":\"" << tr::cellChar(sample.active)
+            << "\",\"hold\":\"" << tr::cellChar(sample.observation.hold)
+            << "\",\"next\":\"" << jsonEscape(piecesString(sample.observation.next))
+            << "\",\"decodedHold\":\"" << tr::cellChar(sample.decoded.hold)
+            << "\",\"decodedNext\":\"" << jsonEscape(piecesString(sample.decoded.next))
+            << "\",\"stable\":" << (sample.stable ? "true" : "false")
+            << ",\"manual\":" << (sample.manuallyEdited ? "true" : "false")
+            << ",\"sequenceCorrected\":" << (sample.sequenceCorrected ? "true" : "false")
+            << ",\"holdCorrected\":" << (sample.holdCorrected ? "true" : "false")
+            << ",\"rejected\":" << (sample.rejected ? "true" : "false") << '}';
+    }
+    out << ']';
+}
+
+std::string makeReviewSnapshot() {
+    std::ostringstream out;
+    out << "{\"duration\":" << runtime.duration << ",\"p1\":{";
+    out << "\"raw\":"; writeTimeline(out, runtime.output.rawP1);
+    out << ",\"solved\":"; writeTimeline(out, runtime.output.p1);
+    out << ",\"queue\":"; writeQueue(out, runtime.p1Queue);
+    out << ",\"originalQueue\":"; writeQueue(out, runtime.output.originalQueueObservationsP1);
+    out << "},\"p2\":{";
+    out << "\"raw\":"; writeTimeline(out, runtime.output.rawP2);
+    out << ",\"solved\":"; writeTimeline(out, runtime.output.p2);
+    out << ",\"queue\":"; writeQueue(out, runtime.p2Queue);
+    out << ",\"originalQueue\":"; writeQueue(out, runtime.output.originalQueueObservationsP2);
+    out << "}}";
+    return out.str();
+}
+
+std::string makeCandidateJson(int player, std::size_t phase, bool useOverride,
+                              int lines, const std::uint16_t* masks, int maskCount) {
+    const auto& raw = player == 1 ? runtime.output.rawP1 : runtime.output.rawP2;
+    const auto& solved = player == 1 ? runtime.output.p1 : runtime.output.p2;
+    std::optional<tr::GarbageRise> overrideGarbage;
+    if (useOverride) {
+        tr::GarbageRise rise;
+        rise.lines = std::clamp(lines, 0, tr::VisibleRows);
+        rise.manuallySpecified = true;
+        for (int i = 0; i < maskCount && i < rise.lines; ++i) rise.holeMasks.push_back(masks[i]);
+        while (rise.holeMasks.size() < static_cast<std::size_t>(rise.lines)) rise.holeMasks.push_back(1u << 4);
+        overrideGarbage = rise;
+    }
+    const auto candidates = tr::TetrisEngine::correctionCandidates(raw, solved, phase, runtime.settings, overrideGarbage);
+    std::ostringstream out;
+    out << '[';
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+        if (i) out << ',';
+        const auto& candidate = candidates[i];
+        out << "{\"index\":" << i
+            << ",\"piece\":\"" << tr::cellChar(candidate.move.piece)
+            << "\",\"x\":" << candidate.move.x
+            << ",\"y\":" << candidate.move.y
+            << ",\"rotation\":" << candidate.move.rotation
+            << ",\"clearedLines\":" << candidate.move.clearedLines
+            << ",\"cells\":[";
+        for (int cell = 0; cell < candidate.move.cellCount; ++cell) {
+            if (cell) out << ',';
+            out << '[' << candidate.move.cells[static_cast<std::size_t>(cell)][0] << ','
+                << candidate.move.cells[static_cast<std::size_t>(cell)][1] << ']';
+        }
+        out << "],\"board\":\"" << boardString(candidate.move.board)
+            << "\",\"fullBoard\":\"" << boardString(candidate.move.fullBoard)
+            << "\",\"score\":" << candidate.observationScore << ",\"garbage\":";
+        writeGarbage(out, candidate.garbage);
+        out << '}';
+    }
+    out << ']';
+    return out.str();
 }
 
 bool validFrameInput(const std::uint8_t* rgba, int byteCount) {
@@ -267,6 +427,88 @@ int tr_recover() {
 }
 
 EMSCRIPTEN_KEEPALIVE
+const char* tr_review_snapshot() {
+    runtime.reviewJson = makeReviewSnapshot();
+    return runtime.reviewJson.c_str();
+}
+
+EMSCRIPTEN_KEEPALIVE
+const char* tr_review_candidates(int player, int phase, int useOverride, int lines,
+                                 const std::uint16_t* masks, int maskCount) {
+    runtime.candidateJson = makeCandidateJson(player, static_cast<std::size_t>(std::max(0, phase)),
+                                               useOverride != 0, lines, masks, std::max(0, maskCount));
+    return runtime.candidateJson.c_str();
+}
+
+EMSCRIPTEN_KEEPALIVE
+int tr_review_queue_edit(int player, int sampleIndex, int active, int hold,
+                         const int* next, int nextCount) {
+    if (player != 1 && player != 2) return fail("Player must be 1 or 2");
+    auto& samples = player == 1 ? runtime.p1Queue : runtime.p2Queue;
+    if (sampleIndex < 0 || static_cast<std::size_t>(sampleIndex) >= samples.size()) return fail("Queue sample is out of range");
+    if (nextCount < 3 || nextCount > 5) return fail("NEXT must contain 3 to 5 pieces");
+    auto& sample = samples[static_cast<std::size_t>(sampleIndex)];
+    sample.active = static_cast<Cell>(std::clamp(active, 0, 8));
+    sample.observation.hold = static_cast<Cell>(std::clamp(hold, 0, 8));
+    sample.observation.next.clear();
+    for (int i = 0; i < nextCount; ++i) sample.observation.next.push_back(static_cast<Cell>(std::clamp(next[i], 0, 8)));
+    sample.stable = true;
+    sample.manuallyEdited = true;
+    sample.rejected = false;
+    sample.decoded = sample.observation;
+    sample.sequenceCorrected = false;
+    sample.holdCorrected = false;
+    runtime.reviewJson.clear();
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int tr_review_queue_restore(int player, int sampleIndex) {
+    if (player != 1 && player != 2) return fail("Player must be 1 or 2");
+    auto& samples = player == 1 ? runtime.p1Queue : runtime.p2Queue;
+    const auto& original = player == 1 ? runtime.output.originalQueueObservationsP1 : runtime.output.originalQueueObservationsP2;
+    if (sampleIndex < 0 || static_cast<std::size_t>(sampleIndex) >= samples.size() ||
+        static_cast<std::size_t>(sampleIndex) >= original.size()) return fail("Queue sample is out of range");
+    samples[static_cast<std::size_t>(sampleIndex)] = original[static_cast<std::size_t>(sampleIndex)];
+    runtime.reviewJson.clear();
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int tr_review_reanalyze() {
+    if (!tr::reanalyzeQueueObservations(runtime.settings, runtime.output, runtime.error)) return 0;
+    runtime.reviewJson.clear();
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int tr_review_apply_candidate(int player, int phase, int candidateIndex, int useOverride,
+                              int lines, const std::uint16_t* masks, int maskCount) {
+    std::optional<tr::GarbageRise> overrideGarbage;
+    if (useOverride) {
+        tr::GarbageRise rise;
+        rise.lines = std::clamp(lines, 0, tr::VisibleRows);
+        rise.manuallySpecified = true;
+        for (int i = 0; i < maskCount && i < rise.lines; ++i) rise.holeMasks.push_back(masks[i]);
+        while (rise.holeMasks.size() < static_cast<std::size_t>(rise.lines)) rise.holeMasks.push_back(1u << 4);
+        overrideGarbage = rise;
+    }
+    if (!tr::applyCorrectionCandidate(runtime.output, player, static_cast<std::size_t>(std::max(0, phase)),
+                                      static_cast<std::size_t>(std::max(0, candidateIndex)),
+                                      runtime.settings, overrideGarbage, runtime.error)) return 0;
+    runtime.reviewJson.clear();
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int tr_review_restore_automatic(int player, int phase) {
+    if (!tr::restoreAutomaticFrom(runtime.output, player, static_cast<std::size_t>(std::max(0, phase)),
+                                  runtime.settings, runtime.error)) return 0;
+    runtime.reviewJson.clear();
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE
 double tr_sample_interval() {
     return runtime.settings.sampleIntervalSeconds;
 }
@@ -281,6 +523,7 @@ int tr_write_output(const char* inputPath, const char* outputDirectory) {
     if (!inputPath || !outputDirectory) {
         return fail("No recovered timeline is available for output");
     }
+    runtime.output.humanApproved = true;
     runtime.output.includeSourceVideoInTraining = true;
     if (!tr::writeRecoveredOutput(std::filesystem::path(inputPath),
                                   std::filesystem::path(outputDirectory),

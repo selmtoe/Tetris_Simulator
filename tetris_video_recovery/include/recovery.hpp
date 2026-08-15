@@ -72,6 +72,17 @@ bool prepareObservationRequests(double videoDurationSeconds, const Settings& set
 // Rebuild phase boundaries and legal-move timelines from edited raw queue
 // samples while reusing the already-computed ONNX board observations.
 bool reanalyzeQueueObservations(const Settings& settings, RecoveryOutput& output, std::string& error);
+// Apply the same manual legal-candidate correction used by the native review
+// window.  The browser review calls this through the WASM bridge so candidate
+// generation, anchoring, and downstream beam recomputation cannot drift.
+bool applyCorrectionCandidate(RecoveryOutput& output, int player, std::size_t phase,
+                              std::size_t candidateIndex, const Settings& settings,
+                              const std::optional<GarbageRise>& overrideGarbage,
+                              std::string& error);
+// Remove manual corrections from `phase` onward and restore the native beam
+// search for that player.
+bool restoreAutomaticFrom(RecoveryOutput& output, int player, std::size_t phase,
+                          const Settings& settings, std::string& error);
 // Persist the currently approved/corrected timeline as simulator shortcuts,
 // JSON and an HTML review report.
 bool writeRecoveredOutput(const std::filesystem::path& input, const std::filesystem::path& outputDirectory,

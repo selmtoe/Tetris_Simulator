@@ -2042,6 +2042,79 @@ bool reanalyzeQueueObservations(const Settings& settings, RecoveryOutput& output
     return true;
 }
 
+namespace {
+
+std::vector<TimelineStep>& reviewRawFor(RecoveryOutput& output, int player) {
+    return player == 1 ? output.rawP1 : output.rawP2;
+}
+
+std::vector<TimelineStep>& reviewSolvedFor(RecoveryOutput& output, int player) {
+    return player == 1 ? output.p1 : output.p2;
+}
+
+void resetManualFrom(std::vector<TimelineStep>& raw, std::size_t first) {
+    for (std::size_t index = first; index < raw.size(); ++index) {
+        raw[index].manuallyFixed = false;
+        raw[index].board = raw[index].observed;
+        raw[index].fullBoard = raw[index].observed;
+        raw[index].garbage = {};
+        raw[index].placedPiece = Cell::Empty;
+        raw[index].placementX = 0;
+        raw[index].placementY = 0;
+        raw[index].placementRotation = 0;
+        raw[index].clearedLines = 0;
+        raw[index].score = 0;
+    }
+}
+
+} // namespace
+
+bool applyCorrectionCandidate(RecoveryOutput& output, int player, std::size_t phase,
+                              std::size_t candidateIndex, const Settings& settings,
+                              const std::optional<GarbageRise>& overrideGarbage,
+                              std::string& error) {
+    if (player != 1 && player != 2) { error = "Player must be 1 or 2"; return false; }
+    auto& raw = reviewRawFor(output, player);
+    auto& solved = reviewSolvedFor(output, player);
+    if (phase == 0 || phase >= raw.size() || solved.size() != raw.size()) {
+        error = "Correction phase is out of range";
+        return false;
+    }
+    const auto candidates = TetrisEngine::correctionCandidates(raw, solved, phase, settings, overrideGarbage);
+    if (candidateIndex >= candidates.size()) {
+        error = "Correction candidate is out of range";
+        return false;
+    }
+    const CorrectionCandidate& selected = candidates[candidateIndex];
+    resetManualFrom(raw, phase + 1);
+    raw[phase].manuallyFixed = true;
+    raw[phase].board = selected.move.board;
+    raw[phase].fullBoard = selected.move.fullBoard;
+    raw[phase].garbage = selected.garbage;
+    raw[phase].placedPiece = selected.move.piece;
+    raw[phase].placementX = selected.move.x;
+    raw[phase].placementY = selected.move.y;
+    raw[phase].placementRotation = selected.move.rotation;
+    raw[phase].clearedLines = selected.move.clearedLines;
+    raw[phase].score = selected.observationScore;
+    solved = TetrisEngine::recomputeFrom(raw, solved, phase, settings);
+    return true;
+}
+
+bool restoreAutomaticFrom(RecoveryOutput& output, int player, std::size_t phase,
+                          const Settings& settings, std::string& error) {
+    if (player != 1 && player != 2) { error = "Player must be 1 or 2"; return false; }
+    auto& raw = reviewRawFor(output, player);
+    auto& solved = reviewSolvedFor(output, player);
+    if (phase == 0 || phase >= raw.size() || solved.size() != raw.size()) {
+        error = "Restore phase is out of range";
+        return false;
+    }
+    resetManualFrom(raw, phase);
+    solved = TetrisEngine::beamSearch(raw, settings);
+    return true;
+}
+
 bool writeRecoveredOutput(const std::filesystem::path& input, const std::filesystem::path& outputDirectory,
                           const Settings& settings, RecoveryOutput& output, std::string& error) {
     return writeOutputs(input, outputDirectory, output.p1, output.p2,

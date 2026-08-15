@@ -991,21 +991,6 @@ void selectPhase(std::size_t index) {
     syncVideoToSelectedPhase(false);
 }
 
-void resetManualFrom(std::vector<tr::TimelineStep>& raw, std::size_t first) {
-    for (std::size_t index = first; index < raw.size(); ++index) {
-        raw[index].manuallyFixed = false;
-        raw[index].board = raw[index].observed;
-        raw[index].fullBoard = raw[index].observed;
-        raw[index].garbage = {};
-        raw[index].placedPiece = tr::Cell::Empty;
-        raw[index].placementX = 0;
-        raw[index].placementY = 0;
-        raw[index].placementRotation = 0;
-        raw[index].clearedLines = 0;
-        raw[index].score = 0;
-    }
-}
-
 bool laterManualCorrectionExists(const std::vector<tr::TimelineStep>& raw, std::size_t index) {
     return std::any_of(raw.begin() + static_cast<std::ptrdiff_t>(std::min(index + 1, raw.size())), raw.end(),
                        [](const tr::TimelineStep& step) { return step.manuallyFixed; });
@@ -1015,7 +1000,6 @@ void applySelectedCandidate(HWND window) {
     if (g_review.phase == 0 || g_review.selectedCandidate < 0 ||
         static_cast<std::size_t>(g_review.selectedCandidate) >= g_review.candidates.size()) return;
     auto& raw = reviewRaw();
-    auto& solved = reviewSolved();
     const std::size_t phase = g_review.phase;
     if (laterManualCorrectionExists(raw, phase)) {
         const int answer = MessageBoxW(window,
@@ -1025,21 +1009,15 @@ void applySelectedCandidate(HWND window) {
     }
 
     const tr::CorrectionCandidate selected = g_review.candidates[static_cast<std::size_t>(g_review.selectedCandidate)];
-    resetManualFrom(raw, phase + 1);
-    raw[phase].manuallyFixed = true;
-    raw[phase].board = selected.move.board;
-    raw[phase].fullBoard = selected.move.fullBoard;
-    raw[phase].garbage = selected.garbage;
-    raw[phase].placedPiece = selected.move.piece;
-    raw[phase].placementX = selected.move.x;
-    raw[phase].placementY = selected.move.y;
-    raw[phase].placementRotation = selected.move.rotation;
-    raw[phase].clearedLines = selected.move.clearedLines;
-    raw[phase].score = selected.observationScore;
-
-    // Keep the approved prefix intact; only the selected phase and following
-    // phases are searched again.
-    solved = tr::TetrisEngine::recomputeFrom(raw, solved, phase, g_settings);
+    std::string error;
+    const std::optional<tr::GarbageRise> overrideGarbage = g_review.garbageOverrideEnabled
+        ? std::optional<tr::GarbageRise>(g_review.garbageEditor) : std::nullopt;
+    if (!tr::applyCorrectionCandidate(g_output, g_review.player + 1, phase,
+                                      static_cast<std::size_t>(g_review.selectedCandidate),
+                                      g_settings, overrideGarbage, error)) {
+        MessageBoxW(window, widen(error).c_str(), L"Correction failed", MB_OK | MB_ICONERROR);
+        return;
+    }
     rebuildPhaseList();
     std::wostringstream message;
     message << playerName() << L" の局面 #" << phase << L" を " << cellText(selected.move.piece)
@@ -1055,10 +1033,12 @@ void restoreAutomaticFromHere(HWND window) {
         L"自動復元へ戻す", MB_ICONQUESTION | MB_YESNO | MB_DEFBUTTON2);
     if (answer != IDYES) return;
     auto& raw = reviewRaw();
-    auto& solved = reviewSolved();
     const std::size_t phase = g_review.phase;
-    resetManualFrom(raw, phase);
-    solved = tr::TetrisEngine::beamSearch(raw, g_settings);
+    std::string error;
+    if (!tr::restoreAutomaticFrom(g_output, g_review.player + 1, phase, g_settings, error)) {
+        MessageBoxW(window, widen(error).c_str(), L"Restore failed", MB_OK | MB_ICONERROR);
+        return;
+    }
     rebuildPhaseList();
     setText(g_review.header, std::wstring(playerName()) + L" の局面 #" + std::to_wstring(phase) +
                              L" 以降を自動の合法手探索へ戻しました。");

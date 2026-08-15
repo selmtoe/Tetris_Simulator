@@ -17,6 +17,18 @@ the desktop program:
 6. writeRecoveredOutput() produces the native JSON, simulator URLs, report,
    and training annotation in the WASM filesystem.
 
+After analysis, the browser stays in the same review stage as the desktop
+tool. The phase editor can filter ONNX cells, paint the four placement cells,
+select an exact originalLegalMoves() candidate, edit garbage-rise line holes,
+and restore or re-run the automatic beam from any phase. The time-based queue
+log supports multi-row current/Hold/NEXT edits, restoring raw recognition, and
+rebuilding the phase timeline from those edits.
+
+The export button writes the approved recovery JSON, P1/P2/2P simulator links,
+the HTML report, training-annotation.json, training-manifest.json, and a
+downloadable copy of the source video used by the training dataset. The
+annotation is marked human-approved only when that button is pressed.
+
 tetris_recovery.js and tetris_recovery.wasm are generated with Emscripten from
 src/recovery.cpp, src/tetris_engine.cpp, src/vision.cpp, src/wasm_bridge.cpp,
 and the portable WASM helpers. The ONNX model is loaded from
@@ -32,3 +44,7 @@ Then open:
 
 The native desktop executable remains under tetris_video_recovery/bin/ and the
 original simulator remains untouched.
+
+To rebuild the browser bundle after changing the shared C++ bridge:
+
+    powershell -ExecutionPolicy Bypass -File .\tetris_video_recovery\build-web.ps1

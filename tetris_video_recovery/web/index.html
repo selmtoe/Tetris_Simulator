@@ -10,10 +10,11 @@
 <body>
   <main class="shell">
     <header class="hero">
-      <p class="eyebrow">C++ core → WebAssembly</p>
+      <p class="eyebrow">C++ core · WebAssembly</p>
       <h1>Tetris Video Recovery</h1>
-      <p class="lead">本家のキュー復元・盤面投票・合法手ビーム探索を、同じC++ソースからWASMで実行します。動画は端末内で処理されます。</p>
+      <p class="lead">本家と同じキュー復元・NEXT履歴修正・盤面投票・合法手ビーム探索を、端末内のC++/WASMで実行します。解析後は本家と同じレビュー編集からテト譜と学習データを保存できます。</p>
     </header>
+
     <section class="panel controls">
       <label class="file-button">動画を選択<input id="video-file" type="file" accept="video/*"></label>
       <span id="file-name" class="muted">未選択</span>
@@ -21,24 +22,85 @@
       <button id="cancel" disabled>キャンセル</button>
       <div class="progress"><div id="progress-bar"></div></div>
       <div class="status"><span id="status">動画を選択してください</span><span id="percent">0%</span></div>
-      <p class="small">設定は <code>config/tetris_recover.ini</code> を読み込みます。サンプル間隔やONNXサンプル数を画面側で変更しません。</p>
+      <p class="small">設定は <code>config/tetris_recover.ini</code> をそのまま読み込みます。サンプル間隔・ONNXサンプル数は画面側で変更しません。</p>
     </section>
+
     <section class="panel video-panel">
       <div class="section-title"><h2>動画</h2><span id="duration" class="muted">—</span></div>
       <video id="video" controls playsinline muted preload="metadata"></video>
       <canvas id="frame" class="hidden"></canvas>
     </section>
+
+    <section id="review" class="panel review-panel hidden">
+      <div class="section-title">
+        <div><h2>本家レビュー編集</h2><p id="review-summary" class="small">解析結果を確認してください。</p></div>
+        <div class="player-tabs"><button id="player-p1" class="active">P1</button><button id="player-p2">P2</button></div>
+      </div>
+      <div class="review-layout">
+        <aside class="phase-side">
+          <div class="side-heading"><strong>局面</strong><span id="phase-count" class="muted"></span></div>
+          <div id="phase-list" class="phase-list"></div>
+        </aside>
+        <div class="review-main">
+          <div class="review-toolbar">
+            <span id="phase-label">局面を選択</span>
+            <div class="video-actions"><button id="video-back">−0.5秒</button><button id="video-phase">局面の前から再生</button><button id="video-play">再生</button><button id="video-forward">＋0.5秒</button></div>
+          </div>
+          <div class="boards-row">
+            <div class="board-card"><h3>前盤面・配置フィルタ</h3><p>配置した4セルをクリック</p><div id="previous-board" class="board-grid placement-board"></div></div>
+            <div class="board-card"><h3>ONNX観測盤面</h3><p>必須セルをクリック</p><div id="observed-board" class="board-grid required-board"></div></div>
+            <div class="board-card"><h3>選択候補の着地</h3><p>現在の固定候補</p><div id="candidate-board" class="board-grid"></div></div>
+          </div>
+          <div id="filter-info" class="notice"></div>
+          <div class="review-actions"><button id="clear-filter">観測・配置フィルタを解除</button><button id="restore-automatic">この局面以降を自動探索へ戻す</button><button id="apply-candidate" class="primary" disabled>選択候補で固定して以降を再探索</button></div>
+          <div class="candidate-section">
+            <div class="section-title"><h3>合法候補</h3><span id="candidate-info" class="muted"></span></div>
+            <div id="candidate-list" class="candidate-list"></div>
+          </div>
+          <div class="garbage-editor">
+            <div class="section-title"><h3>ガベージ上がり</h3><button id="garbage-auto">自動検出に戻す</button></div>
+            <label>行数 <input id="garbage-lines" type="number" min="0" max="20" value="0"></label>
+            <p id="garbage-info" class="small">自動検出。穴は下の盤面で1行につき1つ選べます。</p>
+            <div id="garbage-board" class="board-grid garbage-board"></div>
+          </div>
+        </div>
+      </div>
+
+      <details class="queue-editor" open>
+        <summary>時刻別キュー認識ログ（現在ミノ / Hold / NEXT）</summary>
+        <div class="queue-toolbar">
+          <div class="player-tabs"><button id="queue-p1" class="active">P1</button><button id="queue-p2">P2</button></div>
+          <button id="queue-copy-selected">選択行のNEXT履歴をコピー</button><button id="queue-copy-all">全NEXT履歴をコピー</button>
+          <button id="queue-restore">選択行を元の認識へ戻す</button><button id="queue-reanalyze" class="primary">修正を反映して局面を再解析</button>
+        </div>
+        <div class="queue-edit-controls">
+          <label>現在ミノ<select id="queue-active"></select></label>
+          <label>Hold<select id="queue-hold"></select></label>
+          <label>NEXT1<select id="queue-next-1"></select></label><label>NEXT2<select id="queue-next-2"></select></label><label>NEXT3<select id="queue-next-3"></select></label><label>NEXT4<select id="queue-next-4"></select></label><label>NEXT5<select id="queue-next-5"></select></label>
+          <button id="queue-apply">選択行へ適用</button>
+        </div>
+        <p id="queue-info" class="small">行を選ぶと、その時刻で動画を停止します。Ctrl/Shift相当の複数選択はチェックボックスで行えます。</p>
+        <div id="queue-list" class="queue-list"></div>
+      </details>
+
+      <div class="export-panel">
+        <div><h3>承認済み出力</h3><p class="small">修正内容を確定すると、本家と同じJSON・Simulator URL・HTMLレポートに加えて、学習アノテーションとマニフェストを保存します。</p></div>
+        <button id="export" class="primary">テト譜と学習データを保存</button>
+      </div>
+    </section>
+
     <section class="panel results">
-      <div class="section-title"><h2>解析結果</h2><span id="counts" class="muted">未解析</span></div>
-      <div id="links" class="links"><span class="muted">解析完了後に本家と同じ出力を表示します。</span></div>
+      <div class="section-title"><h2>出力</h2><span id="counts" class="muted">未出力</span></div>
+      <div id="links" class="links"><span class="muted">出力するとSimulatorリンクを表示します。</span></div>
       <div id="downloads" class="downloads"></div>
     </section>
+
     <section class="panel log-panel">
       <div class="section-title"><h2>処理ログ</h2><span id="model-status" class="muted">ONNX: 未読込</span></div>
       <pre id="log">待機中</pre>
     </section>
-    <footer>GitHub Pages上で動作するC++/WASM版。出力生成までブラウザ内で完結します。</footer>
+    <footer>GitHub Pages上で動作するC++/WASM版。動画・編集内容・学習データは端末内で処理されます。</footer>
   </main>
-  <script type="module" src="./app.js?rev=defdd09"></script>
+  <script type="module" src="./app.js?rev=review-v1"></script>
 </body>
 </html>
