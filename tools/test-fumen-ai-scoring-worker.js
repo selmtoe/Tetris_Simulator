@@ -378,6 +378,20 @@ const holdReplayResults = run([
 });
 assert(holdReplayResults.length === 2 && holdReplayResults.every(result => result.status === 'scored'), 'Replay HOLD operation was not scored.');
 
+// normalizeReplayCase stores HOLD/NEXT after resolving the operation on each
+// page. The scorer must still reconstruct the pre-operation state from the
+// initial sequence; otherwise every normalized HOLD page is rejected.
+const normalizedHoldReplayResults = run([
+    { p1: { board: empty(), hold: 'T', next: 'IOLJSZ', operation: operationFromEdge(holdReplayEdge0) } },
+    { p1: { board: holdReplayBoard1, hold: 'T', next: 'OLJSZ', operation: operationFromEdge(holdReplayEdge1) } }
+], 21, {
+    replay: true,
+    operationPages: [0, 1],
+    endPage: 1,
+    replayInitial: { p1: { sequence: 'TIOLJSZ', hold: 'J' } }
+});
+assert(normalizedHoldReplayResults.length === 2 && normalizedHoldReplayResults.every(result => result.status === 'scored'), 'Normalized replay HOLD state was not reconstructed.');
+
 // Older simulator recordings omitted holdUsed for an empty HOLD because the
 // locked piece came from NEXT. The scorer must infer that queue-consuming
 // action from the pre-lock piece state and keep later pages aligned.

@@ -364,17 +364,23 @@ function replaySourceAtPage(pages, initial, pageIndex) {
         }
         if (operation) current = queue.shift() || null;
     }
-    const page = pages[pageIndex]?.p1 || {};
+    const page = explicitPage;
     const pageHold = cleanPieces(page.hold)[0] || null;
     const pageNext = cleanPieces(page.next);
+    const hasSeedState = Boolean(current || hold || queue.length);
+    // `normalizeReplayCase` stores the state after resolving the current
+    // operation on legacy replay pages: a HOLD page therefore already has
+    // the newly held piece in `hold` and NEXT has already consumed the piece
+    // selected by HOLD.  Those fields describe the viewer's post-HOLD state,
+    // not the state in which the recorded operation was started.  The loop
+    // above is the authoritative pre-operation state for scoring; using the
+    // page fields here makes every HOLD operation look like an impossible
+    // piece/queue transition.
     return {
         board: Array.isArray(page.board) ? page.board : [],
         current: current || cleanPieces(page.current)[0] || null,
-        hold: pageHold || hold || null,
-        // Simulator-recorded pages intentionally leave NEXT blank.  Use the
-        // reconstructed queue in that format; hand-authored replay pages
-        // with NEXT take precedence.
-        next: pageNext.length ? pageNext : queue,
+        hold: hasSeedState ? (hold || null) : pageHold,
+        next: hasSeedState ? queue : pageNext,
         explicitCurrent: false
     };
 }
