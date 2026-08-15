@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 const video = $("video");
 const canvas = $("frame");
 const ctx = canvas.getContext("2d", { willReadFrequently: true });
+const RELEASE = "f2ffa62";
 const state = { file: null, module: null, session: null, running: false, cancel: false, framePtr: 0, frameBytes: 0, holdPtr: 0, nextPtr: 0, colorsPtr: 0, featurePtr: 0, labelPtr: 0 };
 
 function log(message) { $("log").textContent += "\n" + message; $("log").scrollTop = $("log").scrollHeight; }
@@ -27,8 +28,8 @@ function frameSize() { return video.videoWidth * video.videoHeight * 4; }
 
 async function loadWasm() {
   if (state.module) return state.module;
-  const loaded = await import("./tetris_recovery.js");
-  state.module = await loaded.default({ locateFile: name => new URL(name, import.meta.url).href });
+  const loaded = await import("./tetris_recovery.js?rev=" + RELEASE);
+  state.module = await loaded.default({ locateFile: name => new URL(name + "?rev=" + RELEASE, import.meta.url).href });
   return state.module;
 }
 
