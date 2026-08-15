@@ -4,6 +4,37 @@
 
 #include <memory>
 
+#ifdef __EMSCRIPTEN__
+
+namespace tr {
+
+// Browser builds run the identical feature vector through ONNX Runtime Web
+// from JavaScript.  Keeping this stub lets the native recovery translation
+// unit be compiled unchanged so its queue/beam/output code is shared by both
+// targets.
+class OnnxBoardModel {
+public:
+    OnnxBoardModel(const std::filesystem::path&, std::string&) {}
+    ~OnnxBoardModel() = default;
+    OnnxBoardModel(const OnnxBoardModel&) = delete;
+    OnnxBoardModel& operator=(const OnnxBoardModel&) = delete;
+
+    bool ready() const { return false; }
+    const std::string& inputName() const { return empty_; }
+    const std::string& outputName() const { return empty_; }
+    std::vector<Cell> infer(const std::vector<float>&, std::string& error) const {
+        error = "ONNX inference is supplied by ONNX Runtime Web";
+        return std::vector<Cell>(BoardWidth * VisibleRows, Cell::Empty);
+    }
+
+private:
+    std::string empty_;
+};
+
+} // namespace tr
+
+#else
+
 #include <onnxruntime_cxx_api.h>
 
 namespace tr {
@@ -32,3 +63,5 @@ private:
 };
 
 } // namespace tr
+
+#endif

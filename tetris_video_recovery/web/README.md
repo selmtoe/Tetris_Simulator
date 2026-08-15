@@ -1,23 +1,34 @@
-# Tetris Video Analyzer (browser)
+# Browser video recovery
 
-`<video>` と Canvas で動画を読み込み、同梱のONNXモデルをONNX Runtime WebのWASM実行プロバイダで推論するブラウザ版です。動画はサーバーへアップロードせず、ブラウザ内だけで処理します。
+This directory is the iPad/Safari front end for the native video recovery tool.
 
-## 起動
+The browser pipeline is deliberately two-pass and uses the same C++ sources as
+the desktop program:
 
-GitHub Pagesのサイトを開き、動画を選択してください。ローカルで確認する場合はHTTPサーバー経由で開きます。
+1. VisionAnalyzer::observeQueue() scans every configured sample interval.
+2. prepareObservationRequests() runs the native queue decoder and produces the
+   native phase-derived ONNX request times.
+3. The browser executes the checked-in tetris.onnx with ONNX Runtime Web.
+4. VisionAnalyzer::boardFeatures() and
+   VisionAnalyzer::analyzeBoardWithLabels() keep feature extraction,
+   classic garbage fallback, and label application in C++.
+5. recoverObservations() runs the same queue phase builder, timeline
+   construction, garbage handling, and TetrisEngine::beamSearch().
+6. writeRecoveredOutput() produces the native JSON, simulator URLs, report,
+   and training annotation in the WASM filesystem.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File tools/serve.ps1 -OpenPath tetris_video_recovery/web/ -NoBrowser
-```
+tetris_recovery.js and tetris_recovery.wasm are generated with Emscripten from
+src/recovery.cpp, src/tetris_engine.cpp, src/vision.cpp, src/wasm_bridge.cpp,
+and the portable WASM helpers. The ONNX model is loaded from
+assets/tetris.onnx.
 
-## 対応範囲
+Run locally from the repository root with any static server:
 
-- iPad Safariを想定したローカル動画選択
-- 16:9中央クロップ
-- P1/P2の盤面、HOLD、NEXTの認識
-- ONNX Runtime Web（WASM）による200セル一括推論
-- 解析サンプルとキュー変化イベントのJSON保存
+    python -m http.server 8080
 
-動画と解析結果は自動送信されません。現在のWindows版 `../src/` にある法的手順のビーム探索や確認用HTMLレポートの全機能ではなく、ブラウザで利用できる認識部分を提供します。既存のC++版はそのまま残してあり、Windowsでの完全な復旧処理は従来どおり `../start.bat` / `../run.ps1` から起動できます。
+Then open:
 
-GitHub Pagesでは、リポジトリの `tetris_video_recovery/web/` を開いてください。ルートのSimulatorは変更していません。
+    http://localhost:8080/tetris_video_recovery/web/
+
+The native desktop executable remains under tetris_video_recovery/bin/ and the
+original simulator remains untouched.

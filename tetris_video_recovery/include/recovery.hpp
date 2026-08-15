@@ -48,6 +48,27 @@ bool loadSettings(const std::filesystem::path& path, Settings& settings, std::st
 // user has approved the result.
 bool analyzeVideo(const std::filesystem::path& input, const std::filesystem::path& modelPath,
                   const Settings& settings, Status& status, RecoveryOutput& output, std::string& error);
+// Browser/WASM entry point. The browser supplies the exact raw queue and
+// board observations produced by the shared VisionAnalyzer; all queue
+// decoding, phase construction, legal-move reconstruction, and beam scoring
+// then run through the same C++ implementation as the native tool.
+bool recoverObservations(double videoDurationSeconds, const Settings& settings,
+                         std::vector<QueueRecognitionSample> p1Queue,
+                         std::vector<QueueRecognitionSample> p2Queue,
+                         std::vector<BoardObservation> p1Boards,
+                         std::vector<BoardObservation> p2Boards,
+                         RecoveryOutput& output, std::string& error);
+// Decode the complete raw queue history using the native queue decoder and
+// return the exact ONNX request times generated from its phase boundaries.
+// The browser uses this between its queue and board passes; the returned
+// queue vectors contain the same decoded metadata that the native pipeline
+// keeps for its JSON/review output.
+bool prepareObservationRequests(double videoDurationSeconds, const Settings& settings,
+                                std::vector<QueueRecognitionSample>& p1Queue,
+                                std::vector<QueueRecognitionSample>& p2Queue,
+                                std::vector<double>& p1BoardTimes,
+                                std::vector<double>& p2BoardTimes,
+                                std::string& error);
 // Rebuild phase boundaries and legal-move timelines from edited raw queue
 // samples while reusing the already-computed ONNX board observations.
 bool reanalyzeQueueObservations(const Settings& settings, RecoveryOutput& output, std::string& error);

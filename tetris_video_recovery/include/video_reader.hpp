@@ -2,7 +2,9 @@
 
 #include "common.hpp"
 
+#ifndef __EMSCRIPTEN__
 #include <windows.h>
+#endif
 
 #include <memory>
 

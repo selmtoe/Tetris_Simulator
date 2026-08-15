@@ -4,8 +4,12 @@
 #include "tetris_engine.hpp"
 #include "vision.hpp"
 
+#ifndef __EMSCRIPTEN__
 #include <windows.h>
 #include <bcrypt.h>
+#else
+#include "wasm_sha256.hpp"
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -718,6 +722,8 @@ std::vector<BoardRequest> makeBoardRequests(const std::vector<QueuePhase>& phase
     return result;
 }
 
+#ifndef __EMSCRIPTEN__
+
 unsigned boardWorkerCount() {
     const unsigned hardware = std::thread::hardware_concurrency();
     if (hardware == 0) return 4;
@@ -795,6 +801,24 @@ private:
     std::size_t maxQueued_ = 1;
     bool stopping_ = false;
 };
+
+#else
+
+// The browser calls the same analysis in a single WASM instance.  Keeping
+// this adapter synchronous preserves submission order and avoids requiring
+// SharedArrayBuffer/cross-origin isolation on GitHub Pages.
+unsigned boardWorkerCount() { return 1; }
+
+class BoardWorkerPool {
+public:
+    explicit BoardWorkerPool(unsigned) {}
+    BoardWorkerPool(const BoardWorkerPool&) = delete;
+    BoardWorkerPool& operator=(const BoardWorkerPool&) = delete;
+    void submit(std::function<void()> task) { task(); }
+    void wait() {}
+};
+
+#endif
 
 bool collectQueuePhases(const std::filesystem::path& input, const Settings& settings, Status& status,
                         std::vector<QueuePhase>& p1, std::vector<QueuePhase>& p2,
@@ -1518,6 +1542,9 @@ void writeTimelineJson(std::ostringstream& out, const std::vector<TimelineStep>&
 }
 
 std::string sha256File(const std::filesystem::path& path) {
+#ifdef __EMSCRIPTEN__
+    return wasmSha256File(path);
+#else
     BCRYPT_ALG_HANDLE algorithm = nullptr;
     BCRYPT_HASH_HANDLE hash = nullptr;
     DWORD objectLength = 0;
@@ -1572,6 +1599,7 @@ std::string sha256File(const std::filesystem::path& path) {
         result.push_back(Hex[value & 15]);
     }
     return result;
+#endif
 }
 
 bool writeTrainingAnnotation(const std::filesystem::path& input, const std::filesystem::path& directory,
@@ -1849,6 +1877,17 @@ void solveTimelinesParallel(const Settings& settings,
                             const std::vector<TimelineStep>& rawP2,
                             std::vector<TimelineStep>& solvedP1,
                             std::vector<TimelineStep>& solvedP2) {
+#ifdef __EMSCRIPTEN__
+    // WebAssembly builds run in the ordinary single-threaded browser
+    // environment.  Keep the exact same beamSearch calls and ordering while
+    // avoiding std::async, which would require a pthread-enabled deployment
+    // and SharedArrayBuffer on GitHub Pages.
+    solvedP1 = settings.player1Enabled ? TetrisEngine::beamSearch(rawP1, settings)
+                                       : std::vector<TimelineStep>{};
+    solvedP2 = settings.player2Enabled ? TetrisEngine::beamSearch(rawP2, settings)
+                                       : std::vector<TimelineStep>{};
+    return;
+#else
     if (settings.player1Enabled && settings.player2Enabled) {
         auto p1Future = std::async(std::launch::async, [&settings, &rawP1] {
             return TetrisEngine::beamSearch(rawP1, settings);
@@ -1861,6 +1900,7 @@ void solveTimelinesParallel(const Settings& settings,
                                        : std::vector<TimelineStep>{};
     solvedP2 = settings.player2Enabled ? TetrisEngine::beamSearch(rawP2, settings)
                                        : std::vector<TimelineStep>{};
+#endif
 }
 
 bool analyzeVideo(const std::filesystem::path& input, const std::filesystem::path& modelPath,
@@ -1901,6 +1941,65 @@ bool analyzeVideo(const std::filesystem::path& input, const std::filesystem::pat
     status.progress.store(97);
     status.progress.store(100);
     status.setMessage("Analysis complete: review and correct legal candidates before export");
+    return true;
+}
+
+bool recoverObservations(double videoDurationSeconds, const Settings& settings,
+                         std::vector<QueueRecognitionSample> p1Queue,
+                         std::vector<QueueRecognitionSample> p2Queue,
+                         std::vector<BoardObservation> p1Boards,
+                         std::vector<BoardObservation> p2Boards,
+                         RecoveryOutput& output, std::string& error) {
+    if (!(videoDurationSeconds > 0)) {
+        error = "Browser observation input has no positive video duration";
+        return false;
+    }
+    output = RecoveryOutput{};
+    output.videoDurationSeconds = videoDurationSeconds;
+    output.queueObservationsP1 = std::move(p1Queue);
+    output.queueObservationsP2 = std::move(p2Queue);
+    output.originalQueueObservationsP1 = output.queueObservationsP1;
+    output.originalQueueObservationsP2 = output.queueObservationsP2;
+    output.boardObservationsP1 = std::move(p1Boards);
+    output.boardObservationsP2 = std::move(p2Boards);
+
+    const auto p1Phases = settings.player1Enabled
+        ? buildQueuePhasesFromSamples(output.queueObservationsP1, settings, videoDurationSeconds)
+        : std::vector<QueuePhase>{};
+    const auto p2Phases = settings.player2Enabled
+        ? buildQueuePhasesFromSamples(output.queueObservationsP2, settings, videoDurationSeconds)
+        : std::vector<QueuePhase>{};
+
+    output.rawP1 = buildRawTimelineFromFlatBoards(p1Phases, output.boardObservationsP1);
+    output.rawP2 = buildRawTimelineFromFlatBoards(p2Phases, output.boardObservationsP2);
+    solveTimelinesParallel(settings, output.rawP1, output.rawP2, output.p1, output.p2);
+    return true;
+}
+
+bool prepareObservationRequests(double videoDurationSeconds, const Settings& settings,
+                                std::vector<QueueRecognitionSample>& p1Queue,
+                                std::vector<QueueRecognitionSample>& p2Queue,
+                                std::vector<double>& p1BoardTimes,
+                                std::vector<double>& p2BoardTimes,
+                                std::string& error) {
+    if (!(videoDurationSeconds > 0)) {
+        error = "Browser observation input has no positive video duration";
+        return false;
+    }
+    p1BoardTimes.clear();
+    p2BoardTimes.clear();
+    const auto p1Phases = settings.player1Enabled
+        ? buildQueuePhasesFromSamples(p1Queue, settings, videoDurationSeconds)
+        : std::vector<QueuePhase>{};
+    const auto p2Phases = settings.player2Enabled
+        ? buildQueuePhasesFromSamples(p2Queue, settings, videoDurationSeconds)
+        : std::vector<QueuePhase>{};
+    for (const auto& request : makeBoardRequests(p1Phases, settings.onnxSamples)) {
+        p1BoardTimes.push_back(request.time);
+    }
+    for (const auto& request : makeBoardRequests(p2Phases, settings.onnxSamples)) {
+        p2BoardTimes.push_back(request.time);
+    }
     return true;
 }
 

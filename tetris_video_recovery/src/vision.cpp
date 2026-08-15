@@ -548,6 +548,10 @@ std::vector<float> VisionAnalyzer::extractBoardFeatures(const Frame& frame) cons
                                                  boardSampleOffsets_, boardSampleFractions_));
 }
 
+std::vector<float> VisionAnalyzer::boardFeatures(const Frame& frame) const {
+    return extractBoardFeatures(frame);
+}
+
 VisibleBoard VisionAnalyzer::classicBoard(const Frame& frame) const {
     return classicBoardFromImage(makeBoardImage(frame, layout_.board, crop_.x, crop_.y, crop_.scale,
                                                 frameWidth_, frameHeight_, boardImageWidth_, boardImageHeight_,
@@ -568,12 +572,26 @@ BoardObservation VisionAnalyzer::analyzeBoard(const Frame& frame) const {
                                             frameWidth_, frameHeight_, boardImageWidth_, boardImageHeight_,
                                             boardSampleOffsets_, boardSampleFractions_);
     const auto labels = model_->infer(featuresFromBoardImage(image), result.recognitionError);
+    auto labeled = analyzeBoardWithLabels(frame, labels);
+    labeled.timeSeconds = result.timeSeconds;
+    labeled.recognitionError = result.recognitionError;
+    return labeled;
+}
+
+BoardObservation VisionAnalyzer::analyzeBoardWithLabels(const Frame& frame,
+                                                        const std::vector<Cell>& labels) const {
+    BoardObservation result;
+    result.timeSeconds = static_cast<double>(frame.time100ns) / 10000000.0;
+    const BoardImage image = makeBoardImage(frame, layout_.board, crop_.x, crop_.y, crop_.scale,
+                                            frameWidth_, frameHeight_, boardImageWidth_, boardImageHeight_,
+                                            boardSampleOffsets_, boardSampleFractions_);
     const auto classic = classicBoardFromImage(image);
     for (int row = 0; row < VisibleRows; ++row) {
         int garbage = 0;
         bool onlyEmptyOrGarbage = true;
         for (int col = 0; col < BoardWidth; ++col) {
-            const Cell cell = labels[index(col, row)];
+            const Cell cell = index(col, row) < static_cast<int>(labels.size())
+                ? labels[index(col, row)] : Cell::Empty;
             result.board[index(col, row)] = cell;
             if (cell == Cell::Garbage) ++garbage;
             if (cell != Cell::Empty && cell != Cell::Garbage) onlyEmptyOrGarbage = false;

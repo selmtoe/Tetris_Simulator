@@ -12,6 +12,11 @@ public:
     // Exact ports of analyzeNextQueue and analyzeBoardOnly in 動画解析.html.
     QueueObservation observeQueue(const Frame& frame) const;
     BoardObservation analyzeBoard(const Frame& frame) const;
+    // Browser/WASM bridge: feature extraction and label application remain
+    // in this C++ implementation; only the ONNX tensor execution is supplied
+    // by ONNX Runtime Web.
+    std::vector<float> boardFeatures(const Frame& frame) const;
+    BoardObservation analyzeBoardWithLabels(const Frame& frame, const std::vector<Cell>& labels) const;
     BoardObservation analyze(const Frame& frame) const;
 
     static BoardObservation aggregate(const std::vector<BoardObservation>& samples);

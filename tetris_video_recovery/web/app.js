@@ -1,27 +1,303 @@
-const MODEL_URL=new URL("./assets/tetris.onnx",document.baseURI).href;
-const FRAME_WIDTH=1920,FRAME_HEIGHT=1080,VISIBLE_ROWS=20,BOARD_WIDTH=10,PIECES=["I","O","T","L","J","S","Z"],CLASS_NAMES=["","G","S","Z","L","J","O","I","T"];
-const PALETTE={NULL:[{r:0,g:0,b:0},{r:48,g:40,b:56}],G:[{r:153,g:153,b:153},{r:216,g:216,b:216}],I:[{r:1,g:152,b:153},{r:1,g:153,b:213}],O:[{r:153,g:154,b:2},{r:249,g:185,b:0}],T:[{r:152,g:0,b:153},{r:135,g:30,b:136}],L:[{r:153,g:103,b:0},{r:245,g:97,b:0}],J:[{r:0,g:0,b:187},{r:0,g:75,b:165}],S:[{r:16,g:151,b:31},{r:92,g:181,b:35}],Z:[{r:153,g:0,b:0},{r:218,g:24,b:34}]};
-const LAYOUTS={p1:{board:{x:316,y:157,w:351,h:713},hold:[160,155],next:[[500,122],[500,175],[500,225],[500,275],[500,325]]},p2:{board:{x:1253,y:157,w:354,h:713},hold:[790,155],next:[[1130,122],[1130,175],[1130,225],[1130,275],[1130,325]]}};
-const $=id=>document.getElementById(id),video=$("video"),videoFile=$("video-file"),frameCanvas=$("frame-canvas"),frameCtx=frameCanvas.getContext("2d",{willReadFrequently:true});
-const state={file:null,objectUrl:null,running:false,cancel:false,session:null,result:null,lastBoard:{p1:null,p2:null}};
-function log(message,kind=""){const line=document.createElement("p");line.textContent=message;if(kind)line.className=kind;const box=$("log");if(box.children.length===1&&box.firstElementChild.classList.contains("muted"))box.replaceChildren();box.append(line);box.scrollTop=box.scrollHeight}
-function setProgress(value,message){const pct=Math.max(0,Math.min(100,value));$("progress-bar").style.width=`${pct}%`;$("progress-text").textContent=`${Math.round(pct)}%`;if(message)$("status-text").textContent=message}
-function distance(a,b){return(a.r-b.r)**2+(a.g-b.g)**2+(a.b-b.b)**2}
-function closestColor(r,g,b){const input={r,g,b};if(PALETTE.NULL.some(c=>distance(input,c)<6000))return null;if(PALETTE.G.some(c=>distance(input,c)<10000))return"G";let best=null,bestDistance=Infinity;for(const piece of PIECES)for(const color of PALETTE[piece]){const current=distance(input,color);if(current<bestDistance){bestDistance=current;best=piece}}return bestDistance>25000?null:best}
-function closestMino(r,g,b){let best="I",bestDistance=Infinity;for(const piece of PIECES)for(const color of PALETTE[piece]){const current=distance({r,g,b},color);if(current<bestDistance){bestDistance=current;best=piece}}return best}
-function averageColor(ctx,cx,cy,radius){const diameter=Math.ceil(radius*2),startX=Math.max(0,Math.floor(cx-radius)),startY=Math.max(0,Math.floor(cy-radius)),endX=Math.min(ctx.canvas.width,startX+diameter),endY=Math.min(ctx.canvas.height,startY+diameter);if(endX<=startX||endY<=startY)return{r:0,g:0,b:0};const data=ctx.getImageData(startX,startY,endX-startX,endY-startY).data,width=endX-startX;let r=0,g=0,b=0,count=0;for(let y=0;y<endY-startY;y++)for(let x=0;x<width;x++){const dx=startX+x-cx,dy=startY+y-cy;if(dx*dx+dy*dy>radius*radius)continue;const i=(y*width+x)*4;if(data[i]>50||data[i+1]>50||data[i+2]>50){r+=data[i];g+=data[i+1];b+=data[i+2];count++}}return count?{r:r/count,g:g/count,b:b/count}:{r:0,g:0,b:0}}
-function recognizeQueue(layout){const scale=1.5,sample=([x,y])=>averageColor(frameCtx,x*scale,y*scale,5*scale),holdColor=sample(layout.hold),hold=holdColor.r<50&&holdColor.g<50&&holdColor.b<50?null:closestMino(holdColor.r,holdColor.g,holdColor.b),next=[];for(let i=0;i<layout.next.length;i++){const color=sample(layout.next[i]),black=color.r<50&&color.g<50&&color.b<50;if(black)break;next.push(closestMino(color.r,color.g,color.b))}return{hold,next}}
-function extractFeatures(image,originX,originY,cellW,cellH){const width=Math.max(1,Math.floor(cellW)),height=Math.max(1,Math.floor(cellH)),channels=Array.from({length:6},()=>new Float32Array(width*height));let i=0;for(let y=0;y<height;y++)for(let x=0;x<width;x++,i++){const p=((originY+y)*image.width+originX+x)*4,r=image.data[p],g=image.data[p+1],b=image.data[p+2],max=Math.max(r,g,b),min=Math.min(r,g,b),diff=max-min;let hue=0;if(max!==min){if(max===r)hue=(60*(g-b)/diff+360)%360;else if(max===g)hue=(60*(b-r)/diff+120)%360;else hue=(60*(r-g)/diff+240)%360}channels[0][i]=b;channels[1][i]=g;channels[2][i]=r;channels[3][i]=hue/2;channels[4][i]=max?diff/max*255:0;channels[5][i]=max}const features=[];for(const channel of channels){let sum=0;for(const value of channel)sum+=value;const mean=sum/channel.length;let variance=0;for(const value of channel)variance+=(value-mean)**2;features.push(mean,Math.sqrt(variance/channel.length))}for(let ty=0;ty<4;ty++)for(let tx=0;tx<4;tx++){const x0=Math.floor(tx*width/4),x1=Math.floor((tx+1)*width/4),y0=Math.floor(ty*height/4),y1=Math.floor((ty+1)*height/4);let count=0,sums=[0,0,0];for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){const at=y*width+x;sums[0]+=channels[0][at];sums[1]+=channels[1][at];sums[2]+=channels[2][at];count++}features.push(...(count?sums.map(v=>v/count):[0,0,0]))}const cx=Math.floor(width/2),cy=Math.floor(height/2),cw=Math.floor(width/4),ch=Math.floor(height/4);let count=0,sums=[0,0,0];for(let y=cy-ch;y<cy+ch;y++)for(let x=cx-cw;x<cx+cw;x++)if(x>=0&&x<width&&y>=0&&y<height){const at=y*width+x;sums[0]+=channels[0][at];sums[1]+=channels[1][at];sums[2]+=channels[2][at];count++}features.push(...(count?sums.map(v=>v/count):[0,0,0]));return features}
-function classicBoard(image){const board=Array.from({length:VISIBLE_ROWS},()=>Array(BOARD_WIDTH).fill(null)),cellW=image.width/BOARD_WIDTH,cellH=image.height/VISIBLE_ROWS,sampleSize=Math.max(1,Math.floor(cellW*.25));for(let row=0;row<VISIBLE_ROWS;row++)for(let col=0;col<BOARD_WIDTH;col++){const cx=(col+.5)*cellW,cy=(row+.5)*cellH,x0=Math.max(0,Math.min(image.width-1,Math.floor(cx-sampleSize/2))),y0=Math.max(0,Math.min(image.height-1,Math.floor(cy-sampleSize/2)));let r=0,g=0,b=0,count=0;for(let y=y0;y<Math.min(image.height,y0+sampleSize);y++)for(let x=x0;x<Math.min(image.width,x0+sampleSize);x++){const p=(y*image.width+x)*4;r+=image.data[p];g+=image.data[p+1];b+=image.data[p+2];count++}board[row][col]=closestColor(r/count,g/count,b/count)}return board}
-async function recognizeBoard(layout){const width=Math.floor(layout.board.w),height=Math.floor(layout.board.h),canvas=document.createElement("canvas");canvas.width=width;canvas.height=height;const ctx=canvas.getContext("2d",{willReadFrequently:true});ctx.drawImage(frameCanvas,layout.board.x,layout.board.y,layout.board.w,layout.board.h,0,0,width,height);const image=ctx.getImageData(0,0,width,height),fallback=classicBoard(image),cellW=width/BOARD_WIDTH,cellH=height/VISIBLE_ROWS,input=new Float32Array(200*63);let offset=0;for(let row=0;row<VISIBLE_ROWS;row++)for(let col=0;col<BOARD_WIDTH;col++){input.set(extractFeatures(image,Math.floor(col*cellW),Math.floor(row*cellH),cellW,cellH),offset);offset+=63}const tensor=new ort.Tensor("float32",input,[200,63]),inputName=state.session.inputNames[0],labelName=state.session.outputNames[0],output=(await state.session.run({[inputName]:tensor},[labelName]))[labelName],board=Array.from({length:VISIBLE_ROWS},()=>Array(BOARD_WIDTH).fill(null));for(let index=0;index<200;index++){const label=CLASS_NAMES[Number(output.data[index])]||"";board[Math.floor(index/10)][index%10]=label===""?null:label}for(let row=0;row<VISIBLE_ROWS;row++){const onnx=board[row];if(onnx.every(cell=>cell===null||cell==="G")&&onnx.filter(cell=>cell==="G").length!==10){const classic=fallback[row];if(classic.filter(cell=>cell==="G").length===9&&classic.filter(cell=>cell===null).length===1)board[row]=classic}}const fullBoard=Array.from({length:40},()=>Array(10).fill(null));for(let row=0;row<20;row++)fullBoard[20+row]=board[row];return{board:fullBoard,visibleBoard:board,quality:1,confidence:1}}
-function aggregateBoards(samples){if(samples.length===1)return samples[0];const board=Array.from({length:40},()=>Array(10).fill(null));for(let row=0;row<40;row++)for(let col=0;col<10;col++){const counts=new Map;for(const sample of samples){const piece=sample.board[row][col];counts.set(piece,(counts.get(piece)||0)+1)}board[row][col]=[...counts.entries()].sort((a,b)=>b[1]-a[1])[0][0]}return{...samples[0],board,visibleBoard:board.slice(20)}}
-function renderBoard(player,snapshot){const grid=$(`board-${player}`);grid.replaceChildren();const board=snapshot?.board||Array.from({length:40},()=>Array(10).fill(null));for(let row=20;row<40;row++)for(let col=0;col<10;col++){const cell=document.createElement("span");cell.className="board-cell";const piece=board[row][col];if(piece)cell.dataset.piece=piece;grid.append(cell)}const queue=snapshot?.queue;$(`queue-${player}`).textContent=queue?`HOLD ${queue.hold||"—"}　NEXT ${queue.next.length?queue.next.join(" "):"—"}`:"HOLD —　NEXT —"}
-function updatePreview(player,board,queue,time){state.lastBoard[player]={...board,queue};renderBoard(player,state.lastBoard[player]);$("snapshot-text").textContent=`${formatTime(time)} の解析結果`}
-function formatTime(seconds){const value=Math.max(0,Math.floor(seconds));return`${String(Math.floor(value/60)).padStart(2,"0")}:${String(value%60).padStart(2,"0")}`}function sleepFrame(){return new Promise(resolve=>requestAnimationFrame(resolve))}
-function waitForSeek(time){return new Promise((resolve,reject)=>{const done=()=>{video.removeEventListener("seeked",done);video.removeEventListener("error",fail);resolve()},fail=()=>{video.removeEventListener("seeked",done);video.removeEventListener("error",fail);reject(new Error("動画のシークに失敗しました。"))};video.addEventListener("seeked",done,{once:true});video.addEventListener("error",fail,{once:true});video.currentTime=time})}
-async function capture(time){await waitForSeek(Math.min(Math.max(0,time),video.duration));const sourceAspect=video.videoWidth/Math.max(1,video.videoHeight),targetAspect=16/9;let cropWidth=video.videoWidth,cropHeight=video.videoHeight,cropX=0,cropY=0;if(sourceAspect>targetAspect){cropWidth=video.videoHeight*targetAspect;cropX=(video.videoWidth-cropWidth)/2}else{cropHeight=video.videoWidth/targetAspect;cropY=(video.videoHeight-cropHeight)/2}frameCanvas.width=FRAME_WIDTH;frameCanvas.height=FRAME_HEIGHT;frameCtx.drawImage(video,cropX,cropY,cropWidth,cropHeight,0,0,FRAME_WIDTH,FRAME_HEIGHT)}
-async function loadModel(){if(state.session)return;$("model-status").textContent="WASMモデル: 読込中…";ort.env.wasm.numThreads=1;ort.env.wasm.wasmPaths="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";ort.env.logLevel="fatal";state.session=await ort.InferenceSession.create(MODEL_URL,{executionProviders:["wasm"]});$("model-status").textContent="WASMモデル: 準備完了"}
-function detectQueueEvents(samples){const events=[];let previous=null;for(const sample of samples){if(!previous){previous=sample;continue}const oldQueue=previous.queue.next,nextQueue=sample.queue.next;let shift=0;for(let candidate=1;candidate<=2;candidate++){const required=candidate===1?4:3;if(oldQueue.length-candidate<required||nextQueue.length<required)continue;if(nextQueue.slice(0,required).every((piece,index)=>piece===oldQueue[index+candidate])){shift=candidate;break}}const same=oldQueue.length===nextQueue.length&&oldQueue.every((piece,index)=>piece===nextQueue[index]);if(shift||(!same&&previous.queue.hold!==sample.queue.hold))events.push({time:sample.time,shift,holdChanged:previous.queue.hold!==sample.queue.hold,before:previous.queue,after:sample.queue});if(shift||same||previous.queue.hold!==sample.queue.hold)previous=sample}return events}
-async function analyze(){if(!state.file||state.running)return;const p1=$("player-p1").checked,p2=$("player-p2").checked;if(!p1&&!p2){log("P1またはP2を選択してください。","warn");return}state.running=true;state.cancel=false;$("analyze-button").disabled=true;$("cancel-button").disabled=false;$("download-button").disabled=true;try{await loadModel();const queueStep=Number($("queue-step").value),boardStep=Number($("board-step").value),boardSamples=Number($("board-samples").value),duration=video.duration,players={};for(const player of["p1","p2"])if((player==="p1"&&p1)||(player==="p2"&&p2))players[player]={queueSamples:[],boardSamples:[],queueEvents:[]};let nextBoard=0;for(let index=0,time=0;time<duration;index++,time=index*queueStep){if(state.cancel)throw new Error("解析を停止しました。");await capture(time);for(const player of Object.keys(players))players[player].queueSamples.push({time,queue:recognizeQueue(LAYOUTS[player])});if(time+.0001>=nextBoard){for(const player of Object.keys(players)){const samples=[];for(let sampleIndex=0;sampleIndex<boardSamples;sampleIndex++){const offset=boardSamples===1?0:(sampleIndex-1)*.04;await capture(Math.max(0,Math.min(duration,time+offset)));samples.push(await recognizeBoard(LAYOUTS[player]))}const board=aggregateBoards(samples);board.time=time;board.queue=players[player].queueSamples.at(-1).queue;players[player].boardSamples.push(board);updatePreview(player,board,board.queue,time)}nextBoard+=boardStep;$("sample-count").textContent=`盤面サンプル: ${players.p1?.boardSamples.length||players.p2?.boardSamples.length||0}`}setProgress(time/duration*100,`${formatTime(time)} を解析中…`);$("time-text").textContent=`${formatTime(time)} / ${formatTime(duration)}`;await sleepFrame()}for(const player of Object.keys(players))players[player].queueEvents=detectQueueEvents(players[player].queueSamples);state.result={version:1,generatedAt:new Date().toISOString(),source:{name:state.file.name,type:state.file.type,duration,width:video.videoWidth,height:video.videoHeight},settings:{queueStep,boardStep,boardSamples},players};$("download-button").disabled=false;setProgress(100,"解析が完了しました。");log(`完了: ${Object.keys(players).join(" / ")} の解析結果を作成しました。`)}catch(error){if(error.message==="解析を停止しました。"){setProgress(0,"解析を停止しました。");log(error.message,"warn")}else{setProgress(0,"解析に失敗しました。");log(error.message||String(error),"error");console.error(error)}}finally{state.running=false;$("analyze-button").disabled=!state.file;$("cancel-button").disabled=true}}
-function downloadResult(){if(!state.result)return;const blob=new Blob([JSON.stringify(state.result,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=`${state.file.name.replace(/\.[^.]+$/,"")||"tetris-analysis"}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
-videoFile.addEventListener("change",()=>{const file=videoFile.files?.[0];if(!file)return;if(state.objectUrl)URL.revokeObjectURL(state.objectUrl);state.file=file;state.objectUrl=URL.createObjectURL(file);video.src=state.objectUrl;video.load();$("file-name").textContent=`${file.name}（${(file.size/1024/1024).toFixed(1)}MB）`;$("analyze-button").disabled=false;setProgress(0,"解析開始できます。");log(`${file.name} を読み込みました。`)});video.addEventListener("loadedmetadata",()=>{$("time-text").textContent=`00:00 / ${formatTime(video.duration)}`});$("analyze-button").addEventListener("click",analyze);$("cancel-button").addEventListener("click",()=>{state.cancel=true});$("download-button").addEventListener("click",downloadResult);for(const player of["p1","p2"])renderBoard(player,null);
+const $ = id => document.getElementById(id);
+const video = $("video");
+const canvas = $("frame");
+const ctx = canvas.getContext("2d", { willReadFrequently: true });
+const state = { file: null, module: null, session: null, running: false, cancel: false, framePtr: 0, frameBytes: 0, holdPtr: 0, nextPtr: 0, colorsPtr: 0, featurePtr: 0, labelPtr: 0 };
+
+function log(message) { $("log").textContent += "\n" + message; $("log").scrollTop = $("log").scrollHeight; }
+function status(message, progress) {
+  $("status").textContent = message;
+  if (progress !== undefined) {
+    const value = Math.max(0, Math.min(100, progress));
+    $("progress-bar").style.width = value + "%";
+    $("percent").textContent = Math.round(value) + "%";
+  }
+}
+function wasmString(pointer) { return state.module.UTF8ToString(pointer); }
+function wasmError() { return wasmString(state.module._tr_last_error()) || "WASM処理に失敗しました"; }
+function wasmCString(value) {
+  const module = state.module;
+  const size = module.lengthBytesUTF8(value) + 1;
+  const pointer = module._malloc(size);
+  module.stringToUTF8(value, pointer, size);
+  return pointer;
+}
+function cancelled() { if (state.cancel) throw new Error("解析をキャンセルしました"); }
+function frameSize() { return video.videoWidth * video.videoHeight * 4; }
+
+async function loadWasm() {
+  if (state.module) return state.module;
+  const loaded = await import("./tetris_recovery.js");
+  state.module = await loaded.default({ locateFile: name => new URL(name, import.meta.url).href });
+  return state.module;
+}
+
+async function loadModel() {
+  if (state.session) return state.session;
+  $("model-status").textContent = "ONNX: 読み込み中";
+  ort.env.wasm.numThreads = 1;
+  ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+  ort.env.logLevel = "fatal";
+  const url = new URL("./assets/tetris.onnx", import.meta.url).href;
+  state.session = await ort.InferenceSession.create(url, { executionProviders: ["wasm"] });
+  $("model-status").textContent = "ONNX: 読み込み完了";
+  return state.session;
+}
+
+async function loadSettings(module) {
+  const url = new URL("../config/tetris_recover.ini", import.meta.url);
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("設定ファイルを読み込めませんでした: " + response.status);
+  module.FS.writeFile("/settings.ini", new TextEncoder().encode(await response.text()));
+}
+
+function allocateBuffers(module) {
+  const bytes = frameSize();
+  if (state.frameBytes === bytes) return;
+  if (state.framePtr) module._free(state.framePtr);
+  if (state.holdPtr) module._free(state.holdPtr);
+  if (state.nextPtr) module._free(state.nextPtr);
+  if (state.colorsPtr) module._free(state.colorsPtr);
+  if (state.featurePtr) module._free(state.featurePtr);
+  if (state.labelPtr) module._free(state.labelPtr);
+  state.frameBytes = bytes;
+  state.framePtr = module._malloc(bytes);
+  state.holdPtr = module._malloc(4);
+  state.nextPtr = module._malloc(5 * 4);
+  state.colorsPtr = module._malloc(6 * 3);
+  state.featurePtr = module._malloc(200 * 63 * 4);
+  state.labelPtr = module._malloc(200);
+}
+
+async function seek(time) {
+  const target = Math.max(0, Math.min(video.duration, time));
+  if (Math.abs(video.currentTime - target) < 0.00001) return;
+  await new Promise((resolve, reject) => {
+    const cleanup = () => { video.removeEventListener("seeked", done); video.removeEventListener("error", fail); };
+    const done = () => { cleanup(); resolve(); };
+    const fail = () => { cleanup(); reject(new Error("動画フレームのシークに失敗しました")); };
+    video.addEventListener("seeked", done, { once: true });
+    video.addEventListener("error", fail, { once: true });
+    video.currentTime = target;
+  });
+}
+
+function readFrame() {
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+}
+
+function nextDecodedFrame() {
+  if (video.ended) return Promise.resolve(null);
+  if (typeof video.requestVideoFrameCallback === "function") {
+    return new Promise(resolve => {
+      let finished = false;
+      let onEnded;
+      const finish = value => {
+        if (finished) return;
+        finished = true;
+        video.removeEventListener("ended", onEnded);
+        resolve(value);
+      };
+      onEnded = () => finish(null);
+      video.addEventListener("ended", onEnded, { once: true });
+      video.requestVideoFrameCallback((_, metadata) => finish(metadata.mediaTime));
+    });
+  }
+  return new Promise(resolve => requestAnimationFrame(() => resolve(video.currentTime)));
+}
+
+function submitQueue(player, rgba, time) {
+  const module = state.module;
+  module.HEAPU8.set(rgba, state.framePtr);
+  const returned = module._tr_queue_observe_and_add(player, state.framePtr, rgba.byteLength, time, state.holdPtr, state.nextPtr, 5, state.colorsPtr, 18);
+  if (!returned) throw new Error(wasmError());
+  const nextCount = returned - 1;
+  const next = [];
+  for (let i = 0; i < nextCount; i++) next.push(module.HEAP32[(state.nextPtr >> 2) + i]);
+  return { hold: module.HEAP32[state.holdPtr >> 2], next: next };
+}
+
+async function playFromStart() {
+  video.pause();
+  await seek(0);
+  video.muted = true;
+  await video.play();
+}
+
+async function queuePass(duration, interval) {
+  let nextScan = 0;
+  let lastFrame = null;
+  let frames = 0;
+  await playFromStart();
+  for (;;) {
+    cancelled();
+    const mediaTime = await nextDecodedFrame();
+    if (mediaTime === null) break;
+    lastFrame = readFrame();
+    frames++;
+    while (nextScan <= mediaTime + 0.000001 && nextScan < duration) {
+      submitQueue(1, lastFrame, nextScan);
+      submitQueue(2, lastFrame, nextScan);
+      nextScan += interval;
+    }
+    status("Pass 1/3: キュー走査 " + frames + "フレーム", duration ? nextScan / duration * 35 : 0);
+    if (mediaTime >= duration - 0.0001) break;
+  }
+  video.pause();
+  if (!lastFrame) throw new Error("動画からデコード可能なフレームを取得できませんでした");
+  while (nextScan < duration) {
+    submitQueue(1, lastFrame, nextScan);
+    submitQueue(2, lastFrame, nextScan);
+    nextScan += interval;
+  }
+  status("Pass 1/3: C++キュー復元", 38);
+  return frames;
+}
+
+function classLabels(output) {
+  const labels = new Uint8Array(200);
+  const data = output.data;
+  const dims = output.dims || [];
+  if (dims.length === 2 && dims[0] === 200 && dims[1] > 1) {
+    const classes = dims[1];
+    for (let cell = 0; cell < 200; cell++) {
+      let best = 0;
+      let bestValue = Number(data[cell * classes]);
+      for (let c = 1; c < classes; c++) {
+        const value = Number(data[cell * classes + c]);
+        if (value > bestValue) { bestValue = value; best = c; }
+      }
+      labels[cell] = best;
+    }
+  } else {
+    for (let i = 0; i < 200; i++) labels[i] = Number(data[i]) || 0;
+  }
+  return labels;
+}
+
+async function boardPass(requests, duration) {
+  const module = state.module;
+  const session = state.session;
+  const inputName = session.inputNames[0];
+  const outputName = session.outputNames[0];
+  let index = 0;
+  let frameCount = 0;
+  await playFromStart();
+  while (index < requests.length) {
+    cancelled();
+    const mediaTime = await nextDecodedFrame();
+    if (mediaTime === null) break;
+    const rgba = readFrame();
+    frameCount++;
+    while (index < requests.length && requests[index].time <= mediaTime + 0.000001) {
+      const request = requests[index++];
+      module.HEAPU8.set(rgba, state.framePtr);
+      if (!module._tr_board_features(request.player, state.framePtr, rgba.byteLength, state.featurePtr, 200 * 63)) throw new Error(wasmError());
+      const features = new Float32Array(module.HEAPF32.buffer, state.featurePtr, 200 * 63).slice();
+      const tensor = new ort.Tensor("float32", features, [200, 63]);
+      const result = await session.run({ [inputName]: tensor }, [outputName]);
+      const labels = classLabels(result[outputName]);
+      module.HEAPU8.set(labels, state.labelPtr);
+      if (!module._tr_board_finish(request.player, state.framePtr, rgba.byteLength, request.time, state.labelPtr, 200)) throw new Error(wasmError());
+      status("Pass 2/3: 盤面ONNX " + index + "/" + requests.length, 40 + index / Math.max(1, requests.length) * 42);
+    }
+    if (mediaTime >= duration - 0.0001 && index < requests.length) break;
+  }
+  video.pause();
+  if (index !== requests.length) throw new Error("盤面要求を処理できませんでした (" + index + "/" + requests.length + ")");
+  return frameCount;
+}
+
+function makeDownload(module, path, filename, type) {
+  const bytes = module.FS.readFile(path);
+  const url = URL.createObjectURL(new Blob([bytes], { type: type || "application/octet-stream" }));
+  const link = document.createElement("a");
+  link.href = url; link.download = filename; link.textContent = filename;
+  $("downloads").append(link);
+}
+
+function publishOutput(module, sourceName) {
+  const jsonPath = wasmString(module._tr_output_path(0));
+  const json = new TextDecoder().decode(module.FS.readFile(jsonPath));
+  const parsed = JSON.parse(json);
+  const links = $("links"); links.replaceChildren();
+  [[1, "P1シミュレータ"], [2, "P2シミュレータ"], [3, "2Pシミュレータ"]].forEach(item => {
+    const url = wasmString(module._tr_output_url(item[0]));
+    const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; a.textContent = item[1] + "を開く";
+    links.append(a);
+  });
+  $("downloads").replaceChildren();
+  [[0, sourceName + "_tetris_recovered.json", "application/json"], [4, sourceName + "_links.html", "text/html"], [5, sourceName + "_report.html", "text/html"], [6, "training-annotation.json", "application/json"], [7, "training-manifest.json", "application/json"]].forEach(item => {
+    const path = wasmString(module._tr_output_path(item[0]));
+    makeDownload(module, path, item[1], item[2]);
+  });
+  const p1 = parsed.p1 && parsed.p1.length || 0;
+  const p2 = parsed.p2 && parsed.p2.length || 0;
+  $("counts").textContent = "P1 " + p1 + " phases / P2 " + p2 + " phases";
+  log("C++のwriteOutputsでJSON・URL・レポート・学習アノテーションを生成しました");
+}
+
+async function analyze() {
+  if (!state.file || state.running) return;
+  state.running = true; state.cancel = false;
+  $("run").disabled = true; $("cancel").disabled = false; $("links").replaceChildren(); $("downloads").replaceChildren(); $("log").textContent = "開始";
+  try {
+    const module = await loadWasm();
+    await loadModel();
+    await loadSettings(module);
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    allocateBuffers(module);
+    const settingsPtr = wasmCString("/settings.ini");
+    const initialized = module._tr_runtime_init(video.videoWidth, video.videoHeight, settingsPtr);
+    module._free(settingsPtr);
+    if (!initialized) throw new Error(wasmError());
+    const duration = video.duration;
+    module._tr_runtime_reset(duration);
+    const bytes = new Uint8Array(await state.file.arrayBuffer());
+    const safeName = state.file.name.replace(/[\/\\]/g, "_") || "video.mp4";
+    const inputPath = "/input/" + safeName;
+    try { module.FS.mkdir("/input"); } catch (_) {}
+    try { module.FS.mkdir("/output"); } catch (_) {}
+    module.FS.writeFile(inputPath, bytes);
+    log("動画 " + video.videoWidth + "x" + video.videoHeight + ", " + duration.toFixed(3) + "秒");
+    const interval = module._tr_sample_interval();
+    await queuePass(duration, interval);
+    const capacity = Math.ceil(duration / Math.max(interval, 0.001)) * 5 + 32;
+    const requestPtr = module._malloc(capacity * 8);
+    const p1Count = module._tr_prepare_board_requests(1, requestPtr, capacity);
+    const p1Times = Array.from(new Float64Array(module.HEAPF64.buffer, requestPtr, p1Count));
+    const p2Count = module._tr_prepare_board_requests(2, requestPtr, capacity);
+    const p2Times = Array.from(new Float64Array(module.HEAPF64.buffer, requestPtr, p2Count));
+    module._free(requestPtr);
+    const requests = p1Times.map(time => ({ player: 1, time })).concat(p2Times.map(time => ({ player: 2, time }))).sort((a, b) => a.time - b.time || a.player - b.player);
+    log("C++が生成した盤面要求: P1 " + p1Count + " / P2 " + p2Count);
+    await boardPass(requests, duration);
+    status("Pass 3/3: C++合法手ビーム探索", 86);
+    if (!module._tr_recover()) throw new Error(wasmError());
+    const outputDir = "/output/" + (safeName.replace(/\.[^.]*$/, "") || "video");
+    try { module.FS.mkdir(outputDir); } catch (_) {}
+    const inputPtr = wasmCString(inputPath);
+    const outputPtr = wasmCString(outputDir);
+    const written = module._tr_write_output(inputPtr, outputPtr);
+    module._free(inputPtr); module._free(outputPtr);
+    if (!written) throw new Error(wasmError());
+    publishOutput(module, safeName.replace(/\.[^.]*$/, "") || "video");
+    status("解析完了", 100);
+  } catch (error) {
+    status(error.message || String(error), 0);
+    log("ERROR: " + (error.stack || error));
+  } finally {
+    state.running = false; $("run").disabled = !state.file; $("cancel").disabled = true;
+  }
+}
+
+$("video-file").addEventListener("change", () => {
+  const file = $("video-file").files && $("video-file").files[0]; if (!file) return;
+  state.file = file; video.src = URL.createObjectURL(file); video.load();
+  $("file-name").textContent = file.name + " (" + (file.size / 1024 / 1024).toFixed(1) + " MB)";
+  $("run").disabled = false; status("動画のメタデータを読み込みました", 0); $("log").textContent = "待機中";
+});
+video.addEventListener("loadedmetadata", () => { $("duration").textContent = video.videoWidth + "×" + video.videoHeight + " / " + video.duration.toFixed(3) + "秒"; });
+$("run").addEventListener("click", analyze);
+$("cancel").addEventListener("click", () => { state.cancel = true; status("キャンセル処理中…"); });
