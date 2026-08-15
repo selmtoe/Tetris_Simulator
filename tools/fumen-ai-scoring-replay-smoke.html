@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fumen AI scoring replay smoke</title>
+<pre id="output">running...</pre>
+<script>
+(() => {
+    const output = document.getElementById('output');
+    const empty = () => Array.from({ length: 40 }, () => Array(10).fill(null));
+    const board0 = empty();
+    const board1 = empty();
+    for (let x = 3; x <= 6; x++) board1[39][x] = 'I';
+
+    // This intentionally uses the old format: an empty HOLD was not marked
+    // holdUsed even though it consumed T and locked NEXT[0] = I.
+    const pages = [
+        { p1: { board: board0, hold: '', next: '', operation: {
+            type: 'I', rotation: 'spawn', x: 3, y: 39, holdUsed: false
+        } } },
+        { p1: { board: board1, hold: 'T', next: '', operation: {
+            type: 'O', rotation: 'spawn', x: 0, y: 39, holdUsed: false
+        } } }
+    ];
+    const worker = new Worker(`../F/app/84-ai-scoring-worker.js?v=replay-smoke-${Date.now()}`);
+    const result = { passed: false, statuses: [], reconstructions: [] };
+    worker.onmessage = event => {
+        const message = event.data || {};
+        if (message.type === 'progress' && message.result) {
+            result.statuses.push(message.result.status);
+            result.reconstructions.push(message.result.reconstruction);
+        }
+        if (message.type === 'done') {
+            result.results = message.results || [];
+            result.passed = result.results.length === 2 &&
+                result.results.every(item => item.status === 'scored') &&
+                result.results[0].reconstruction === 'recorded-operation' &&
+                result.results[1].reconstruction === 'recorded-operation';
+            output.textContent = JSON.stringify(result, null, 2);
+            worker.terminate();
+        }
+        if (message.type === 'error') {
+            result.error = message.message || 'worker error';
+            output.textContent = JSON.stringify(result, null, 2);
+            worker.terminate();
+        }
+    };
+    worker.postMessage({
+        type: 'score',
+        runId: 'replay-smoke',
+        pages,
+        replay: true,
+        operationPages: [0, 1],
+        replayInitial: { p1: { sequence: 'TIOLJSZ', hold: '' } },
+        nodeBudget: 500,
+        detailNodeBudget: 5000,
+        thresholdScore: 1000,
+        planLength: 1,
+        useWasm: false
+    });
+})();
+</script>
