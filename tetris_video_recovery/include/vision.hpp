@@ -29,6 +29,14 @@ private:
     PlayerLayout layout_;
     Crop crop_;
     const OnnxBoardModel* model_ = nullptr;
+    int boardImageWidth_ = 0;
+    int boardImageHeight_ = 0;
+    // These tables are pure geometry.  Precomputing them removes repeated
+    // floor/clamp/address calculations without changing any sampled pixel or
+    // floating-point blend operation.
+    std::vector<std::array<std::size_t, 4>> boardSampleOffsets_;
+    std::vector<std::array<double, 2>> boardSampleFractions_;
+    std::array<std::vector<std::size_t>, 6> queueSampleOffsets_;
 
     std::vector<float> extractBoardFeatures(const Frame& frame) const;
     VisibleBoard classicBoard(const Frame& frame) const;

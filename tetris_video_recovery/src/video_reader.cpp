@@ -102,7 +102,13 @@ bool VideoReader::open(const std::filesystem::path& path, std::string& error) {
 
 bool VideoReader::read(Frame& frame, bool& endOfStream, std::string& error) {
     endOfStream = false;
-    frame = {};
+    // Every output byte is overwritten below.  Clearing the vector keeps its
+    // capacity so sequential decoding does not allocate a full RGB frame for
+    // every decoded sample.
+    frame.width = 0;
+    frame.height = 0;
+    frame.time100ns = 0;
+    frame.bgra.clear();
     if (!impl_ || !impl_->reader) { error = "VideoReader is not open"; return false; }
 
     DWORD streamIndex = 0, flags = 0;

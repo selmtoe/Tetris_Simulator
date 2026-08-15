@@ -45,7 +45,7 @@ OnnxBoardModel::OnnxBoardModel(const std::filesystem::path& modelPath, std::stri
     try {
         Ort::SessionOptions options;
         options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-        options.SetIntraOpNumThreads(2);
+        options.SetIntraOpNumThreads(1);
         options.SetInterOpNumThreads(1);
         options.DisableMemPattern();
         session_ = std::make_unique<Ort::Session>(env_, modelPath.c_str(), options);

@@ -10,11 +10,16 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <condition_variable>
+#include <deque>
 #include <fstream>
+#include <future>
+#include <functional>
 #include <iomanip>
 #include <memory>
 #include <ostream>
 #include <sstream>
+#include <thread>
 
 namespace tr {
 
@@ -713,6 +718,84 @@ std::vector<BoardRequest> makeBoardRequests(const std::vector<QueuePhase>& phase
     return result;
 }
 
+unsigned boardWorkerCount() {
+    const unsigned hardware = std::thread::hardware_concurrency();
+    if (hardware == 0) return 4;
+    // Each ONNX session is configured for one intra-op thread.  Keeping the
+    // number of concurrent requests bounded avoids oversubscribing small
+    // machines while using the available CPU on the current 24-thread host.
+    return std::clamp(hardware / 4u, 2u, 8u);
+}
+
+class BoardWorkerPool {
+public:
+    explicit BoardWorkerPool(unsigned count) {
+        maxQueued_ = std::max<std::size_t>(count * 2u, 1u);
+        workers_.reserve(count);
+        for (unsigned i = 0; i < count; ++i) workers_.emplace_back([this] { run(); });
+    }
+
+    BoardWorkerPool(const BoardWorkerPool&) = delete;
+    BoardWorkerPool& operator=(const BoardWorkerPool&) = delete;
+
+    ~BoardWorkerPool() {
+        wait();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stopping_ = true;
+        }
+        workAvailable_.notify_all();
+        for (auto& worker : workers_) worker.join();
+    }
+
+    void submit(std::function<void()> task) {
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            spaceAvailable_.wait(lock, [this] { return stopping_ || queue_.size() < maxQueued_; });
+            if (stopping_) return;
+            queue_.push_back(std::move(task));
+        }
+        workAvailable_.notify_one();
+    }
+
+    void wait() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        idle_.wait(lock, [this] { return queue_.empty() && active_ == 0; });
+    }
+
+private:
+    void run() {
+        for (;;) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                workAvailable_.wait(lock, [this] { return stopping_ || !queue_.empty(); });
+                if (stopping_ && queue_.empty()) return;
+                task = std::move(queue_.front());
+                queue_.pop_front();
+                ++active_;
+                spaceAvailable_.notify_one();
+            }
+            task();
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                --active_;
+                if (queue_.empty() && active_ == 0) idle_.notify_all();
+            }
+        }
+    }
+
+    std::vector<std::thread> workers_;
+    std::deque<std::function<void()>> queue_;
+    std::mutex mutex_;
+    std::condition_variable workAvailable_;
+    std::condition_variable spaceAvailable_;
+    std::condition_variable idle_;
+    std::size_t active_ = 0;
+    std::size_t maxQueued_ = 1;
+    bool stopping_ = false;
+};
+
 bool collectQueuePhases(const std::filesystem::path& input, const Settings& settings, Status& status,
                         std::vector<QueuePhase>& p1, std::vector<QueuePhase>& p2,
                         std::vector<QueueRecognitionSample>& p1Samples,
@@ -741,7 +824,7 @@ bool collectQueuePhases(const std::filesystem::path& input, const Settings& sett
         if (status.cancel.load()) { error = "Recovery cancelled"; return false; }
         if (!reader.read(frame, eos, error)) return false;
         if (eos || frame.bgra.empty()) continue;
-        lastFrame = std::move(frame);
+        std::swap(frame, lastFrame);
         haveFrame = true;
         const double frameTime = static_cast<double>(lastFrame.time100ns) / 10000000.0;
         // Original code scans at every 0.01 s seek point. With sequential
@@ -793,58 +876,107 @@ bool collectBoardSamples(const std::filesystem::path& input, const std::filesyst
     const auto p2Requests = makeBoardRequests(p2Phases, settings.onnxSamples);
     p1Samples.assign(p1Phases.size(), {});
     p2Samples.assign(p2Phases.size(), {});
+    std::vector<BoardObservation> p1Flat(p1Requests.size());
+    std::vector<BoardObservation> p2Flat(p2Requests.size());
     std::size_t p1Index = 0;
     std::size_t p2Index = 0;
     const std::size_t totalRequests = p1Requests.size() + p2Requests.size();
-    std::size_t completeRequests = 0;
+    std::atomic<std::size_t> completeRequests{0};
+    std::atomic<bool> failed{false};
+    std::mutex errorMutex;
+    std::string workerError;
+    BoardWorkerPool workers(std::max(1u, boardWorkerCount()));
     Frame frame;
     Frame lastFrame;
+    std::shared_ptr<const Frame> lastOwnedFrame;
     bool haveFrame = false;
     bool eos = false;
 
-    const auto process = [&](const Frame& source, const BoardRequest& request, VisionAnalyzer& vision,
-                             std::vector<std::vector<BoardObservation>>& samples) -> bool {
-        auto observation = vision.analyzeBoard(source);
-        if (!observation.recognitionError.empty()) {
-            error = observation.recognitionError;
-            return false;
+    const auto failWorker = [&](const std::string& message) {
+        if (!failed.exchange(true)) {
+            std::lock_guard<std::mutex> lock(errorMutex);
+            workerError = message;
         }
-        observation.timeSeconds = request.time;
-        samples[request.phase].push_back(std::move(observation));
-        return true;
+    };
+    const auto submit = [&](const std::shared_ptr<const Frame>& source, const BoardRequest& request,
+                            bool player1, std::size_t requestIndex) {
+        workers.submit([&, source, request, player1, requestIndex] {
+            if (failed.load() || status.cancel.load()) return;
+            try {
+                VisionAnalyzer& vision = player1 ? p1Vision : p2Vision;
+                auto observation = vision.analyzeBoard(*source);
+                if (!observation.recognitionError.empty()) {
+                    failWorker(observation.recognitionError);
+                    return;
+                }
+                observation.timeSeconds = request.time;
+                if (player1) p1Flat[requestIndex] = std::move(observation);
+                else p2Flat[requestIndex] = std::move(observation);
+                completeRequests.fetch_add(1);
+            } catch (const std::exception& exception) {
+                failWorker(std::string("Board analysis worker failed: ") + exception.what());
+            } catch (...) {
+                failWorker("Board analysis worker failed");
+            }
+        });
     };
 
-    while (!eos) {
+    while (!eos && !failed.load()) {
         if (status.cancel.load()) { error = "Recovery cancelled"; return false; }
         if (!reader.read(frame, eos, error)) return false;
         if (eos || frame.bgra.empty()) continue;
-        lastFrame = std::move(frame);
+        std::swap(frame, lastFrame);
         haveFrame = true;
         const double frameTime = static_cast<double>(lastFrame.time100ns) / 10000000.0;
-        while (p1Index < p1Requests.size() && p1Requests[p1Index].time <= frameTime + .000001) {
-            if (!process(lastFrame, p1Requests[p1Index], p1Vision, p1Samples)) return false;
-            ++p1Index;
-            ++completeRequests;
-        }
-        while (p2Index < p2Requests.size() && p2Requests[p2Index].time <= frameTime + .000001) {
-            if (!process(lastFrame, p2Requests[p2Index], p2Vision, p2Samples)) return false;
-            ++p2Index;
-            ++completeRequests;
+        const bool hasRequest =
+            (p1Index < p1Requests.size() && p1Requests[p1Index].time <= frameTime + .000001) ||
+            (p2Index < p2Requests.size() && p2Requests[p2Index].time <= frameTime + .000001);
+        if (hasRequest) {
+            auto source = std::make_shared<Frame>(std::move(lastFrame));
+            lastOwnedFrame = source;
+            while (p1Index < p1Requests.size() && p1Requests[p1Index].time <= frameTime + .000001) {
+                submit(source, p1Requests[p1Index], true, p1Index);
+                ++p1Index;
+            }
+            while (p2Index < p2Requests.size() && p2Requests[p2Index].time <= frameTime + .000001) {
+                submit(source, p2Requests[p2Index], false, p2Index);
+                ++p2Index;
+            }
         }
         const int pct = totalRequests > 0
-            ? 35 + static_cast<int>(completeRequests * 45 / totalRequests)
+            ? 35 + static_cast<int>(completeRequests.load() * 45 / totalRequests)
             : 80;
         status.progress.store(std::min(pct, 80));
-        status.setMessage("Pass 2/3: ONNX board inference " + std::to_string(completeRequests) + "/" + std::to_string(totalRequests));
+        status.setMessage("Pass 2/3: ONNX board inference " + std::to_string(completeRequests.load()) + "/" + std::to_string(totalRequests));
     }
     if (!haveFrame) { error = "No decodable video frame was found"; return false; }
+
+    std::shared_ptr<const Frame> fallbackSource;
+    if (!lastFrame.bgra.empty()) fallbackSource = std::make_shared<Frame>(std::move(lastFrame));
+    else fallbackSource = lastOwnedFrame;
     while (p1Index < p1Requests.size()) {
-        if (!process(lastFrame, p1Requests[p1Index], p1Vision, p1Samples)) return false;
+        if (failed.load() || status.cancel.load()) break;
+        submit(fallbackSource, p1Requests[p1Index], true, p1Index);
         ++p1Index;
     }
     while (p2Index < p2Requests.size()) {
-        if (!process(lastFrame, p2Requests[p2Index], p2Vision, p2Samples)) return false;
+        if (failed.load() || status.cancel.load()) break;
+        submit(fallbackSource, p2Requests[p2Index], false, p2Index);
         ++p2Index;
+    }
+    workers.wait();
+    if (status.cancel.load()) { error = "Recovery cancelled"; return false; }
+    if (failed.load()) {
+        std::lock_guard<std::mutex> lock(errorMutex);
+        error = workerError.empty() ? "Board analysis worker failed" : workerError;
+        return false;
+    }
+
+    for (std::size_t i = 0; i < p1Requests.size(); ++i) {
+        p1Samples[p1Requests[i].phase].push_back(std::move(p1Flat[i]));
+    }
+    for (std::size_t i = 0; i < p2Requests.size(); ++i) {
+        p2Samples[p2Requests[i].phase].push_back(std::move(p2Flat[i]));
     }
     return true;
 }
@@ -1712,6 +1844,25 @@ bool loadSettings(const std::filesystem::path& path, Settings& settings, std::st
     return true;
 }
 
+void solveTimelinesParallel(const Settings& settings,
+                            const std::vector<TimelineStep>& rawP1,
+                            const std::vector<TimelineStep>& rawP2,
+                            std::vector<TimelineStep>& solvedP1,
+                            std::vector<TimelineStep>& solvedP2) {
+    if (settings.player1Enabled && settings.player2Enabled) {
+        auto p1Future = std::async(std::launch::async, [&settings, &rawP1] {
+            return TetrisEngine::beamSearch(rawP1, settings);
+        });
+        solvedP2 = TetrisEngine::beamSearch(rawP2, settings);
+        solvedP1 = p1Future.get();
+        return;
+    }
+    solvedP1 = settings.player1Enabled ? TetrisEngine::beamSearch(rawP1, settings)
+                                       : std::vector<TimelineStep>{};
+    solvedP2 = settings.player2Enabled ? TetrisEngine::beamSearch(rawP2, settings)
+                                       : std::vector<TimelineStep>{};
+}
+
 bool analyzeVideo(const std::filesystem::path& input, const std::filesystem::path& modelPath,
                   const Settings& settings, Status& status, RecoveryOutput& output, std::string& error) {
     // A new analysis starts with no stale file paths/URLs.  The caller may
@@ -1745,9 +1896,8 @@ bool analyzeVideo(const std::filesystem::path& input, const std::filesystem::pat
     status.progress.store(84);
     output.rawP1 = buildRawTimeline(p1Phases, p1Samples);
     output.rawP2 = buildRawTimeline(p2Phases, p2Samples);
-    output.p1 = settings.player1Enabled ? TetrisEngine::beamSearch(output.rawP1, settings) : std::vector<TimelineStep>{};
+    solveTimelinesParallel(settings, output.rawP1, output.rawP2, output.p1, output.p2);
     status.progress.store(91);
-    output.p2 = settings.player2Enabled ? TetrisEngine::beamSearch(output.rawP2, settings) : std::vector<TimelineStep>{};
     status.progress.store(97);
     status.progress.store(100);
     status.setMessage("Analysis complete: review and correct legal candidates before export");
@@ -1789,8 +1939,7 @@ bool reanalyzeQueueObservations(const Settings& settings, RecoveryOutput& output
     const auto rawP2 = buildRawTimelineFromFlatBoards(p2Phases, output.boardObservationsP2);
     output.rawP1 = rawP1;
     output.rawP2 = rawP2;
-    output.p1 = settings.player1Enabled ? TetrisEngine::beamSearch(output.rawP1, settings) : std::vector<TimelineStep>{};
-    output.p2 = settings.player2Enabled ? TetrisEngine::beamSearch(output.rawP2, settings) : std::vector<TimelineStep>{};
+    solveTimelinesParallel(settings, output.rawP1, output.rawP2, output.p1, output.p2);
     return true;
 }
 

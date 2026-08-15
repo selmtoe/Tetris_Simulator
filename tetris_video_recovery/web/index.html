@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>Tetris Video Analyzer</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div><p class="eyebrow">JavaScript + WebAssembly</p><h1>Tetris Video Analyzer</h1><p class="lead">iPadのSafariで動画を読み込み、Tetrisの盤面・HOLD・NEXTを端末内で解析します。</p></div>
+      <span class="privacy-pill">動画は端末内で処理</span>
+    </header>
+    <section class="panel controls-panel">
+      <div class="file-row"><label class="file-picker" for="video-file"><span>動画を選択</span><input id="video-file" type="file" accept="video/*"></label><span id="file-name" class="muted">未選択</span></div>
+      <div class="settings-grid">
+        <label>対象プレイヤー<span class="check-group"><label><input id="player-p1" type="checkbox" checked> P1</label><label><input id="player-p2" type="checkbox" checked> P2</label></span></label>
+        <label>キュー取得間隔<select id="queue-step"><option value="0.10">0.10秒（高精度）</option><option value="0.25" selected>0.25秒（標準）</option><option value="0.50">0.50秒（高速）</option></select></label>
+        <label>盤面取得間隔<select id="board-step"><option value="0.50" selected>0.50秒</option><option value="1.00">1.00秒（高速）</option><option value="0.25">0.25秒（高精度）</option></select></label>
+        <label>ONNXサンプル数<select id="board-samples"><option value="1" selected>1（標準）</option><option value="3">3（安定優先）</option></select></label>
+      </div>
+      <div class="action-row"><button id="analyze-button" class="primary" disabled>解析開始</button><button id="cancel-button" class="secondary" disabled>停止</button><button id="download-button" class="secondary" disabled>JSONを保存</button></div>
+      <div class="progress-wrap"><div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div><div class="status-line"><span id="status-text">動画を選択してください。</span><span id="progress-text">0%</span></div></div>
+    </section>
+    <section class="workspace">
+      <div class="panel video-panel"><div class="panel-heading"><h2>プレビュー</h2><span id="time-text" class="muted">00:00 / 00:00</span></div><video id="video" controls playsinline preload="metadata"></video><canvas id="frame-canvas" class="hidden-canvas"></canvas><p class="hint">対応レイアウト: 16:9のPuyo Puyo Tetris系画面。動画の左右が余る場合は中央を自動クロップします。</p></div>
+      <div class="panel result-panel"><div class="panel-heading"><h2>最新の盤面</h2><span id="snapshot-text" class="muted">未解析</span></div><div class="board-columns"><div><h3>P1</h3><div id="board-p1" class="board-grid empty-board"></div><div id="queue-p1" class="queue-line">HOLD —　NEXT —</div></div><div><h3>P2</h3><div id="board-p2" class="board-grid empty-board"></div><div id="queue-p2" class="queue-line">HOLD —　NEXT —</div></div></div><div class="result-summary"><span id="sample-count">盤面サンプル: 0</span><span id="model-status">WASMモデル: 未読込</span></div></div>
+    </section>
+    <section class="panel details-panel"><div class="panel-heading"><h2>解析ログ</h2><span class="muted">JSONには全サンプルを収録</span></div><div id="log" class="log" role="log"><p class="muted">ここに解析の進捗が表示されます。</p></div></section>
+    <footer><p>推論はONNX Runtime Web（WebAssembly）で実行します。動画と解析結果は自動送信されません。</p></footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -143,7 +143,7 @@ Rgb averageColorNonBlack(const Frame& frame, double cx, double cy, double radius
     return {totalR / count, totalG / count, totalB / count};
 }
 
-BoardImage makeBoardImage(const Frame& frame, const LayoutRect& layout, double cropX, double cropY, double scale) {
+BoardImage makeBoardImageUncached(const Frame& frame, const LayoutRect& layout, double cropX, double cropY, double scale) {
     BoardImage image;
     image.width = std::max(10, static_cast<int>(std::floor(layout.w)));
     image.height = std::max(20, static_cast<int>(std::floor(layout.h)));
@@ -189,13 +189,70 @@ BoardImage makeBoardImage(const Frame& frame, const LayoutRect& layout, double c
     return image;
 }
 
+BoardImage makeBoardImage(const Frame& frame, const LayoutRect& layout, double cropX, double cropY, double scale,
+                         int expectedFrameWidth, int expectedFrameHeight, int imageWidth, int imageHeight,
+                         const std::vector<std::array<std::size_t, 4>>& sampleOffsets,
+                         const std::vector<std::array<double, 2>>& sampleFractions) {
+    if (frame.width != expectedFrameWidth || frame.height != expectedFrameHeight ||
+        imageWidth <= 0 || imageHeight <= 0 ||
+        sampleOffsets.size() != static_cast<std::size_t>(imageWidth) * imageHeight ||
+        sampleFractions.size() != sampleOffsets.size()) {
+        return makeBoardImageUncached(frame, layout, cropX, cropY, scale);
+    }
+
+    BoardImage image;
+    image.width = imageWidth;
+    image.height = imageHeight;
+    image.pixels.resize(sampleOffsets.size());
+    const auto canvasByte = [](double value) -> std::uint8_t {
+        value = std::clamp(value, 0.0, 255.0);
+        const int lower = static_cast<int>(std::floor(value));
+        const double fraction = value - lower;
+        if (fraction > .5 || (fraction == .5 && (lower & 1))) return static_cast<std::uint8_t>(lower + 1);
+        return static_cast<std::uint8_t>(lower);
+    };
+    for (std::size_t i = 0; i < sampleOffsets.size(); ++i) {
+        const auto& offsets = sampleOffsets[i];
+        const double fx = sampleFractions[i][0];
+        const double fy = sampleFractions[i][1];
+        const auto blend = [&](int channel) {
+            const double top = frame.bgra[offsets[0] + channel] * (1.0 - fx) +
+                               frame.bgra[offsets[1] + channel] * fx;
+            const double bottom = frame.bgra[offsets[2] + channel] * (1.0 - fx) +
+                                  frame.bgra[offsets[3] + channel] * fx;
+            return top * (1.0 - fy) + bottom * fy;
+        };
+        image.pixels[i] = BgrPixel{canvasByte(blend(0)), canvasByte(blend(1)), canvasByte(blend(2))};
+    }
+    return image;
+}
+
 std::vector<float> featuresFromBoardImage(const BoardImage& image) {
-    std::vector<float> features;
-    features.reserve(200 * 63);
+    std::vector<float> features(200 * 63);
+    std::size_t featureIndex = 0;
     const double cellW = static_cast<double>(image.width) / BoardWidth;
     const double cellH = static_cast<double>(image.height) / VisibleRows;
     const int cellPixelWidth = std::max(1, static_cast<int>(std::floor(cellW)));
     const int cellPixelHeight = std::max(1, static_cast<int>(std::floor(cellH)));
+    std::array<int, BoardWidth> cellX{};
+    std::array<int, VisibleRows> cellY{};
+    for (int col = 0; col < BoardWidth; ++col) cellX[col] = static_cast<int>(std::floor(col * cellW));
+    for (int row = 0; row < VisibleRows; ++row) cellY[row] = static_cast<int>(std::floor(row * cellH));
+    std::array<int, 4> tileX0{}, tileY0{}, tileX1{}, tileY1{};
+    for (int tile = 0; tile < 4; ++tile) {
+        tileX0[tile] = static_cast<int>(std::floor(tile * (cellPixelWidth / 4.0)));
+        tileY0[tile] = static_cast<int>(std::floor(tile * (cellPixelHeight / 4.0)));
+        tileX1[tile] = static_cast<int>(std::floor((tile + 1) * (cellPixelWidth / 4.0)));
+        tileY1[tile] = static_cast<int>(std::floor((tile + 1) * (cellPixelHeight / 4.0)));
+    }
+    const int centerX = static_cast<int>(std::floor(cellPixelWidth / 2.0));
+    const int centerY = static_cast<int>(std::floor(cellPixelHeight / 2.0));
+    const int centerWidth = static_cast<int>(std::floor(cellPixelWidth / 4.0));
+    const int centerHeight = static_cast<int>(std::floor(cellPixelHeight / 4.0));
+    const int startX = centerX - centerWidth;
+    const int endCenterX = centerX + centerWidth;
+    const int startY = centerY - centerHeight;
+    const int endCenterY = centerY + centerHeight;
     std::array<std::vector<float>, 6> channels;
     for (auto& channel : channels) channel.reserve(cellPixelWidth * cellPixelHeight);
     const auto stats = [](const std::vector<float>& values) {
@@ -213,8 +270,8 @@ std::vector<float> featuresFromBoardImage(const BoardImage& image) {
     for (int row = 0; row < VisibleRows; ++row) {
         for (int col = 0; col < BoardWidth; ++col) {
             // Exact extractCellPixels(x, y, w, h) integer conversion.
-            const int cellX = static_cast<int>(std::floor(col * cellW));
-            const int cellY = static_cast<int>(std::floor(row * cellH));
+            const int originX = cellX[col];
+            const int originY = cellY[row];
             // This is a literal port of extractCellPixels() followed by
             // extractFeaturesJS().  The temporary channels matter because
             // JavaScript stores them in Float32Array before calculating the
@@ -223,7 +280,7 @@ std::vector<float> featuresFromBoardImage(const BoardImage& image) {
             for (auto& channel : channels) channel.clear();
             for (int localY = 0; localY < cellPixelHeight; ++localY) {
                 for (int localX = 0; localX < cellPixelWidth; ++localX) {
-                    const auto& p = image.at(cellX + localX, cellY + localY);
+                    const auto& p = image.pixels[static_cast<std::size_t>(originY + localY) * image.width + originX + localX];
                     const double r = p.r, g = p.g, b = p.b;
                     const double maximum = std::max({r, g, b});
                     const double minimum = std::min({r, g, b});
@@ -243,17 +300,17 @@ std::vector<float> featuresFromBoardImage(const BoardImage& image) {
             }
             for (const auto& channel : channels) {
                 const auto result = stats(channel);
-                features.push_back(result[0]);
-                features.push_back(result[1]);
+                features[featureIndex++] = result[0];
+                features[featureIndex++] = result[1];
             }
 
             // The 4x4 BGR tiles from extractFeaturesJS().
             for (int tileY = 0; tileY < 4; ++tileY) {
                 for (int tileX = 0; tileX < 4; ++tileX) {
-                    const int x0 = static_cast<int>(std::floor(tileX * (cellPixelWidth / 4.0)));
-                    const int y0 = static_cast<int>(std::floor(tileY * (cellPixelHeight / 4.0)));
-                    const int x1 = static_cast<int>(std::floor((tileX + 1) * (cellPixelWidth / 4.0)));
-                    const int y1 = static_cast<int>(std::floor((tileY + 1) * (cellPixelHeight / 4.0)));
+                    const int x0 = tileX0[tileX];
+                    const int y0 = tileY0[tileY];
+                    const int x1 = tileX1[tileX];
+                    const int y1 = tileY1[tileY];
                     double sumB = 0, sumG = 0, sumR = 0, tileCount = 0;
                     for (int y = y0; y < y1; ++y) {
                         for (int x = x0; x < x1; ++x) {
@@ -267,23 +324,17 @@ std::vector<float> featuresFromBoardImage(const BoardImage& image) {
                         }
                     }
                     if (tileCount == 0) {
-                        features.insert(features.end(), {0.0f, 0.0f, 0.0f});
+                        features[featureIndex++] = 0.0f;
+                        features[featureIndex++] = 0.0f;
+                        features[featureIndex++] = 0.0f;
                     } else {
-                        features.push_back(static_cast<float>(sumB / tileCount));
-                        features.push_back(static_cast<float>(sumG / tileCount));
-                        features.push_back(static_cast<float>(sumR / tileCount));
+                        features[featureIndex++] = static_cast<float>(sumB / tileCount);
+                        features[featureIndex++] = static_cast<float>(sumG / tileCount);
+                        features[featureIndex++] = static_cast<float>(sumR / tileCount);
                     }
                 }
             }
 
-            const int centerX = static_cast<int>(std::floor(cellPixelWidth / 2.0));
-            const int centerY = static_cast<int>(std::floor(cellPixelHeight / 2.0));
-            const int centerWidth = static_cast<int>(std::floor(cellPixelWidth / 4.0));
-            const int centerHeight = static_cast<int>(std::floor(cellPixelHeight / 4.0));
-            const int startX = centerX - centerWidth;
-            const int endCenterX = centerX + centerWidth;
-            const int startY = centerY - centerHeight;
-            const int endCenterY = centerY + centerHeight;
             double sumB = 0, sumG = 0, sumR = 0, centerCount = 0;
             for (int y = startY; y < endCenterY; ++y) {
                 for (int x = startX; x < endCenterX; ++x) {
@@ -297,11 +348,13 @@ std::vector<float> featuresFromBoardImage(const BoardImage& image) {
                 }
             }
             if (centerCount == 0) {
-                features.insert(features.end(), {0.0f, 0.0f, 0.0f});
+                features[featureIndex++] = 0.0f;
+                features[featureIndex++] = 0.0f;
+                features[featureIndex++] = 0.0f;
             } else {
-                features.push_back(static_cast<float>(sumB / centerCount));
-                features.push_back(static_cast<float>(sumG / centerCount));
-                features.push_back(static_cast<float>(sumR / centerCount));
+                features[featureIndex++] = static_cast<float>(sumB / centerCount);
+                features[featureIndex++] = static_cast<float>(sumG / centerCount);
+                features[featureIndex++] = static_cast<float>(sumR / centerCount);
             }
         }
     }
@@ -381,22 +434,95 @@ VisionAnalyzer::VisionAnalyzer(int frameWidth, int frameHeight, const PlayerLayo
         cropY = (frameHeight_ - cropWidth / targetAspect) / 2.0;
     }
     crop_ = {cropX, cropY, cropWidth / 1920.0};
+
+    boardImageWidth_ = std::max(10, static_cast<int>(std::floor(layout_.board.w)));
+    boardImageHeight_ = std::max(20, static_cast<int>(std::floor(layout_.board.h)));
+    if (model_ != nullptr) {
+        const std::size_t pixelCount = static_cast<std::size_t>(boardImageWidth_) * boardImageHeight_;
+        boardSampleOffsets_.resize(pixelCount);
+        boardSampleFractions_.resize(pixelCount);
+        for (int y = 0; y < boardImageHeight_; ++y) {
+            for (int x = 0; x < boardImageWidth_; ++x) {
+                const double sourceX = crop_.x + layout_.board.x * crop_.scale + (x + .5) * crop_.scale - .5;
+                const double sourceY = crop_.y + layout_.board.y * crop_.scale + (y + .5) * crop_.scale - .5;
+                const double clampedX = std::clamp(sourceX, 0.0, static_cast<double>(frameWidth_ - 1));
+                const double clampedY = std::clamp(sourceY, 0.0, static_cast<double>(frameHeight_ - 1));
+                const int x0 = static_cast<int>(std::floor(clampedX));
+                const int y0 = static_cast<int>(std::floor(clampedY));
+                const int x1 = std::min(frameWidth_ - 1, x0 + 1);
+                const int y1 = std::min(frameHeight_ - 1, y0 + 1);
+                const std::size_t i = static_cast<std::size_t>(y) * boardImageWidth_ + x;
+                boardSampleOffsets_[i] = {
+                    (static_cast<std::size_t>(y0) * frameWidth_ + x0) * 4,
+                    (static_cast<std::size_t>(y0) * frameWidth_ + x1) * 4,
+                    (static_cast<std::size_t>(y1) * frameWidth_ + x0) * 4,
+                    (static_cast<std::size_t>(y1) * frameWidth_ + x1) * 4,
+                };
+                boardSampleFractions_[i] = {clampedX - x0, clampedY - y0};
+            }
+        }
+    }
+
+    const double queueScale = crop_.scale * (1920.0 / layout_.queueCoordinateWidth);
+    const double radius = layout_.queueSampleRadius * queueScale;
+    const std::array<std::array<double, 2>, 6> coordinates{{
+        layout_.hold, layout_.next[0], layout_.next[1], layout_.next[2], layout_.next[3], layout_.next[4]
+    }};
+    for (std::size_t i = 0; i < coordinates.size(); ++i) {
+        const double cx = crop_.x + coordinates[i][0] * queueScale;
+        const double cy = crop_.y + coordinates[i][1] * queueScale;
+        const int startX = std::max(0, static_cast<int>(std::floor(cx - radius)));
+        const int startY = std::max(0, static_cast<int>(std::floor(cy - radius)));
+        const int diameter = static_cast<int>(std::ceil(radius * 2.0));
+        const int endX = std::min(frameWidth_, startX + diameter);
+        const int endY = std::min(frameHeight_, startY + diameter);
+        auto& offsets = queueSampleOffsets_[i];
+        offsets.reserve(static_cast<std::size_t>(std::max(0, endX - startX)) * std::max(0, endY - startY));
+        const double radiusSq = radius * radius;
+        for (int y = startY; y < endY; ++y) {
+            for (int x = startX; x < endX; ++x) {
+                const double dx = x - cx;
+                const double dy = y - cy;
+                if (dx * dx + dy * dy <= radiusSq) {
+                    offsets.push_back((static_cast<std::size_t>(y) * frameWidth_ + x) * 4);
+                }
+            }
+        }
+    }
 }
 
 QueueObservation VisionAnalyzer::observeQueue(const Frame& frame) const {
     QueueObservation result;
-    const double scale = crop_.scale * (1920.0 / layout_.queueCoordinateWidth);
-    const double radius = layout_.queueSampleRadius * scale;
+    const bool cachedGeometryMatches = frame.width == frameWidth_ && frame.height == frameHeight_;
+    const double fallbackScale = crop_.scale * (1920.0 / layout_.queueCoordinateWidth);
+    const double fallbackRadius = layout_.queueSampleRadius * fallbackScale;
     const std::array<std::array<double, 2>, 6> coordinates{{
         layout_.hold, layout_.next[0], layout_.next[1], layout_.next[2], layout_.next[3], layout_.next[4]
     }};
 
     for (std::size_t i = 0; i < coordinates.size(); ++i) {
-        const auto& coordinate = coordinates[i];
-        const Rgb color = averageColorNonBlack(frame,
-            crop_.x + coordinate[0] * scale,
-            crop_.y + coordinate[1] * scale,
-            radius);
+        Rgb color;
+        if (cachedGeometryMatches) {
+            double totalR = 0, totalG = 0, totalB = 0, count = 0;
+            for (const std::size_t offset : queueSampleOffsets_[i]) {
+                const double r = frame.bgra[offset + 2];
+                const double g = frame.bgra[offset + 1];
+                const double b = frame.bgra[offset + 0];
+                if (r > 50.0 || g > 50.0 || b > 50.0) {
+                    totalR += r;
+                    totalG += g;
+                    totalB += b;
+                    ++count;
+                }
+            }
+            if (count != 0) color = {totalR / count, totalG / count, totalB / count};
+        } else {
+            const auto& coordinate = coordinates[i];
+            color = averageColorNonBlack(frame,
+                crop_.x + coordinate[0] * fallbackScale,
+                crop_.y + coordinate[1] * fallbackScale,
+                fallbackRadius);
+        }
         result.colors.push_back({
             static_cast<std::uint8_t>(std::clamp(std::lround(color.r), 0l, 255l)),
             static_cast<std::uint8_t>(std::clamp(std::lround(color.g), 0l, 255l)),
@@ -417,11 +543,15 @@ QueueObservation VisionAnalyzer::observeQueue(const Frame& frame) const {
 }
 
 std::vector<float> VisionAnalyzer::extractBoardFeatures(const Frame& frame) const {
-    return featuresFromBoardImage(makeBoardImage(frame, layout_.board, crop_.x, crop_.y, crop_.scale));
+    return featuresFromBoardImage(makeBoardImage(frame, layout_.board, crop_.x, crop_.y, crop_.scale,
+                                                 frameWidth_, frameHeight_, boardImageWidth_, boardImageHeight_,
+                                                 boardSampleOffsets_, boardSampleFractions_));
 }
 
 VisibleBoard VisionAnalyzer::classicBoard(const Frame& frame) const {
-    return classicBoardFromImage(makeBoardImage(frame, layout_.board, crop_.x, crop_.y, crop_.scale));
+    return classicBoardFromImage(makeBoardImage(frame, layout_.board, crop_.x, crop_.y, crop_.scale,
+                                                frameWidth_, frameHeight_, boardImageWidth_, boardImageHeight_,
+                                                boardSampleOffsets_, boardSampleFractions_));
 }
 
 BoardObservation VisionAnalyzer::analyzeBoard(const Frame& frame) const {
@@ -434,7 +564,9 @@ BoardObservation VisionAnalyzer::analyzeBoard(const Frame& frame) const {
 
     // Keep the ONNX and the original row-recovery fallback together, exactly
     // as analyzeBoardOnly() does in 動画解析.html.
-    const BoardImage image = makeBoardImage(frame, layout_.board, crop_.x, crop_.y, crop_.scale);
+    const BoardImage image = makeBoardImage(frame, layout_.board, crop_.x, crop_.y, crop_.scale,
+                                            frameWidth_, frameHeight_, boardImageWidth_, boardImageHeight_,
+                                            boardSampleOffsets_, boardSampleFractions_);
     const auto labels = model_->infer(featuresFromBoardImage(image), result.recognitionError);
     const auto classic = classicBoardFromImage(image);
     for (int row = 0; row < VisibleRows; ++row) {
