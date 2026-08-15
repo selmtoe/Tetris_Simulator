@@ -117,6 +117,11 @@ function submitQueue(player, rgba, time) {
   for (let i = 0; i < nextCount; i++) next.push(module.HEAP32[(state.nextPtr >> 2) + i]);
   return { hold: module.HEAP32[state.holdPtr >> 2], next: next };
 }
+function uploadFrame(rgba) {
+  const module = state.module;
+  module.HEAPU8.set(rgba, state.framePtr);
+  if (!module._tr_frame_upload(state.framePtr, rgba.byteLength)) throw new Error(wasmError());
+}
 
 async function playFromStart() {
   video.pause();
@@ -136,7 +141,9 @@ async function queuePass(duration, interval) {
     if (mediaTime === null) break;
     lastFrame = readFrame();
     frames++;
+    let uploaded = false;
     while (nextScan <= mediaTime + 0.000001 && nextScan < duration) {
+      if (!uploaded) { uploadFrame(lastFrame); uploaded = true; }
       submitQueue(1, lastFrame, nextScan);
       submitQueue(2, lastFrame, nextScan);
       nextScan += interval;
@@ -190,9 +197,10 @@ async function boardPass(requests, duration) {
     if (mediaTime === null) break;
     const rgba = readFrame();
     frameCount++;
+    let uploaded = false;
     while (index < requests.length && requests[index].time <= mediaTime + 0.000001) {
       const request = requests[index++];
-      module.HEAPU8.set(rgba, state.framePtr);
+      if (!uploaded) { uploadFrame(rgba); uploaded = true; }
       if (!module._tr_board_features(request.player, state.framePtr, rgba.byteLength, state.featurePtr, 200 * 63)) throw new Error(wasmError());
       const features = new Float32Array(module.HEAPF32.buffer, state.featurePtr, 200 * 63).slice();
       const tensor = new ort.Tensor("float32", features, [200, 63]);

@@ -4763,6 +4763,7 @@ function checkIncomingModuleAPI() {
 var _tr_runtime_init = Module['_tr_runtime_init'] = makeInvalidEarlyAccess('_tr_runtime_init');
 var _tr_last_error = Module['_tr_last_error'] = makeInvalidEarlyAccess('_tr_last_error');
 var _tr_runtime_reset = Module['_tr_runtime_reset'] = makeInvalidEarlyAccess('_tr_runtime_reset');
+var _tr_frame_upload = Module['_tr_frame_upload'] = makeInvalidEarlyAccess('_tr_frame_upload');
 var _tr_queue_observe_and_add = Module['_tr_queue_observe_and_add'] = makeInvalidEarlyAccess('_tr_queue_observe_and_add');
 var _tr_prepare_board_requests = Module['_tr_prepare_board_requests'] = makeInvalidEarlyAccess('_tr_prepare_board_requests');
 var _tr_board_features = Module['_tr_board_features'] = makeInvalidEarlyAccess('_tr_board_features');
@@ -4793,6 +4794,7 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['tr_runtime_init'] != 'undefined', 'missing Wasm export: tr_runtime_init');
   assert(typeof wasmExports['tr_last_error'] != 'undefined', 'missing Wasm export: tr_last_error');
   assert(typeof wasmExports['tr_runtime_reset'] != 'undefined', 'missing Wasm export: tr_runtime_reset');
+  assert(typeof wasmExports['tr_frame_upload'] != 'undefined', 'missing Wasm export: tr_frame_upload');
   assert(typeof wasmExports['tr_queue_observe_and_add'] != 'undefined', 'missing Wasm export: tr_queue_observe_and_add');
   assert(typeof wasmExports['tr_prepare_board_requests'] != 'undefined', 'missing Wasm export: tr_prepare_board_requests');
   assert(typeof wasmExports['tr_board_features'] != 'undefined', 'missing Wasm export: tr_board_features');
@@ -4820,6 +4822,7 @@ function assignWasmExports(wasmExports) {
   _tr_runtime_init = Module['_tr_runtime_init'] = createExportWrapper('tr_runtime_init', wasmExports['tr_runtime_init'], 3);
   _tr_last_error = Module['_tr_last_error'] = createExportWrapper('tr_last_error', wasmExports['tr_last_error'], 0);
   _tr_runtime_reset = Module['_tr_runtime_reset'] = createExportWrapper('tr_runtime_reset', wasmExports['tr_runtime_reset'], 1);
+  _tr_frame_upload = Module['_tr_frame_upload'] = createExportWrapper('tr_frame_upload', wasmExports['tr_frame_upload'], 2);
   _tr_queue_observe_and_add = Module['_tr_queue_observe_and_add'] = createExportWrapper('tr_queue_observe_and_add', wasmExports['tr_queue_observe_and_add'], 9);
   _tr_prepare_board_requests = Module['_tr_prepare_board_requests'] = createExportWrapper('tr_prepare_board_requests', wasmExports['tr_prepare_board_requests'], 3);
   _tr_board_features = Module['_tr_board_features'] = createExportWrapper('tr_board_features', wasmExports['tr_board_features'], 5);

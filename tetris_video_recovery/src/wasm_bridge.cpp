@@ -28,6 +28,8 @@ using tr::VisionAnalyzer;
 struct Runtime {
     int width = 0;
     int height = 0;
+    Frame currentFrame;
+    bool frameReady = false;
     Settings settings;
     double duration = 0;
     std::unique_ptr<tr::OnnxBoardModel> geometryModel;
@@ -92,6 +94,13 @@ Frame makeFrame(const std::uint8_t* rgba) {
         frame.bgra[i * 4 + 3] = rgba[i * 4 + 3];
     }
     return frame;
+}
+
+bool uploadFrame(const std::uint8_t* rgba, int byteCount) {
+    if (!validFrameInput(rgba, byteCount)) return false;
+    runtime.currentFrame = makeFrame(rgba);
+    runtime.frameReady = true;
+    return true;
 }
 
 VisionAnalyzer* visionForPlayer(int player) {
@@ -166,7 +175,14 @@ void tr_runtime_reset(double durationSeconds) {
     runtime.p1Boards.clear();
     runtime.p2Boards.clear();
     runtime.output = RecoveryOutput{};
+    runtime.currentFrame = Frame{};
+    runtime.frameReady = false;
     runtime.error.clear();
+}
+
+EMSCRIPTEN_KEEPALIVE
+int tr_frame_upload(const std::uint8_t* rgba, int byteCount) {
+    return uploadFrame(rgba, byteCount) ? 1 : 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -175,8 +191,8 @@ int tr_queue_observe_and_add(int player, const std::uint8_t* rgba, int byteCount
                              std::uint8_t* colors, int colorsCapacity) {
     VisionAnalyzer* vision = visionForPlayer(player);
     if (!vision || !validFrameInput(rgba, byteCount)) return 0;
-    Frame frame = makeFrame(rgba);
-    const QueueObservation observation = vision->observeQueue(frame);
+    if (!runtime.frameReady && !uploadFrame(rgba, byteCount)) return 0;
+    const QueueObservation observation = vision->observeQueue(runtime.currentFrame);
     if (hold) *hold = static_cast<int>(observation.hold);
     if (next && nextCapacity > 0) {
         const int count = std::min<int>(nextCapacity, observation.next.size());
@@ -220,8 +236,8 @@ EMSCRIPTEN_KEEPALIVE
 int tr_board_features(int player, const std::uint8_t* rgba, int byteCount, float* output, int outputCapacity) {
     VisionAnalyzer* vision = visionForPlayer(player);
     if (!vision || !validFrameInput(rgba, byteCount) || !output || outputCapacity < 200 * 63) return 0;
-    const Frame frame = makeFrame(rgba);
-    const auto features = vision->boardFeatures(frame);
+    if (!runtime.frameReady && !uploadFrame(rgba, byteCount)) return 0;
+    const auto features = vision->boardFeatures(runtime.currentFrame);
     std::copy(features.begin(), features.end(), output);
     return static_cast<int>(features.size());
 }
@@ -231,10 +247,10 @@ int tr_board_finish(int player, const std::uint8_t* rgba, int byteCount, double 
                     const std::uint8_t* classLabels, int labelCount) {
     VisionAnalyzer* vision = visionForPlayer(player);
     if (!vision || !validFrameInput(rgba, byteCount) || !classLabels || labelCount < 200) return 0;
+    if (!runtime.frameReady && !uploadFrame(rgba, byteCount)) return 0;
     std::vector<Cell> labels(200, Cell::Empty);
     for (int i = 0; i < 200; ++i) labels[static_cast<std::size_t>(i)] = labelToCell(classLabels[i]);
-    const Frame frame = makeFrame(rgba);
-    BoardObservation observation = vision->analyzeBoardWithLabels(frame, labels);
+    BoardObservation observation = vision->analyzeBoardWithLabels(runtime.currentFrame, labels);
     observation.timeSeconds = timeSeconds;
     boardsForPlayer(player).push_back(std::move(observation));
     return static_cast<int>(boardsForPlayer(player).size());
