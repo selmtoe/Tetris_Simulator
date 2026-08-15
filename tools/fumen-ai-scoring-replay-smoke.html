@@ -6,13 +6,41 @@
 (() => {
     const output = document.getElementById('output');
     const empty = () => Array.from({ length: 40 }, () => Array(10).fill(null));
-    const board0 = empty();
-    const board1 = empty();
-    for (let x = 3; x <= 6; x++) board1[39][x] = 'I';
+    function scoreReplay(pages, runId) {
+        return new Promise(resolve => {
+            const worker = new Worker(`../F/app/84-ai-scoring-worker.js?v=replay-smoke-${Date.now()}-${runId}`);
+            worker.onmessage = event => {
+                const message = event.data || {};
+                if (message.type === 'done') {
+                    resolve(message.results || []);
+                    worker.terminate();
+                } else if (message.type === 'error') {
+                    resolve([{ status: 'error', error: message.message || 'worker error' }]);
+                    worker.terminate();
+                }
+            };
+            worker.postMessage({
+                type: 'score',
+                runId,
+                pages,
+                replay: true,
+                operationPages: pages.map((_, index) => index),
+                replayInitial: { p1: { sequence: 'TIOLJSZ', hold: '' } },
+                nodeBudget: 500,
+                detailNodeBudget: 5000,
+                thresholdScore: 1000,
+                planLength: 1,
+                useWasm: false
+            });
+        });
+    }
 
     // This intentionally uses the old format: an empty HOLD was not marked
     // holdUsed even though it consumed T and locked NEXT[0] = I.
-    const pages = [
+    const board0 = empty();
+    const board1 = empty();
+    for (let x = 3; x <= 6; x++) board1[39][x] = 'I';
+    const legacyPages = [
         { p1: { board: board0, hold: '', next: '', operation: {
             type: 'I', rotation: 'spawn', x: 3, y: 39, holdUsed: false
         } } },
@@ -20,41 +48,40 @@
             type: 'O', rotation: 'spawn', x: 0, y: 39, holdUsed: false
         } } }
     ];
-    const worker = new Worker(`../F/app/84-ai-scoring-worker.js?v=replay-smoke-${Date.now()}`);
-    const result = { passed: false, statuses: [], reconstructions: [] };
-    worker.onmessage = event => {
-        const message = event.data || {};
-        if (message.type === 'progress' && message.result) {
-            result.statuses.push(message.result.status);
-            result.reconstructions.push(message.result.reconstruction);
-        }
-        if (message.type === 'done') {
-            result.results = message.results || [];
-            result.passed = result.results.length === 2 &&
-                result.results.every(item => item.status === 'scored') &&
-                result.results[0].reconstruction === 'recorded-operation' &&
-                result.results[1].reconstruction === 'recorded-operation';
-            output.textContent = JSON.stringify(result, null, 2);
-            worker.terminate();
-        }
-        if (message.type === 'error') {
-            result.error = message.message || 'worker error';
-            output.textContent = JSON.stringify(result, null, 2);
-            worker.terminate();
-        }
-    };
-    worker.postMessage({
-        type: 'score',
-        runId: 'replay-smoke',
-        pages,
-        replay: true,
-        operationPages: [0, 1],
-        replayInitial: { p1: { sequence: 'TIOLJSZ', hold: '' } },
-        nodeBudget: 500,
-        detailNodeBudget: 5000,
-        thresholdScore: 1000,
-        planLength: 1,
-        useWasm: false
+
+    const simulatorShapes = [
+        [[0, 0], [1, 0], [2, 0], [3, 0]],
+        [[2, 0], [2, -1], [2, 1], [2, 2]],
+        [[0, 1], [1, 1], [2, 1], [3, 1]],
+        [[1, 0], [1, -1], [1, 1], [1, 2]]
+    ];
+    const rotationNames = ['spawn', 'right', 'reverse', 'left'];
+    const rotationPages = rotationNames.map((rotation, index) => {
+        const x = 3;
+        const y = index === 0 || index === 2 ? (index === 0 ? 39 : 38) : 37;
+        const board = empty();
+        simulatorShapes[index].forEach(([dx, dy]) => { board[y + dy][x + dx] = 'I'; });
+        return { p1: { board: empty(), hold: '', next: '', operation: {
+            type: 'I', rotation, x, y, holdUsed: false
+        } }, expectedBoard: board };
+    }).map(page => ({ p1: page.p1 }));
+
+    Promise.all([
+        scoreReplay(legacyPages, 'legacy-empty-hold'),
+        ...rotationPages.map((pages, index) => scoreReplay([pages], `i-rotation-${index}`))
+    ]).then(([legacyResults, ...rotationResults]) => {
+        const allScored = legacyResults.length === 2 &&
+            legacyResults.every(item => item.status === 'scored') &&
+            rotationResults.every(items => items.length === 1 && items[0].status === 'scored');
+        output.textContent = JSON.stringify({
+            passed: allScored,
+            legacy: legacyResults.map(item => ({ status: item.status, reconstruction: item.reconstruction })),
+            iRotations: rotationResults.map((items, index) => ({
+                rotation: rotationNames[index],
+                status: items[0]?.status,
+                reconstruction: items[0]?.reconstruction
+            }))
+        }, null, 2);
     });
 })();
 </script>
