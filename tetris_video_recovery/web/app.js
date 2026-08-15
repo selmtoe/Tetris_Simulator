@@ -460,3 +460,9 @@ async function copyText(value, label) {
   catch (_) { alert("クリップボードへコピーできませんでした。HTTPS上で実行してください。"); }
 }
 setupEvents();
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch(error => {
+    log("PWAキャッシュを有効化できませんでした: " + (error.message || error));
+  });
+}

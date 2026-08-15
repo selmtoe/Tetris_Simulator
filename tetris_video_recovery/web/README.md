@@ -48,3 +48,11 @@ original simulator remains untouched.
 To rebuild the browser bundle after changing the shared C++ bridge:
 
     powershell -ExecutionPolicy Bypass -File .\tetris_video_recovery\build-web.ps1
+
+## iPadホーム画面/PWA
+
+このディレクトリにはGitHub Pagesのサブパスに対応したWeb App Manifestと
+Service Workerを含めています。iPadのSafariで公開URLを開き、共有ボタンから
+「ホーム画面に追加」を選ぶと、スタンドアロンのPWAとして起動できます。
+初回起動時にアプリ本体・WASM・ONNXモデルをキャッシュします。動画ファイルや
+生成した学習データはService Workerのキャッシュには保存しません。
