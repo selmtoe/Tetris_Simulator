@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const video = $("video");
 const canvas = $("frame");
 const ctx = canvas.getContext("2d", { willReadFrequently: true });
-const RELEASE = "0c05973";
+const RELEASE = "defdd09";
 const state = { file: null, module: null, session: null, running: false, cancel: false, framePtr: 0, frameBytes: 0, holdPtr: 0, nextPtr: 0, colorsPtr: 0, featurePtr: 0, labelPtr: 0 };
 
 function log(message) { $("log").textContent += "\n" + message; $("log").scrollTop = $("log").scrollHeight; }
