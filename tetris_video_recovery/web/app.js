@@ -190,33 +190,47 @@ async function boardPass(requests, duration) {
   const session = state.session;
   const inputName = session.inputNames[0];
   const outputName = session.outputNames[0];
+  const runRequest = async (request, rgba, alreadyUploaded) => {
+    if (!alreadyUploaded) uploadFrame(rgba);
+    if (!module._tr_board_features(request.player, state.framePtr, rgba.byteLength, state.featurePtr, 200 * 63)) throw new Error(wasmError());
+    const features = new Float32Array(module.HEAPF32.buffer, state.featurePtr, 200 * 63).slice();
+    const tensor = new ort.Tensor("float32", features, [200, 63]);
+    const result = await session.run({ [inputName]: tensor }, [outputName]);
+    const labels = classLabels(result[outputName]);
+    module.HEAPU8.set(labels, state.labelPtr);
+    if (!module._tr_board_finish(request.player, state.framePtr, rgba.byteLength, request.time, state.labelPtr, 200)) throw new Error(wasmError());
+  };
   let index = 0;
   let frameCount = 0;
+  let lastFrame = null;
   await playFromStart();
   while (index < requests.length) {
     cancelled();
     const mediaTime = await nextDecodedFrame();
     if (mediaTime === null) break;
     const rgba = readFrame();
+    lastFrame = rgba;
     frameCount++;
     let uploaded = false;
     while (index < requests.length && requests[index].time <= mediaTime + 0.000001) {
       const request = requests[index++];
-      if (!uploaded) { uploadFrame(rgba); uploaded = true; }
-      if (!module._tr_board_features(request.player, state.framePtr, rgba.byteLength, state.featurePtr, 200 * 63)) throw new Error(wasmError());
-      const features = new Float32Array(module.HEAPF32.buffer, state.featurePtr, 200 * 63).slice();
-      const tensor = new ort.Tensor("float32", features, [200, 63]);
-      const result = await session.run({ [inputName]: tensor }, [outputName]);
-      const labels = classLabels(result[outputName]);
-      module.HEAPU8.set(labels, state.labelPtr);
-      if (!module._tr_board_finish(request.player, state.framePtr, rgba.byteLength, request.time, state.labelPtr, 200)) throw new Error(wasmError());
+      await runRequest(request, rgba, uploaded);
+      uploaded = true;
       status("Pass 2/3: 盤面ONNX " + index + "/" + requests.length, 40 + index / Math.max(1, requests.length) * 42);
       await yieldToBrowser();
     }
-    if (mediaTime >= duration - 0.0001 && index < requests.length) break;
+    if (mediaTime >= duration - 0.0001) break;
   }
   video.pause();
-  if (index !== requests.length) throw new Error("盤面要求を処理できませんでした (" + index + "/" + requests.length + ")");
+  if (index < requests.length) {
+    if (!lastFrame) throw new Error("動画から盤面補完用の最終フレームを取得できませんでした");
+    uploadFrame(lastFrame);
+    while (index < requests.length) {
+      await runRequest(requests[index++], lastFrame, true);
+      status("Pass 2/3: 末尾フレームで盤面補完 " + index + "/" + requests.length, 40 + index / Math.max(1, requests.length) * 42);
+      await yieldToBrowser();
+    }
+  }
   return frameCount;
 }
 
