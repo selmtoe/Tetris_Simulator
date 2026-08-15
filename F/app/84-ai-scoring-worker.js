@@ -147,9 +147,11 @@ function publicMove(edge) {
         rotation: placement.rotation,
         tspin: placement.tspin === 2 ? 'full' : (placement.tspin === 1 ? 'mini' : null),
         hold: Boolean(edge.hold),
-        cells: shape ? shape
-            .map(([dx, dy]) => [placement.x + dx, placement.y + dy])
-            .filter(([x, y]) => x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT) : []
+        // Keep cells outside the visible 40-row window.  A legal lock may
+        // still have a cell above the top during a top-out; dropping that
+        // cell here turns an otherwise recorded four-cell operation into an
+        // invalid one.
+        cells: shape ? shape.map(([dx, dy]) => [placement.x + dx, placement.y + dy]) : []
     };
 }
 
@@ -289,8 +291,10 @@ function recordedOperationCells(operation) {
     if (!operation || !SIMULATOR_SHAPES[operation.type]) return [];
     const rotation = operationRotationIndex(operation.rotation);
     return simulatorShape(operation.type, rotation)
-        .map(([x, y]) => [Math.round(operation.x + x), Math.round(operation.y + y)])
-        .filter(([x, y]) => x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT);
+        // Do not clip the four cells to the visible board.  The simulator
+        // permits a lock with cells above row 0, and the operation itself is
+        // still unambiguous in that case.
+        .map(([x, y]) => [Math.round(operation.x + x), Math.round(operation.y + y)]);
 }
 
 function normalizeRecordedOperation(value) {
@@ -310,6 +314,20 @@ function normalizeRecordedOperation(value) {
 
 function operationForWorker(page) {
     return normalizeRecordedOperation(page?.p1?.operation);
+}
+
+// Older simulator recordings only marked HOLD when the locked piece came
+// from an already-filled HOLD slot.  An empty HOLD is also a real action: it
+// stores the current piece and locks NEXT[0]. Infer that legacy action from
+// the recorded piece and the reconstructed pre-lock state.
+function operationUsesHoldAction(operation, source) {
+    if (!operation || source?.explicitCurrent) return false;
+    if (operation.holdUsed) return true;
+    const current = source?.current || null;
+    const queue = Array.isArray(source?.next) ? source.next : [];
+    const hold = source?.hold || null;
+    if (hold && operation.type === hold && operation.type !== current) return true;
+    return !hold && Boolean(current) && operation.type !== current && operation.type === queue[0];
 }
 
 function replaySourceAtPage(pages, initial, pageIndex) {
@@ -333,7 +351,8 @@ function replaySourceAtPage(pages, initial, pageIndex) {
     let hold = cleanPieces(seed.hold)[0] || null;
     for (let index = 0; index < pageIndex; index++) {
         const operation = normalizeRecordedOperation(pages[index]?.p1?.operation);
-        if (operation?.holdUsed) {
+        const source = { current, hold, next: queue, explicitCurrent: false };
+        if (operationUsesHoldAction(operation, source)) {
             if (hold) {
                 const previousCurrent = current;
                 current = hold;
@@ -346,11 +365,16 @@ function replaySourceAtPage(pages, initial, pageIndex) {
         if (operation) current = queue.shift() || null;
     }
     const page = pages[pageIndex]?.p1 || {};
+    const pageHold = cleanPieces(page.hold)[0] || null;
+    const pageNext = cleanPieces(page.next);
     return {
         board: Array.isArray(page.board) ? page.board : [],
         current: current || cleanPieces(page.current)[0] || null,
-        hold: hold || cleanPieces(page.hold)[0] || null,
-        next: cleanPieces(page.next),
+        hold: pageHold || hold || null,
+        // Simulator-recorded pages intentionally leave NEXT blank.  Use the
+        // reconstructed queue in that format; hand-authored replay pages
+        // with NEXT take precedence.
+        next: pageNext.length ? pageNext : queue,
         explicitCurrent: false
     };
 }
@@ -362,7 +386,7 @@ function recordedOperationMatches(search, operation, source) {
     // In the new replay format HOLD has already been resolved into
     // `source.current`; holdUsed records provenance for the viewer and must
     // not cause Cold Clear to press HOLD a second time.
-    const usesHoldAction = !source.explicitCurrent && operation.holdUsed;
+    const usesHoldAction = operationUsesHoldAction(operation, source);
     return search.root.children
         .filter(edge => Boolean(edge.hold) === usesHoldAction)
         .filter(edge => edge.placement.type === operation.type)
@@ -384,8 +408,12 @@ function forcedRecordedOperationEdge(search, source, operation) {
     // I/S/Z placement after a garbage rise).  The board delta still proves
     // the four locked cells, so score that exact placement instead of
     // dropping the hand from the run.
-    if (!search?.root?.state?.board || !source?.explicitCurrent ||
-        source.current !== operation.type) return null;
+    if (!search?.root?.state?.board || !operation) return null;
+    const usesHoldAction = operationUsesHoldAction(operation, source);
+    const expectedPiece = usesHoldAction
+        ? (source.hold || source.next[0] || null)
+        : (source.current || source.next[0] || null);
+    if (expectedPiece !== operation.type) return null;
     const rotation = operation.rotation;
     const placement = {
         type: operation.type,
@@ -398,8 +426,23 @@ function forcedRecordedOperationEdge(search, source, operation) {
         time: 0,
         inputs: []
     };
+    // An empty HOLD is represented by a base state whose current piece is
+    // NEXT[0]; makeEdge then advances to NEXT[1] and keeps the old current in
+    // HOLD, exactly like the normal child generator.
+    if (usesHoldAction && !source.hold) {
+        const heldBase = {
+            ...search.root.state,
+            index: search.root.state.index + 1,
+            current: source.next[0] || null,
+            hold: source.current || null
+        };
+        if (!heldBase.current || !heldBase.board.valid(placement)) return null;
+        const edge = search.makeEdge(search.root, heldBase, placement, false);
+        if (edge) edge.hold = true;
+        return edge;
+    }
     if (!search.root.state.board.valid(placement)) return null;
-    return search.makeEdge(search.root, search.root.state, placement, false);
+    return search.makeEdge(search.root, search.root.state, placement, usesHoldAction);
 }
 
 function edgeCanBeRecordedMove(edge, source) {

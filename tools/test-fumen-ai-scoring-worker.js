@@ -378,6 +378,26 @@ const holdReplayResults = run([
 });
 assert(holdReplayResults.length === 2 && holdReplayResults.every(result => result.status === 'scored'), 'Replay HOLD operation was not scored.');
 
+// Older simulator recordings omitted holdUsed for an empty HOLD because the
+// locked piece came from NEXT. The scorer must infer that queue-consuming
+// action from the pre-lock piece state and keep later pages aligned.
+const emptyHoldReplaySearch0 = makeSearch(empty(), 'T', ['I', 'O', 'L', 'J', 'S', 'Z']);
+const emptyHoldReplayEdge0 = firstEdge(emptyHoldReplaySearch0, edge => edge.hold && edge.placement.type === 'I');
+const emptyHoldReplayBoard1 = addEdge(empty(), emptyHoldReplayEdge0);
+const emptyHoldReplaySearch1 = makeSearch(emptyHoldReplayBoard1, 'O', ['L', 'J', 'S', 'Z'], 'T');
+const emptyHoldReplayEdge1 = firstEdge(emptyHoldReplaySearch1, edge => !edge.hold && edge.placement.type === 'O');
+const legacyEmptyHoldOperation = { ...operationFromEdge(emptyHoldReplayEdge0), holdUsed: false };
+const emptyHoldReplayResults = run([
+    { p1: { board: empty(), hold: '', next: 'IOLJSZ', operation: legacyEmptyHoldOperation } },
+    { p1: { board: emptyHoldReplayBoard1, hold: 'T', next: 'LJSZ', operation: operationFromEdge(emptyHoldReplayEdge1) } }
+], 20, {
+    replay: true,
+    operationPages: [0, 1],
+    endPage: 1,
+    replayInitial: { p1: { sequence: 'TIOLJSZ', hold: '' } }
+});
+assert(emptyHoldReplayResults.length === 2 && emptyHoldReplayResults.every(result => result.status === 'scored'), 'Legacy empty-HOLD replay was not reconstructed.');
+
 globalThis.self = originalSelf;
 console.log(JSON.stringify({
     passed: true,
@@ -387,5 +407,5 @@ console.log(JSON.stringify({
     garbage: { rows: [garbage.garbageRows, doubleGarbage.garbageRows], cells: garbage.actualMove.cells.length },
     detailed: { roughNodes: detailed.roughNodes, nodes: detailed.nodes, planLength: detailed.aiPlan.length },
     requestedPlans: { short: shortPlan.aiPlan.length, max: maxPlan.aiPlan.length },
-    replay: { operations: replayResults.length, holdOperations: holdReplayResults.length, statuses: replayResults.map(result => result.status) }
+    replay: { operations: replayResults.length, holdOperations: holdReplayResults.length, emptyHoldOperations: emptyHoldReplayResults.length, statuses: replayResults.map(result => result.status) }
 }, null, 2));

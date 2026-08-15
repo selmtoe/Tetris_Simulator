@@ -49,6 +49,19 @@ function operationForPage(playerData) {
     return normalizeOperation(playerData?.operation || playerData?.o || playerData?.placement);
 }
 
+// A legacy simulator replay did not mark an empty HOLD as holdUsed because
+// the locked piece came from NEXT. It is still a queue-consuming HOLD action,
+// so infer it while the replay state is being reconstructed.
+function operationUsesHoldAction(operation, state) {
+    if (!operation) return false;
+    if (operation.holdUsed) return true;
+    const current = state?.current || '';
+    const hold = state?.hold || '';
+    const queue = Array.isArray(state?.queue) ? state.queue : [];
+    if (hold && operation.type === hold && operation.type !== current) return true;
+    return !hold && Boolean(current) && operation.type !== current && operation.type === queue[0];
+}
+
 // Older native recovery exports used the candidate generator's anchor for I
 // and O. The browser/editor uses the simulator shape table instead. The four
 // occupied cells are identical; only the stored anchor differs. New native
@@ -388,7 +401,7 @@ function replayStateAtPage(caseData, playerId, pageIndex) {
             if (operation) state.current = state.queue.shift() || '';
             continue;
         }
-        if (operation?.holdUsed) {
+        if (operationUsesHoldAction(operation, state)) {
             if (state.hold) {
                 const previousCurrent = state.current;
                 state.current = state.hold;
@@ -428,7 +441,7 @@ function normalizeReplayCase(caseData) {
                 if (operation) state.current = state.queue.shift() || '';
                 return;
             }
-            if (operation?.holdUsed) {
+            if (operationUsesHoldAction(operation, state)) {
                 if (state.hold) {
                     const previousCurrent = state.current;
                     state.current = state.hold;
