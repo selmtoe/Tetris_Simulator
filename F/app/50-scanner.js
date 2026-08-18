@@ -92,6 +92,7 @@ async function runHighPrecisionAnalysis(imgBitmap) {
         } else if (currentPageIndex === 0 && !currentCase().initial.p1.sequence) {
             currentCase().initial.p1.sequence = p1Data.nextQueue.join('');
             currentCase().initial.p1.hold = p1Data.holdMino || '';
+            invalidateReplayCase(currentCase());
             normalizeReplayCase(currentCase());
         }
         
@@ -104,6 +105,7 @@ async function runHighPrecisionAnalysis(imgBitmap) {
         } else if (currentPageIndex === 0 && !currentCase().initial.p2.sequence) {
             currentCase().initial.p2.sequence = p2Data.nextQueue.join('');
             currentCase().initial.p2.hold = p2Data.holdMino || '';
+            invalidateReplayCase(currentCase());
             normalizeReplayCase(currentCase());
         }
 

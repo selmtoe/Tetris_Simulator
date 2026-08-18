@@ -122,8 +122,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 sequence
             };
         });
+        const firstEventTime = recordedReplayEvents[0]?.time || 0;
         const pages = recordedReplayEvents.map(event => {
-            const page = {};
+            const page = { time: Math.max(0, event.time - firstEventTime) / 1000 };
             playerIds.forEach(playerId => {
                 const entry = event.pages[playerId];
                 page[playerId] = {
@@ -140,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             return page;
         });
-        return {
+        const collection = {
             v: 3,
             m: gameMode,
             currentCase: 0,
@@ -156,6 +157,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 pages
             }]
         };
+        return typeof TetrisEventCodec !== 'undefined'
+            ? TetrisEventCodec.encodeCollection(collection)
+            : collection;
     };
 
     loadKeyBindings();

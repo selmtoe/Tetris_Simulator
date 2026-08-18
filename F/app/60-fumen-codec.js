@@ -758,9 +758,9 @@ async function loadStateFromURL() {
                 throw e;
             }
 
-            if (data?.simulatorData || data?.pageFormat === 'operation-pages/v1' || data?.version === 5) {
+            if (data?.simulatorData || data?.eventReplay || data?.pageFormat === 'operation-pages/v1' || data?.version === 5 || data?.version === 6) {
                 applyVideoRecoveryData(data);
-            } else if (data.v === 3) {
+            } else if (data.v === 3 || (typeof TetrisEventCodec !== 'undefined' && TetrisEventCodec.isEventReplay(data))) {
                 applyCollectionData(data);
             } else if (data.v === 'f1' || data.v === 'f2') {
 

@@ -45,16 +45,11 @@ viewerCanvas = document.getElementById('viewerCanvas');
     viewerCtx.scale(RESOLUTION_SCALE, RESOLUTION_SCALE);
 
     updatePageControls();
+    updateCaseControls();
     drawViewer();
     
     // Init History
-    historyStack = [{
-        cases: JSON.parse(JSON.stringify(fumenCases)),
-        caseIndex: currentCaseIndex,
-        pages: JSON.parse(JSON.stringify(fumenPages)),
-        idx: currentPageIndex,
-        mode: gameMode
-    }];
+    historyStack = [captureHistoryState()];
     historyIndex = 0;
     updateUndoRedoButtons();
 
@@ -64,6 +59,8 @@ viewerCanvas = document.getElementById('viewerCanvas');
         document.getElementById('mode-1p').classList.add('active');
         document.getElementById('mode-2p').classList.remove('active');
         document.getElementById('p2-editor-col').style.display = 'none';
+        updateCaseControls();
+        if (currentDisplayMode === 'editor') renderEditorPage();
         setTimeout(updateScale, 0);
     });
         document.getElementById('mode-2p').addEventListener('click', () => {
@@ -72,6 +69,7 @@ viewerCanvas = document.getElementById('viewerCanvas');
         document.getElementById('mode-2p').classList.add('active');
         document.getElementById('mode-1p').classList.remove('active');
         document.getElementById('p2-editor-col').style.display = 'flex';
+        updateCaseControls();
         drawEditorField('p2');
         updateNextQueueDisplay('p2');
         
@@ -108,6 +106,7 @@ viewerCanvas = document.getElementById('viewerCanvas');
                 ? createPageAfterOperation(currentPage)
                 : JSON.parse(JSON.stringify(currentPage));
             fumenPages.push(newPage);
+            invalidateReplayCase();
             saveCurrentCase();
             loadPage(currentPageIndex + 1);
              updatePageControls();
@@ -116,12 +115,14 @@ viewerCanvas = document.getElementById('viewerCanvas');
     document.getElementById('new-page').addEventListener('click', () => {
         pushHistory();
         fumenPages.splice(currentPageIndex + 1, 0, createBlankPage());
+        invalidateReplayCase();
         loadPage(currentPageIndex + 1);
     });
     document.getElementById('delete-page').addEventListener('click', () => {
         if (fumenPages.length > 1) {
             pushHistory();
             fumenPages.splice(currentPageIndex, 1);
+            invalidateReplayCase();
             if (currentPageIndex >= fumenPages.length) {
                 currentPageIndex = fumenPages.length - 1;
             }
@@ -160,6 +161,7 @@ viewerCanvas = document.getElementById('viewerCanvas');
                             const newPage = createBlankPage();
                             newPage.p1 = { ...newPage.p1, board: p.board, hold: p.hold, next: p.next };
                             fumenPages.splice(currentPageIndex + 1, 0, newPage);
+                            invalidateReplayCase();
                             currentPageIndex++;
                         });
                         loadPage(currentPageIndex);
@@ -174,6 +176,7 @@ viewerCanvas = document.getElementById('viewerCanvas');
             pushHistory();
             const newPage = JSON.parse(JSON.stringify(pageClipboard));
             fumenPages.splice(currentPageIndex + 1, 0, newPage);
+            invalidateReplayCase();
             loadPage(currentPageIndex + 1);
             alert('コピーしたページを挿入しました');
         } else {
@@ -185,6 +188,8 @@ viewerCanvas = document.getElementById('viewerCanvas');
         pushHistory();
         const p = fumenPages[currentPageIndex];
         [p.p1, p.p2] = [p.p2, p.p1];
+        invalidateReplayCase();
+        markHistoryPageChanged(p);
         loadPage(currentPageIndex);
         editMenuModal.style.display = 'none';
     });
@@ -194,6 +199,8 @@ document.getElementById('swap-p1p2-all-btn').addEventListener('click', () => {
         fumenPages.forEach(p => {
              [p.p1, p.p2] = [p.p2, p.p1];
         });
+        invalidateReplayCase();
+        markAllHistoryPagesChanged();
         loadPage(currentPageIndex);
         editMenuModal.style.display = 'none';
     });
@@ -255,7 +262,7 @@ document.getElementById('hidden-ppt-loader').addEventListener('change', (e) => {
         currentDisplayMode = 'editor';
         document.getElementById('editor-container').style.display = 'flex';
         document.getElementById('viewer-container').style.display = 'none';
-        
+        renderEditorPage();
         updateScale();
     });
 

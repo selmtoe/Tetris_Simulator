@@ -8,6 +8,8 @@
 
 const PIECE_TYPES = ['I', 'O', 'T', 'L', 'J', 'S', 'Z'];
 const OPERATION_ROTATIONS = ['spawn', 'right', 'reverse', 'left'];
+const normalizedCases = new WeakSet();
+const replayStateCaches = new WeakMap();
 
 function normalizePieceType(value, fallback = '') {
     const type = String(value || '').toUpperCase();
@@ -123,6 +125,11 @@ function cloneBoard(board) {
         Array.from({ length: BOARD_WIDTH }, (_, x) => board?.[y]?.[x] || null));
 }
 
+function normalizedBoard(board) {
+    if (board?.[LAZY_BOARD_INFO]) return board;
+    return typeof board === 'string' ? createLazyBoard(board) : cloneBoard(board);
+}
+
 function clonePage(page) {
     return JSON.parse(JSON.stringify(page || createBlankPage()));
 }
@@ -144,13 +151,14 @@ function createCase(name = 'Case 1', kind = 'snapshot') {
 
 function normalizeCase(caseData) {
     const normalized = caseData && typeof caseData === 'object' ? caseData : createCase();
+    if (normalizedCases.has(normalized)) return normalized;
     normalized.name = String(normalized.name || 'Case');
     normalized.kind = normalized.kind === 'replay' ? 'replay' : 'snapshot';
     normalized.gameMode = normalized.gameMode === '2P' ? '2P' : '1P';
     normalized.initial = normalized.initial || {};
     ['p1', 'p2'].forEach(playerId => {
         normalized.initial[playerId] = normalized.initial[playerId] || {};
-        normalized.initial[playerId].board = cloneBoard(normalized.initial[playerId].board);
+        normalized.initial[playerId].board = normalizedBoard(normalized.initial[playerId].board);
         normalized.initial[playerId].hold = normalizePieceType(normalized.initial[playerId].hold);
         normalized.initial[playerId].sequence = String(normalized.initial[playerId].sequence || '')
             .toUpperCase().split('').filter(piece => PIECE_TYPES.includes(piece)).join('');
@@ -160,7 +168,7 @@ function normalizeCase(caseData) {
             const normalizedPage = page || createBlankPage();
             ['p1', 'p2'].forEach(playerId => {
                 normalizedPage[playerId] = normalizedPage[playerId] || createBlankPage()[playerId];
-                normalizedPage[playerId].board = cloneBoard(normalizedPage[playerId].board);
+                normalizedPage[playerId].board = normalizedBoard(normalizedPage[playerId].board);
                 normalizedPage[playerId].hold = normalizePieceType(normalizedPage[playerId].hold);
                 normalizedPage[playerId].next = String(normalizedPage[playerId].next || '')
                     .toUpperCase().split('').filter(piece => PIECE_TYPES.includes(piece)).join('');
@@ -181,6 +189,7 @@ function normalizeCase(caseData) {
             return normalizedPage;
         })
         : [createBlankPage()];
+    normalizedCases.add(normalized);
     if (normalized.kind === 'replay') {
         normalizeReplayOperationCoordinates(normalized);
         normalizeReplayCase(normalized);
@@ -199,8 +208,6 @@ function normalizeActiveCase() {
     fumenCases[currentCaseIndex] = normalizeCase(fumenCases[currentCaseIndex]);
     fumenCases[currentCaseIndex].pages = fumenPages;
     fumenCases[currentCaseIndex].gameMode = gameMode;
-    if (fumenCases[currentCaseIndex].kind === 'replay') normalizeReplayCase(fumenCases[currentCaseIndex]);
-    if (typeof updateCaseControls === 'function') updateCaseControls();
 }
 
 function currentCase() {
@@ -217,6 +224,10 @@ function saveCurrentCase() {
     fumenCases[currentCaseIndex] = normalizeCase(fumenCases[currentCaseIndex]);
     fumenCases[currentCaseIndex].pages = fumenPages;
     fumenCases[currentCaseIndex].gameMode = gameMode;
+}
+
+function invalidateReplayCase(caseData = fumenCases[currentCaseIndex]) {
+    if (caseData && typeof caseData === 'object') replayStateCaches.delete(caseData);
 }
 
 function switchCase(index) {
@@ -385,48 +396,30 @@ function detectOperationFromDraft(board, draft) {
 }
 
 function replayStateAtPage(caseData, playerId, pageIndex) {
-    const initial = caseData.initial[playerId] || {};
-    const sequence = String(initial.sequence || '').split('').filter(piece => PIECE_TYPES.includes(piece));
-    const state = { current: sequence.shift() || '', queue: sequence, hold: normalizePieceType(initial.hold) };
-    const pages = caseData.pages || [];
-    for (let index = 0; index <= pageIndex; index++) {
-        const player = pages[index]?.[playerId] || {};
-        const operation = operationForPage(player);
-        if (Object.prototype.hasOwnProperty.call(player, 'active')) {
-            state.current = normalizePieceType(player.active);
-            state.queue = String(player.next || '').toUpperCase().split('')
-                .filter(piece => PIECE_TYPES.includes(piece));
-            state.hold = normalizePieceType(player.hold);
-            if (index === pageIndex) return state;
-            if (operation) state.current = state.queue.shift() || '';
-            continue;
-        }
-        if (operationUsesHoldAction(operation, state)) {
-            if (state.hold) {
-                const previousCurrent = state.current;
-                state.current = state.hold;
-                state.hold = previousCurrent;
-            } else {
-                state.hold = state.current;
-                state.current = state.queue.shift() || '';
-            }
-        }
-        if (index === pageIndex) return state;
-        if (operation) state.current = state.queue.shift() || '';
-    }
-    return state;
+    normalizeReplayCase(caseData);
+    const player = caseData.pages?.[pageIndex]?.[playerId] || {};
+    const cached = replayStateCaches.get(caseData)?.[playerId]?.[pageIndex] || { current: '', hold: '' };
+    return {
+        current: cached.current,
+        queue: String(player.next || '').toUpperCase().split('').filter(piece => PIECE_TYPES.includes(piece)),
+        hold: cached.hold
+    };
 }
 
 function normalizeReplayCase(caseData) {
     if (!caseData || caseData.kind !== 'replay') return;
+    if (replayStateCaches.has(caseData)) return;
+    const replayStates = { p1: [], p2: [] };
     ['p1', 'p2'].forEach(playerId => {
         let state;
         const initial = caseData.initial[playerId] || {};
         const sequence = String(initial.sequence || '').split('').filter(piece => PIECE_TYPES.includes(piece));
         state = { current: sequence.shift() || '', queue: sequence, hold: normalizePieceType(initial.hold) };
-        caseData.pages.forEach(page => {
+        caseData.pages.forEach((page, pageIndex) => {
             const player = page[playerId];
             const operation = operationForPage(player);
+            const previousHold = player.hold;
+            const previousNext = player.next;
             if (Object.prototype.hasOwnProperty.call(player, 'active')) {
                 // Native video exports provide the already-resolved state for
                 // every page.  Use it as the authority: reconstructing HOLD
@@ -438,6 +431,9 @@ function normalizeReplayCase(caseData) {
                 state.hold = normalizePieceType(player.hold);
                 player.hold = state.hold;
                 player.next = state.queue.join('');
+                replayStates[playerId][pageIndex] = { current: state.current, hold: state.hold };
+                if ((player.hold !== previousHold || player.next !== previousNext) &&
+                    typeof markHistoryPageChanged === 'function') markHistoryPageChanged(page);
                 if (operation) state.current = state.queue.shift() || '';
                 return;
             }
@@ -453,9 +449,13 @@ function normalizeReplayCase(caseData) {
             }
             player.hold = state.hold;
             player.next = state.queue.join('');
+            replayStates[playerId][pageIndex] = { current: state.current, hold: state.hold };
+            if ((player.hold !== previousHold || player.next !== previousNext) &&
+                typeof markHistoryPageChanged === 'function') markHistoryPageChanged(page);
             if (operation) state.current = state.queue.shift() || '';
         });
     });
+    replayStateCaches.set(caseData, replayStates);
 }
 
 function derivedNextForPage(playerId, pageIndex, pages = fumenPages) {
@@ -490,11 +490,12 @@ function setReplaySequence(playerId, sequence) {
     if (!active || active.kind !== 'replay') return;
     active.initial[playerId].sequence = String(sequence || '').toUpperCase()
         .split('').filter(piece => PIECE_TYPES.includes(piece)).join('');
+    invalidateReplayCase(active);
     normalizeReplayCase(active);
     loadPage(currentPageIndex);
 }
 
-function collectionData() {
+function pageCollectionData() {
     saveCurrentCase();
     return {
         v: 3,
@@ -505,6 +506,9 @@ function collectionData() {
 }
 
 function applyCollectionData(data) {
+    if (typeof TetrisEventCodec !== 'undefined' && TetrisEventCodec.isEventReplay(data)) {
+        data = TetrisEventCodec.decodeCollection(data, { compactBoards: true });
+    }
     if (!data || data.v !== 3 || !Array.isArray(data.cases) || !data.cases.length) return false;
     fumenCases = data.cases.map(normalizeCase);
     currentCaseIndex = Math.max(0, Math.min(Number(data.currentCase) || 0, fumenCases.length - 1));
@@ -514,6 +518,13 @@ function applyCollectionData(data) {
     loadPage(0);
     if (typeof updateCaseControls === 'function') updateCaseControls();
     return true;
+}
+
+function collectionData() {
+    const pages = pageCollectionData();
+    return typeof TetrisEventCodec !== 'undefined'
+        ? TetrisEventCodec.encodeCollection(pages)
+        : pages;
 }
 
 // The native video recovery tool also writes a human-readable analysis JSON.
@@ -630,12 +641,13 @@ function applyVideoRecoveryData(data) {
     // New native exports embed the exact v3 collection used by the generated
     // simulator URL. Prefer it so operation coordinates and player timing are
     // preserved byte-for-byte.
-    const embedded = data.simulatorData || data.collectionData || data.collection;
-    if (embedded?.v === 3 && typeof applyCollectionData === 'function') {
+    const embedded = data.simulatorData || data.eventReplay || data.collectionData || data.collection;
+    if ((embedded?.v === 3 || embedded?.v === 4) && typeof applyCollectionData === 'function') {
         return applyCollectionData(embedded);
     }
-    if (data.v === 3 && typeof applyCollectionData === 'function') return applyCollectionData(data);
-    if (data.pageFormat !== 'operation-pages/v1' && data.version !== 5) return false;
+    if ((data.v === 3 || data.v === 4) && typeof applyCollectionData === 'function') return applyCollectionData(data);
+    if (data.pageFormat !== 'operation-pages/v1' && data.pageFormat !== 'event-replay/v1' &&
+        data.version !== 5 && data.version !== 6) return false;
 
     const p1 = recoveryPlayerCaseData(data.p1);
     const p2 = recoveryPlayerCaseData(data.p2);

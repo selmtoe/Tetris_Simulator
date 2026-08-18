@@ -206,6 +206,7 @@ max-width: 500px; font-family: var(--font-ui);">
                 <div style="display: flex;
 gap: 10px; margin-top: 5px; flex-wrap: wrap;">
                     <button id="copy-link-btn" class="button">リンクをコピー</button>
+                    <button id="export-event-file-btn" class="button">イベントリプレイを保存</button>
                     <button id="export-fumen-p1-btn" class="button" title="本家テト譜リンクをコピー（HOLD/NEXTは含まれません）" >本家テト譜をコピー（1P）</button>
                     <button id="export-fumen-p2-btn" class="button" style="display: none;" title="本家テト譜リンクをコピー（HOLD/NEXTは含まれません）">本家テト譜をコピー（2P）</button>
                 </div>
@@ -223,6 +224,8 @@ gap: 10px; margin-top: 5px; flex-wrap: wrap;">
             <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">インポート</h3>
             <p></p>
             <button id="import-from-data-btn" class="button">クリップボードからインポート</button>
+            <button id="import-event-file-btn" class="button">リプレイファイルをインポート</button>
+            <input id="import-event-file" type="file" accept=".json,.tetrisevent,application/json" hidden>
         </div>
 
         <div class="modal-controls" style="text-align: center;
@@ -346,18 +349,19 @@ margin-top: 15px;">
 </div>
 
 <script defer src="./app/00-debug-console.js?v=app-v18"></script>
-<script defer src="./app/10-state.js?v=app-v18"></script>
-<script defer src="./app/15-sequence.js?v=app-v22"></script>
-<script defer src="./app/20-editor.js?v=app-v18"></script>
+<script defer src="./app/10-state.js?v=app-v20"></script>
+<script defer src="./app/15-sequence.js?v=app-v25"></script>
+<script defer src="../shared/tetris-event-codec.js?v=te1-v2"></script>
+<script defer src="./app/20-editor.js?v=app-v20"></script>
 <script defer src="./app/30-viewer.js?v=app-v21"></script>
-<script defer src="./app/40-history.js?v=app-v18"></script>
-<script defer src="./app/50-scanner.js?v=app-v18"></script>
-<script defer src="./app/60-fumen-codec.js?v=app-v19"></script>
-<script defer src="./app/70-hub-bridge.js?v=app-v18"></script>
-<script defer src="./app/80-editor-bootstrap.js?v=app-v18"></script>
-<script defer src="./app/81-export-controls.js?v=app-v18"></script>
+<script defer src="./app/40-history.js?v=app-v20"></script>
+<script defer src="./app/50-scanner.js?v=app-v20"></script>
+<script defer src="./app/60-fumen-codec.js?v=app-v20"></script>
+<script defer src="./app/70-hub-bridge.js?v=app-v19"></script>
+<script defer src="./app/80-editor-bootstrap.js?v=app-v20"></script>
+<script defer src="./app/81-export-controls.js?v=app-v20"></script>
 <script defer src="./app/82-code-generator.js?v=app-v18"></script>
-<script defer src="./app/83-share-controls.js?v=app-v18"></script>
+<script defer src="./app/83-share-controls.js?v=app-v19"></script>
 <script defer src="./app/84-ai-scoring.js?v=app-v21"></script>
 </body>
 </html>

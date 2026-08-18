@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tetris-simulator-v18';
+const CACHE_NAME = 'tetris-simulator-v20';
 const APP_SHELL = [
   './index.html',
   './styles/simulator.css?v=app-v7',
@@ -9,8 +9,9 @@ const APP_SHELL = [
   './simulator/app/editor.js',
   './simulator/app/settings.js?v=app-v5',
   './simulator/app/scanner.js',
-  './simulator/app/state-transport.js?v=app-v7',
-  './simulator/app/bootstrap.js?v=app-v7',
+  './shared/tetris-event-codec.js?v=te1-v2',
+  './simulator/app/state-transport.js?v=app-v9',
+  './simulator/app/bootstrap.js?v=app-v9',
   './simulator/workers/cold-clear-worker.js',
   './simulator/workers/cold-clear-core.js',
   './simulator/workers/pc-finder-worker.js?v=app-v5',

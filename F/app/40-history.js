@@ -84,17 +84,99 @@ function applyDifference(prevBoard1D, diffData1D) {
     return currentBoard1D;
 }
 
+const historyPageSnapshots = new WeakMap();
+const HISTORY_BOARD_KEY = '__tetrisCompactBoard';
+
+function compactHistoryValue(value, key = '') {
+    if (key === 'board') {
+        const packed = typeof TetrisEventCodec !== 'undefined'
+            ? TetrisEventCodec.packBoard(boardToString(value))
+            : boardToString(value);
+        return { [HISTORY_BOARD_KEY]: packed };
+    }
+    if (Array.isArray(value)) return value.map(item => compactHistoryValue(item));
+    if (!value || typeof value !== 'object') return value;
+    const result = {};
+    Object.keys(value).forEach(childKey => {
+        result[childKey] = compactHistoryValue(value[childKey], childKey);
+    });
+    return result;
+}
+
+function expandHistoryValue(value, key = '') {
+    if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, HISTORY_BOARD_KEY)) {
+        const text = typeof TetrisEventCodec !== 'undefined'
+            ? TetrisEventCodec.unpackBoard(value[HISTORY_BOARD_KEY])
+            : value[HISTORY_BOARD_KEY];
+        return createLazyBoard(text);
+    }
+    if (Array.isArray(value)) return value.map(item => expandHistoryValue(item));
+    if (!value || typeof value !== 'object') return value;
+    const result = {};
+    Object.keys(value).forEach(childKey => {
+        result[childKey] = expandHistoryValue(value[childKey], childKey);
+    });
+    return result;
+}
+
+function markHistoryPageChanged(page = fumenPages[currentPageIndex]) {
+    if (page && typeof page === 'object') historyPageSnapshots.delete(page);
+}
+
+function markAllHistoryPagesChanged(caseData = fumenCases[currentCaseIndex]) {
+    (caseData?.pages || []).forEach(markHistoryPageChanged);
+}
+
+function compactHistoryPage(page) {
+    const cached = historyPageSnapshots.get(page);
+    if (cached) return cached;
+    const compact = compactHistoryValue(page);
+    historyPageSnapshots.set(page, compact);
+    return compact;
+}
+
+function compactHistoryCase(caseData) {
+    const compact = {};
+    Object.keys(caseData || {}).forEach(key => {
+        compact[key] = key === 'pages'
+            ? (caseData.pages || []).map(compactHistoryPage)
+            : compactHistoryValue(caseData[key], key);
+    });
+    return compact;
+}
+
+function expandHistoryCase(caseData) {
+    const expanded = {};
+    Object.keys(caseData || {}).forEach(key => {
+        expanded[key] = key === 'pages'
+            ? (caseData.pages || []).map(page => {
+                const livePage = expandHistoryValue(page);
+                historyPageSnapshots.set(livePage, page);
+                return livePage;
+            })
+            : expandHistoryValue(caseData[key], key);
+    });
+    return expanded;
+}
+
+function captureHistoryState() {
+    return {
+        cases: fumenCases.map(compactHistoryCase),
+        caseIndex: currentCaseIndex,
+        idx: currentPageIndex,
+        mode: gameMode
+    };
+}
+
 function pushHistory() {
     if (historyIndex < historyStack.length - 1) {
         historyStack = historyStack.slice(0, historyIndex + 1);
     }
-    const state = {
-        cases: JSON.parse(JSON.stringify(fumenCases)),
-        caseIndex: currentCaseIndex,
-        pages: JSON.parse(JSON.stringify(fumenPages)),
-        idx: currentPageIndex,
-        mode: gameMode
-    };
+    // Most edit handlers call pushHistory after mutating the current page.
+    // Invalidate that page's shared snapshot; untouched pages remain shared
+    // between history entries instead of being duplicated up to 50 times.
+    markHistoryPageChanged();
+    const state = captureHistoryState();
     historyStack.push(state);
     if (historyStack.length > MAX_HISTORY) {
         historyStack.shift();
@@ -120,12 +202,12 @@ function redo() {
 
 function restoreState(state) {
     if (Array.isArray(state.cases) && state.cases.length) {
-        fumenCases = JSON.parse(JSON.stringify(state.cases));
+        fumenCases = state.cases.map(expandHistoryCase).map(normalizeCase);
         currentCaseIndex = Number.isInteger(state.caseIndex) ? state.caseIndex : 0;
         currentCaseIndex = Math.max(0, Math.min(currentCaseIndex, fumenCases.length - 1));
         fumenPages = fumenCases[currentCaseIndex].pages;
     } else {
-        fumenPages = JSON.parse(JSON.stringify(state.pages));
+        fumenPages = expandHistoryValue(state.pages || []);
         fumenCases = [createCase('Case 1', 'snapshot')];
         fumenCases[0].pages = fumenPages;
         currentCaseIndex = 0;

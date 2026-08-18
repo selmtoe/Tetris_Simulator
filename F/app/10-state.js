@@ -17,6 +17,7 @@ const COLORS = { 'I': '#009999', 'O': '#999900', 'T': '#990099', 'L': '#996600',
 // NEXT/HOLD and attached-piece previews retain the original bright palette.
 const NEXT_COLORS = { 'I': '#00ffff', 'O': '#ffff00', 'T': '#ff00ff', 'L': '#ff9900', 'J': '#0000ff', 'S': '#00ff00', 'Z': '#ff0000', 'G': '#cccccc' };
 const EDITOR_COLORS = {...COLORS, 'EMPTY': '#000000'};
+const LAZY_BOARD_INFO = Symbol('lazyBoardInfo');
 
 let gameMode = '1P';
 let fumenPages = [];
@@ -60,51 +61,83 @@ const DRAW_SHAPE_MAP = {
     "-1,1;-1,2;0,1": { type: "Z", rot: 1, offset: [1, -1] },
 };
 const createEmptyBoard = () => Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
-const boardToString = (board) => board.map(row => row.map(cell => cell || '_').join('')).join('');
-const stringToBoard = (value) => {
-    const text = String(value || '').padEnd(BOARD_WIDTH * BOARD_HEIGHT, '_').slice(0, BOARD_WIDTH * BOARD_HEIGHT);
+function normalizedBoardText(value) {
+    if (typeof value === 'string' && value.includes('.') && typeof TetrisEventCodec !== 'undefined') {
+        return TetrisEventCodec.unpackBoard(value);
+    }
+    return String(value || '').padEnd(BOARD_WIDTH * BOARD_HEIGHT, '_').slice(0, BOARD_WIDTH * BOARD_HEIGHT)
+        .split('').map(cell => cell === 'E' || cell === '0' ? '_' : cell).join('');
+}
+function createLazyBoard(value) {
+    if (value?.[LAZY_BOARD_INFO]) return value;
+    if (Array.isArray(value)) return value;
+    const info = { source: normalizedBoardText(value), materialized: false };
+    const rows = new Array(BOARD_HEIGHT);
+    const ensure = () => {
+        if (info.materialized) return;
+        for (let y = 0; y < BOARD_HEIGHT; y++) {
+            rows[y] = Array.from({ length: BOARD_WIDTH }, (_, x) => {
+                const cell = info.source[y * BOARD_WIDTH + x];
+                return cell === '_' ? null : cell;
+            });
+        }
+        info.materialized = true;
+    };
+    return new Proxy(rows, {
+        get(target, property, receiver) {
+            if (property === LAZY_BOARD_INFO) return info;
+            if (property !== 'length') ensure();
+            return Reflect.get(target, property, receiver);
+        },
+        set(target, property, nextValue, receiver) {
+            ensure();
+            return Reflect.set(target, property, nextValue, receiver);
+        },
+        ownKeys(target) { ensure(); return Reflect.ownKeys(target); },
+        getOwnPropertyDescriptor(target, property) {
+            if (property !== 'length') ensure();
+            return Reflect.getOwnPropertyDescriptor(target, property);
+        }
+    });
+}
+const boardToString = board => {
+    const lazy = board?.[LAZY_BOARD_INFO];
+    if (lazy && !lazy.materialized) return lazy.source;
     return Array.from({ length: BOARD_HEIGHT }, (_, y) =>
-        Array.from({ length: BOARD_WIDTH }, (_, x) => {
-            const cell = text[y * BOARD_WIDTH + x];
-            return cell === '_' || cell === 'E' || cell === '0' ? null : cell;
-        }));
+        Array.from({ length: BOARD_WIDTH }, (_, x) => board?.[y]?.[x] || '_').join('')).join('');
 };
+const stringToBoard = value => createLazyBoard(value);
 const createBlankPage = () => ({
     // nextInsertionIndex を追加: 0なら先頭、-1なら末尾、'hold'ならホールド
     p1: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '', nextInsertionIndex: -1, operation: null, placementDraft: [], placementMode: false },
     p2: { board: createEmptyBoard(), viewY: BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT, activeColor: 'I', hold: '', next: '', nextInsertionIndex: -1, operation: null, placementDraft: [], placementMode: false }
 });
-function loadPage(index) {
+function renderEditorPage() {
+    const playerIds = gameMode === '2P' ? ['p1', 'p2'] : ['p1'];
+    playerIds.forEach(playerId => {
+        const data = fumenPages[currentPageIndex]?.[playerId];
+        if (!data) return;
+        const palette = document.getElementById(`${playerId}-palette`);
+        palette?.querySelector('.active')?.classList.remove('active');
+        palette?.querySelectorAll('.color-swatch').forEach(swatch => {
+            swatch.classList.toggle('active', swatch.dataset.color === data.activeColor);
+        });
+        if (data.nextInsertionIndex === undefined) data.nextInsertionIndex = -1;
+        updateNextQueueDisplay(playerId);
+        drawEditorField(playerId);
+    });
+}
 
+function loadPage(index) {
     if (index < 0 || index >= fumenPages.length) return;
     currentPageIndex = index;
 
     if (typeof normalizeActiveCase === 'function') normalizeActiveCase();
-
-    ['p1', 'p2'].forEach(playerId => {
-        const data = fumenPages[currentPageIndex][playerId];
-        const palette = document.getElementById(`${playerId}-palette`);
-        
-        palette.querySelector('.active')?.classList.remove('active');
-        const swatches = palette.querySelectorAll('.color-swatch');
-        swatches.forEach(swatch => {
-            if (swatch.dataset.color === data.activeColor) {
-      swatch.classList.add('active');
-            }
-        });
-
-        // 修正: テキスト入力への代入を削除し、UI更新関数を呼び出し
-        // データ読み込み時は末尾に追加するようにインデックスをリセット
-        if (data.nextInsertionIndex === undefined) data.nextInsertionIndex = -1;
-        updateNextQueueDisplay(playerId);
-
-        drawEditorField(playerId);
-    });
-updatePageControls();
-
-    if (currentDisplayMode === 'viewer') {
-        drawViewer();
-    }}
+    if (typeof updateCaseControls === 'function') updateCaseControls();
+    updatePageControls();
+    if (currentDisplayMode === 'editor') renderEditorPage();
+    else if (viewerCtx) drawViewer();
+}
 
 function updatePageControls() {
     const pageText = `Page ${currentPageIndex + 1} / ${fumenPages.length}`;

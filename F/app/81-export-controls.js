@@ -228,11 +228,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    document.getElementById('viewer-page-slider').addEventListener('input', (e) => {
-        const newIndex = parseInt(e.target.value, 10);
-        if (newIndex !== currentPageIndex) {
-            loadPage(newIndex);
-        }
+    const viewerPageSlider = document.getElementById('viewer-page-slider');
+    let pendingSliderIndex = currentPageIndex;
+    let pendingSliderFrame = 0;
+    const commitSliderPage = () => {
+        pendingSliderFrame = 0;
+        if (pendingSliderIndex !== currentPageIndex) loadPage(pendingSliderIndex);
+    };
+    viewerPageSlider.addEventListener('input', event => {
+        pendingSliderIndex = parseInt(event.target.value, 10);
+        if (!pendingSliderFrame) pendingSliderFrame = requestAnimationFrame(commitSliderPage);
+    });
+    viewerPageSlider.addEventListener('change', event => {
+        pendingSliderIndex = parseInt(event.target.value, 10);
+        if (pendingSliderFrame) cancelAnimationFrame(pendingSliderFrame);
+        commitSliderPage();
     });
 
 });

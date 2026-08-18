@@ -101,6 +101,9 @@ if (gameMode === '2P') {
 }
 
 function replayCollectionToGameState(collection) {
+    if (typeof TetrisEventCodec !== 'undefined' && TetrisEventCodec.isEventReplay(collection)) {
+        collection = TetrisEventCodec.decodeCollection(collection);
+    }
     const cases = Array.isArray(collection?.cases) ? collection.cases : [];
     const caseIndex = Math.max(0, Math.min(Number(collection?.currentCase) || 0, cases.length - 1));
     const activeCase = cases[caseIndex];
@@ -121,7 +124,9 @@ function replayCollectionToGameState(collection) {
 
 function applyGameState(data) {
     try {
-        if (data?.v === 3) data = replayCollectionToGameState(data);
+        if (data?.v === 3 || (typeof TetrisEventCodec !== 'undefined' && TetrisEventCodec.isEventReplay(data))) {
+            data = replayCollectionToGameState(data);
+        }
         if (!data || (data.v !== 1 && data.v !== 2)) {
             alert('無効または非対応のデータです。');
 return false;

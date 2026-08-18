@@ -1,6 +1,7 @@
 /* Field editor plus the operation/lock editor. */
 
 let caseControlsReady = false;
+let caseControlsSignature = '';
 
 function setupEditors() {
     ['p1', 'p2'].forEach(setupPlayerEditor);
@@ -32,6 +33,15 @@ function setupCaseControls() {
 function updateCaseControls() {
     const active = fumenCases[currentCaseIndex];
     if (!active) return;
+    const signature = JSON.stringify({
+        currentCaseIndex,
+        gameMode,
+        cases: fumenCases.map(caseData => [caseData.id, caseData.name, caseData.kind, caseData.gameMode]),
+        p1: active.initial?.p1?.sequence || '',
+        p2: active.initial?.p2?.sequence || ''
+    });
+    if (signature === caseControlsSignature) return;
+    caseControlsSignature = signature;
     const selector = document.getElementById('case-selector');
     if (selector) {
         selector.replaceChildren();
@@ -229,6 +239,7 @@ function ensureReplayCaseForAuto() {
     if (active.kind === 'replay') return active;
     if (fumenPages.length > 1 && !window.confirm('This is an independent snapshot set. Convert it to a replay case for AUTO lock?')) return null;
     active.kind = 'replay';
+    invalidateReplayCase(active);
     ['p1', 'p2'].forEach(playerId => {
         const first = fumenPages[0][playerId];
         active.initial[playerId].board = cloneBoard(first.board);
@@ -258,6 +269,7 @@ function autoLockOperation(playerId) {
     data.operation = detected;
     data.placementDraft = [];
     data.placementMode = false;
+    invalidateReplayCase(active);
     normalizeReplayCase(active);
     updateCaseControls();
     setPlacementStatus(playerId, `Locked ${detected.type} ${detected.rotation} at (${detected.x}, ${detected.y}).`);
@@ -284,31 +296,10 @@ function updatePlacementStatus(playerId) {
     }
 }
 
-// Keep the original icon-based NEXT strip, but let the strip scroll instead
-// of wrapping when a replay contains a long recorded queue.
-function updateNextQueueDisplay(playerId) {
-    const qd = document.getElementById(`${playerId}-next-queue`);
-    if (!qd) return;
-    qd.replaceChildren();
-    const data = fumenPages[currentPageIndex]?.[playerId];
-    if (!data) return;
-    const nextArr = String(displayNextForPage(playerId) || '').split('').filter(type => NEXT_COLORS[type]);
-    if (data.nextInsertionIndex === undefined) data.nextInsertionIndex = -1;
-    const createGap = index => {
-        const gap = document.createElement('div');
-        gap.style.width = '8px';
-        gap.style.height = '38px';
-        gap.style.flex = '0 0 8px';
-        gap.style.cursor = 'pointer';
-        gap.style.backgroundColor = data.nextInsertionIndex === index ||
-            (index === -1 && data.nextInsertionIndex === nextArr.length) ? '#fff' : 'rgba(255,255,255,0.1)';
-        gap.addEventListener('click', event => {
-            event.stopPropagation();
-            data.nextInsertionIndex = index;
-            updateNextQueueDisplay(playerId);
-        });
-        return gap;
-    };
+// Reuse the NEXT strip nodes. Long replays change pages frequently, and
+// rebuilding every icon and listener for both players was avoidable DOM work.
+function nextQueueUi(playerId, qd) {
+    if (qd._nextQueueUi) return qd._nextQueueUi;
     const holdContainer = document.createElement('div');
     holdContainer.style.cssText = 'display:flex;align-items:center;gap:3px;flex:0 0 auto;padding-right:8px;border-right:1px solid #555;margin-right:5px;';
     const holdLabel = document.createElement('span');
@@ -316,43 +307,71 @@ function updateNextQueueDisplay(playerId) {
     holdLabel.style.fontFamily = 'var(--font-display)';
     const holdSlot = document.createElement('div');
     holdSlot.className = 'mino-icon';
-    holdSlot.style.width = '38px';
-    holdSlot.style.height = '38px';
-    holdSlot.style.cursor = 'pointer';
-    holdSlot.style.backgroundColor = data.hold ? (NEXT_COLORS[data.hold] || '#333') : 'transparent';
-    holdSlot.style.border = data.hold ? '2px solid transparent' : '2px dashed #555';
-    if (data.nextInsertionIndex === 'hold') holdSlot.style.borderColor = '#fff';
-    holdSlot.addEventListener('click', event => {
-        event.stopPropagation();
-        data.nextInsertionIndex = 'hold';
-        updateNextQueueDisplay(playerId);
-    });
+    holdSlot.dataset.nextRole = 'hold';
+    holdSlot.style.cssText = 'width:38px;height:38px;cursor:pointer;';
     holdContainer.append(holdLabel, holdSlot);
-    qd.appendChild(holdContainer);
     const track = document.createElement('div');
     track.className = 'next-queue-track';
-    track.appendChild(createGap(0));
-    nextArr.forEach((type, index) => {
-        const icon = document.createElement('div');
-        icon.className = 'mino-icon';
-        icon.style.width = '38px';
-        icon.style.height = '38px';
-        icon.style.flex = '0 0 38px';
-        icon.style.backgroundColor = NEXT_COLORS[type] || '#333';
-        icon.title = `NEXT ${index + 1}: ${type}`;
-        icon.addEventListener('click', event => {
-            event.stopPropagation();
-            data.nextInsertionIndex = index + 1;
-            updateNextQueueDisplay(playerId);
-        });
-        track.append(icon, createGap(index + 1));
-    });
-    track.addEventListener('click', event => {
-        if (event.target !== track) return;
-        data.nextInsertionIndex = nextArr.length;
+    track.dataset.nextRole = 'track';
+    const ui = { holdSlot, track, gaps: [], icons: [], nextLength: 0 };
+    qd.append(holdContainer, track);
+    qd.addEventListener('click', event => {
+        const target = event.target.closest?.('[data-next-role]');
+        if (!target || !qd.contains(target)) return;
+        const data = fumenPages[currentPageIndex]?.[playerId];
+        if (!data) return;
+        if (target.dataset.nextRole === 'track' && event.target !== track) return;
+        event.stopPropagation();
+        if (target.dataset.nextRole === 'hold') data.nextInsertionIndex = 'hold';
+        else if (target.dataset.nextRole === 'gap') data.nextInsertionIndex = Number(target.dataset.index);
+        else if (target.dataset.nextRole === 'icon') data.nextInsertionIndex = Number(target.dataset.index) + 1;
+        else data.nextInsertionIndex = ui.nextLength;
         updateNextQueueDisplay(playerId);
     });
-    qd.appendChild(track);
+    qd._nextQueueUi = ui;
+    return ui;
+}
+
+function updateNextQueueDisplay(playerId) {
+    const qd = document.getElementById(`${playerId}-next-queue`);
+    if (!qd) return;
+    const data = fumenPages[currentPageIndex]?.[playerId];
+    if (!data) return;
+    const nextArr = String(displayNextForPage(playerId) || '').split('').filter(type => NEXT_COLORS[type]);
+    if (data.nextInsertionIndex === undefined) data.nextInsertionIndex = -1;
+    const ui = nextQueueUi(playerId, qd);
+    ui.nextLength = nextArr.length;
+    ui.holdSlot.style.backgroundColor = data.hold ? (NEXT_COLORS[data.hold] || '#333') : 'transparent';
+    ui.holdSlot.style.border = data.hold ? '2px solid transparent' : '2px dashed #555';
+    if (data.nextInsertionIndex === 'hold') ui.holdSlot.style.borderColor = '#fff';
+    while (ui.gaps.length < nextArr.length + 1) {
+        const gap = document.createElement('div');
+        gap.dataset.nextRole = 'gap';
+        gap.style.cssText = 'width:8px;height:38px;flex:0 0 8px;cursor:pointer;';
+        ui.gaps.push(gap);
+    }
+    while (ui.icons.length < nextArr.length) {
+        const icon = document.createElement('div');
+        icon.className = 'mino-icon';
+        icon.dataset.nextRole = 'icon';
+        icon.style.cssText = 'width:38px;height:38px;flex:0 0 38px;';
+        ui.icons.push(icon);
+    }
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index <= nextArr.length; index++) {
+        const gap = ui.gaps[index];
+        gap.dataset.index = index;
+        gap.style.backgroundColor = data.nextInsertionIndex === index ? '#fff' : 'rgba(255,255,255,0.1)';
+        fragment.appendChild(gap);
+        if (index >= nextArr.length) continue;
+        const type = nextArr[index];
+        const icon = ui.icons[index];
+        icon.dataset.index = index;
+        icon.style.backgroundColor = NEXT_COLORS[type] || '#333';
+        icon.title = `NEXT ${index + 1}: ${type}`;
+        fragment.appendChild(icon);
+    }
+    ui.track.replaceChildren(fragment);
     updatePlacementStatus(playerId);
 }
 

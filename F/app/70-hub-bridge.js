@@ -2,7 +2,7 @@
 window.addEventListener('message', (e) => {
     if (e.data && e.data.type === 'loadFumen') {
         const fumenData = e.data.data;
-        const applied = fumenData?.v === 3 && typeof applyCollectionData === 'function'
+        const applied = (fumenData?.v === 3 || (typeof TetrisEventCodec !== 'undefined' && TetrisEventCodec.isEventReplay(fumenData))) && typeof applyCollectionData === 'function'
             ? applyCollectionData(fumenData)
             : (typeof applyFumenData === 'function' && applyFumenData(fumenData));
         if (applied) {
