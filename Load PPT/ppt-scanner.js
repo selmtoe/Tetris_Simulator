@@ -1,6 +1,6 @@
 
 // --- グローバル変数 & 定数 ---
-const CLASS_NAMES = ['null', 'G', 'S', 'Z', 'L', 'J', 'O', 'I', 'T'];
+const CELL_CNN_MODEL_URL = './tetris.onnx?v=cell-cnn-stage1-e513a35d';
 // ONNXセッション
 let session = null;
 
@@ -26,8 +26,8 @@ window.onerror = function(message, source, lineno, colno, error) {
 async function initModel() {
     try {
         log("モデルを読み込み中...", 'info');
-        session = await ort.InferenceSession.create('./tetris.onnx', { executionProviders: ['wasm'] });
-        log("モデルロード完了　拡張機能からの画像待機中...", 'info');
+        session = await ort.InferenceSession.create(CELL_CNN_MODEL_URL, { executionProviders: ['wasm'] });
+        log("Cell CNNモデルロード完了　拡張機能からの画像待機中...", 'info');
         document.getElementById('statusMessage').textContent = "準備完了";
         
         // 待機していた画像があれば処理
@@ -103,11 +103,11 @@ async function runAnalysis(imgBitmap) {
         // Next/Hold: 1280基準 (content.jsオリジナルの座標、後でcrop幅に合わせてスケール計算)
         
         const p1Config = {
-            boardRect: { x: 304, y: 157, w: 670 - 304, h: 882 - 157 },
+            boardRect: { x: 316, y: 157, w: 351, h: 713 },
             nextCoords: [ {x:160, y:155}, {x:500, y:122}, {x:500, y:175}, {x:500, y:225}, {x:500, y:275}, {x:500, y:325} ]
         };
         const p2Config = {
-            boardRect: { x: 1257, y: 157, w: 1620 - 1257, h: 882 - 157 },
+            boardRect: { x: 1253, y: 157, w: 354, h: 713 },
             nextCoords: [ {x:790, y:155}, {x:1130, y:122}, {x:1130, y:175}, {x:1130, y:225}, {x:1130, y:275}, {x:1130, y:325} ]
         };
 
@@ -187,7 +187,6 @@ async function analyzePlayer(canvas, originalBitmap, cropData, config) {
     // 1. 盤面スキャン (ONNXモデル使用 + 旧ロジックによる補正)
     // ※ 盤面解析は1080pリサイズ済みの画像で行う (ONNXモデルがその解像度で精度が出ているため)
     const boardRect = config.boardRect;
-    const boardImgData = ctx.getImageData(boardRect.x, boardRect.y, boardRect.w, boardRect.h);
     const cellW = boardRect.w / 10;
     const cellH = boardRect.h / 20;
     const recognizedBoard = []; // 20x10 array (ONNX Result)
@@ -218,41 +217,13 @@ async function analyzePlayer(canvas, originalBitmap, cropData, config) {
         classicBoard.push(row);
     }
 
-    // --- (B) ONNX 特徴量抽出と推論 ---
-    const batchFeatures = [];
-    for (let r = 0; r < 20; r++) {
-        const row = [];
-        for (let c = 0; c < 10; c++) {
-            const x = c * cellW;
-            const y = r * cellH;
-            const cellPixels = extractCellPixels(boardImgData, x, y, cellW, cellH);
-            const feats = extractFeaturesJS(cellPixels, Math.floor(cellW), Math.floor(cellH));
-            batchFeatures.push(feats);
-            row.push(null);
-        }
-        recognizedBoard.push(row);
-    }
-
-    const flatInput = new Float32Array(batchFeatures.length * 63);
-    for (let i = 0; i < batchFeatures.length; i++) {
-        flatInput.set(batchFeatures[i], i * 63);
-    }
-    
-    const tensor = new ort.Tensor('float32', flatInput, [200, 63]);
-    const inputName = session.inputNames[0];
-    const feeds = { [inputName]: tensor };
-    const labelOutputName = session.outputNames[0]; 
-    const fetches = [labelOutputName];
-    const results = await session.run(feeds, fetches);
-    const outputLabel = results[labelOutputName];
-    const labelData = outputLabel.data;
-
-    // 結果を盤面にマッピング
+    // --- (B) Cell CNN inference with 200 RGB 32x32 cells ---
+    const predictedLabels = await TetrisCellCnn.recognizeBoard(session, ort, canvas, boardRect);
     for (let i = 0; i < 200; i++) {
         const r = Math.floor(i / 10);
         const c = i % 10;
-        const classIdx = Number(labelData[i]);
-        const label = CLASS_NAMES[classIdx];
+        if (!recognizedBoard[r]) recognizedBoard[r] = new Array(10).fill(null);
+        const label = predictedLabels[i];
         recognizedBoard[r][c] = (label === 'null') ? null : label;
     }
 
@@ -352,170 +323,6 @@ async function analyzePlayer(canvas, originalBitmap, cropData, config) {
     return { board: fullBoard, holdMino, nextQueue };
 }
 
-// --- 特徴量抽出 (Python互換実装) ---
-// 画像データ(RGBA)を受け取り、63次元の特徴量ベクトルを返す
-function extractFeaturesJS(pixelsRGBA, w, h) {
-    const numPixels = w * h;
-    const feats = [];
-
-    // バッファ用意
-    // BGR順にする必要がある (Python cv2.imread is BGR)
-    // RGBA -> BGR 変換 & HSV 計算
-    const bCh = new Float32Array(numPixels);
-    const gCh = new Float32Array(numPixels);
-    const rCh = new Float32Array(numPixels);
-    
-    const hCh = new Float32Array(numPixels);
-    const sCh = new Float32Array(numPixels);
-    const vCh = new Float32Array(numPixels);
-
-    for (let i = 0; i < numPixels; i++) {
-        const r = pixelsRGBA[i * 4];
-        const g = pixelsRGBA[i * 4 + 1];
-        const b = pixelsRGBA[i * 4 + 2];
-        // 1. BGR Store
-        bCh[i] = b;
-        gCh[i] = g;
-        rCh[i] = r;
-        // 2. HSV Calculation (OpenCV formula)
-        // V: 0-255, S: 0-255, H: 0-179
-        const maxVal = Math.max(r, g, b);
-        const minVal = Math.min(r, g, b);
-        const diff = maxVal - minVal;
-        // V
-        const v = maxVal;
-        // S
-        let s = 0;
-        if (maxVal !== 0) {
-            s = (diff / maxVal) * 255;
-        }
-
-        // H
-        let h_val = 0;
-        if (maxVal === minVal) {
-            h_val = 0;
-        } else if (maxVal === r) {
-            h_val = (60 * (g - b) / diff + 360) % 360;
-        } else if (maxVal === g) {
-            h_val = (60 * (b - r) / diff + 120) % 360;
-        } else if (maxVal === b) {
-            h_val = (60 * (r - g) / diff + 240) % 360;
-        }
-        // OpenCV uses 0-179 for H
-        h_val = h_val / 2;
-        vCh[i] = v;
-        sCh[i] = s;
-        hCh[i] = h_val;
-    }
-
-    // Helper: Mean & Std
-    const getStats = (arr) => {
-        let sum = 0;
-        for(let v of arr) sum += v;
-        const mean = sum / arr.length;
-        let sqDiffSum = 0;
-        for(let v of arr) sqDiffSum += (v - mean) ** 2;
-        const std = Math.sqrt(sqDiffSum / arr.length);
-        return [mean, std];
-    };
-
-    // 1. RGB Stats (6 dims) -> Note: Order in Python was Mean(B,G,R), Std(B,G,R)
-    // Python code: features.append(np.mean(img[:, :, channel])) where channel is 0(B),1(G),2(R)
-    // So order is: MeanB, StdB, MeanG, StdG, MeanR, StdR
-    const statsB = getStats(bCh);
-    const statsG = getStats(gCh);
-    const statsR = getStats(rCh);
-    
-    feats.push(statsB[0], statsB[1]);
-    feats.push(statsG[0], statsG[1]);
-    feats.push(statsR[0], statsR[1]);
-    // 2. HSV Stats (6 dims)
-    const statsH = getStats(hCh);
-    const statsS = getStats(sCh);
-    const statsV = getStats(vCh);
-    
-    feats.push(statsH[0], statsH[1]);
-    feats.push(statsS[0], statsS[1]);
-    feats.push(statsV[0], statsV[1]);
-    // 3. 4x4 Tiny Image (48 dims)
-    // 単純なダウンサンプリング (Nearest Neighbor的な間引き) or 平均画素
-    // ここでは簡易的にブロック平均をとる
-    const tinyFeats = [];
-    const stepX = w / 4;
-    const stepY = h / 4;
-    
-    for (let ty = 0; ty < 4; ty++) {
-        for (let tx = 0; tx < 4; tx++) {
-            // この領域の平均BGRを計算
-            const sx = Math.floor(tx * stepX);
-            const sy = Math.floor(ty * stepY);
-            const ex = Math.floor((tx + 1) * stepX);
-            const ey = Math.floor((ty + 1) * stepY);
-            
-            let sumB=0, sumG=0, sumR=0, count=0;
-            for(let py=sy; py<ey; py++){
-                for(let px=sx; px<ex; px++){
-                    const idx = py * w + px;
-                    if(idx < numPixels) {
-                        sumB += bCh[idx];
-                        sumG += gCh[idx];
-                        sumR += rCh[idx];
-                        count++;
-                    }
-                }
-            }
-            if(count===0) { tinyFeats.push(0,0,0); }
-            else { tinyFeats.push(sumB/count, sumG/count, sumR/count); }
-        }
-    }
-    feats.push(...tinyFeats);
-    // 48個追加
-
-    // 4. Center Crop Mean (3 dims)
-    // Center 20% width/height ?
-    // Python code said: w//4, h//4 radius around center.
-    // So it's half width, half height crop essentially.
-    const cx = Math.floor(w/2), cy = Math.floor(h/2);
-    const cw = Math.floor(w/4), ch = Math.floor(h/4);
-    const startX = cx - cw, endX = cx + cw;
-    const startY = cy - ch, endY = cy + ch;
-    
-    let cSumB=0, cSumG=0, cSumR=0, cCount=0;
-    for(let py=startY; py<endY; py++){
-        for(let px=startX; px<endX; px++){
-            if(px>=0 && px<w && py>=0 && py<h){
-                const idx = py * w + px;
-                cSumB += bCh[idx];
-                cSumG += gCh[idx];
-                cSumR += rCh[idx];
-                cCount++;
-            }
-        }
-    }
-    if(cCount===0) feats.push(0,0,0);
-    else feats.push(cSumB/cCount, cSumG/cCount, cSumR/cCount);
-
-    return new Float32Array(feats); // Total 63
-}
-
-// ImageDataの部分取得ヘルパー
-function extractCellPixels(sourceImgData, x, y, w, h) {
-    const sw = sourceImgData.width;
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const iw = Math.floor(w), ih = Math.floor(h);
-    const data = new Uint8ClampedArray(iw * ih * 4);
-    
-    for (let row = 0; row < ih; row++) {
-        const srcRowStart = ((iy + row) * sw + ix) * 4;
-        const destRowStart = (row * iw) * 4;
-        // 行ごとにコピー
-        const rowPixels = sourceImgData.data.subarray(srcRowStart, srcRowStart + iw * 4);
-        data.set(rowPixels, destRowStart);
-    }
-    return data; // RGBA array
-}
-
-
 // --- 既存のユーティリティ関数 (content.jsより移植・調整) ---
 
 const SCAN_COLOR_PALETTE = { 'NULL': ['#000000', '#302838'], 'G': ['#999999', '#D8D8D8'], 'I': ['#019899', '#0199D5'], 'O': ['#999A02', '#F9B900'], 'T': ['#980099', '#871E88'], 'L': ['#996700', '#F56100'], 'J': ['#0000BB', '#004BA5'], 'S': ['#10971F', '#5CB523'], 'Z': ['#990000', '#DA1822'] };
@@ -584,6 +391,4 @@ function getAverageColorNonBlack(ctx, cx, cy, radius) {
 }
 
 const boardToString = (board) => board.map(row => row.map(cell => cell === null ? '_' : cell).join('')).join('');
-
-
 

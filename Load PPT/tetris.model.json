@@ -1,0 +1,23 @@
+{
+  "schema": "tetris-cell-cnn.model/v1",
+  "name": "cell_cnn_stage1",
+  "onnxFile": "tetris.onnx",
+  "onnxSha256": "da60d1c9a32939f0d607a0393db842b994d801f877c5e24dcfaca5d301d5b7f2",
+  "reviewSha256": "e513a35d296b2e2fe04a46d25906f91e3f7dc8643f95629c2691e388cba3c22b",
+  "input": {
+    "name": "cells",
+    "shape": ["N", 3, 32, 32],
+    "color": "RGB",
+    "range": [0.0, 1.0]
+  },
+  "output": {
+    "name": "logits",
+    "shape": ["N", 9],
+    "classes": ["null", "G", "S", "Z", "L", "J", "O", "I", "T"]
+  },
+  "boardCellOrder": "row-major 10x20",
+  "boardLayouts1920x1080": {
+    "p1": { "x": 316, "y": 157, "w": 351, "h": 713 },
+    "p2": { "x": 1253, "y": 157, "w": 354, "h": 713 }
+  }
+}

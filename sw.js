@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tetris-simulator-v20';
+const CACHE_NAME = 'tetris-simulator-v21-cell-cnn';
 const APP_SHELL = [
   './index.html',
   './styles/simulator.css?v=app-v7',
@@ -8,7 +8,8 @@ const APP_SHELL = [
   './simulator/app/pc-finder.js?v=app-v5',
   './simulator/app/editor.js',
   './simulator/app/settings.js?v=app-v5',
-  './simulator/app/scanner.js',
+  './shared/cell-cnn-inference.js?v=cell-cnn-v1',
+  './simulator/app/scanner.js?v=cell-cnn-v1',
   './shared/tetris-event-codec.js?v=te1-v2',
   './simulator/app/state-transport.js?v=app-v9',
   './simulator/app/bootstrap.js?v=app-v9',

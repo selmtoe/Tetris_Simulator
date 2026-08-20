@@ -107,14 +107,14 @@ function findClosestMinoOnly(r, g, b) {
 
 // --- ONNX High Precision PPT Load ---
 let onnxSession = null;
-const ONNX_CLASS_NAMES = ['null', 'G', 'S', 'Z', 'L', 'J', 'O', 'I', 'T'];
+const CELL_CNN_MODEL_URL = './Load%20PPT/tetris.onnx?v=cell-cnn-stage1-e513a35d';
 let modelReadyResolver;
 const modelReadyPromise = new Promise(resolve => modelReadyResolver = resolve);
 
 async function initOnnxModel() {
     try {
-        onnxSession = await ort.InferenceSession.create('./Load%20PPT/tetris.onnx', { executionProviders: ['wasm'] });
-console.log("ONNX Model loaded.");
+        onnxSession = await ort.InferenceSession.create(CELL_CNN_MODEL_URL, { executionProviders: ['wasm'] });
+console.log("Cell CNN ONNX model loaded.");
         if (modelReadyResolver) modelReadyResolver(true);
     } catch (e) {
         console.error("Failed to load ONNX model:", e);
@@ -165,11 +165,11 @@ async function runHighPrecisionAnalysis(imgBitmap) {
 
         // 2. プレイヤー情報の抽出と解析
         const p1Config = {
-            boardRect: { x: 304, y: 157, w: 670 - 304, h: 882 - 157 },
+            boardRect: { x: 316, y: 157, w: 351, h: 713 },
             nextCoords: [ {x:160, y:155}, {x:500, y:122}, {x:500, y:175}, {x:500, y:225}, {x:500, y:275}, {x:500, y:325} ]
         };
         const p2Config = {
-            boardRect: { x: 1257, y: 157, w: 1620 - 1257, h: 882 - 157 },
+            boardRect: { x: 1253, y: 157, w: 354, h: 713 },
             nextCoords: [ {x:790, y:155}, {x:1130, y:122}, {x:1130, y:175}, {x:1130, y:225}, {x:1130, y:275}, {x:1130, y:325} ]
         };
 
@@ -227,7 +227,6 @@ function processImageTo1080p(imgBitmap) {
 async function analyzePlayerHighPrecision(canvas, originalBitmap, cropData, config) {
     const ctx = canvas.getContext('2d');
     const boardRect = config.boardRect;
-    const boardImgData = ctx.getImageData(boardRect.x, boardRect.y, boardRect.w, boardRect.h);
     const cellW = boardRect.w / 10;
     const cellH = boardRect.h / 20;
     const recognizedBoard = []; 
@@ -255,40 +254,13 @@ async function analyzePlayerHighPrecision(canvas, originalBitmap, cropData, conf
         classicBoard.push(row);
     }
 
-    // (B) ONNX 特徴量抽出と推論
-    const batchFeatures = [];
-    for (let r = 0; r < 20; r++) {
-        const row = [];
-        for (let c = 0; c < 10; c++) {
-            const x = c * cellW;
-            const y = r * cellH;
-            const cellPixels = extractCellPixels(boardImgData, x, y, cellW, cellH);
-            const feats = extractFeaturesJS(cellPixels, Math.floor(cellW), Math.floor(cellH));
-            batchFeatures.push(feats);
-            row.push(null);
-        }
-        recognizedBoard.push(row);
-    }
-
-    const flatInput = new Float32Array(batchFeatures.length * 63);
-    for (let i = 0; i < batchFeatures.length; i++) {
-        flatInput.set(batchFeatures[i], i * 63);
-    }
-    
-    const tensor = new ort.Tensor('float32', flatInput, [200, 63]);
-    const inputName = onnxSession.inputNames[0];
-    const feeds = { [inputName]: tensor };
-    const labelOutputName = onnxSession.outputNames[0]; 
-    const fetches = [labelOutputName];
-    const results = await onnxSession.run(feeds, fetches);
-    const outputLabel = results[labelOutputName];
-    const labelData = outputLabel.data;
-
+    // (B) Cell CNN: resize the complete crop to 320x640, then infer 200 RGB cells.
+    const predictedLabels = await TetrisCellCnn.recognizeBoard(onnxSession, ort, canvas, boardRect);
     for (let i = 0; i < 200; i++) {
         const r = Math.floor(i / 10);
         const c = i % 10;
-        const classIdx = Number(labelData[i]);
-        const label = ONNX_CLASS_NAMES[classIdx];
+        if (!recognizedBoard[r]) recognizedBoard[r] = new Array(10).fill(null);
+        const label = predictedLabels[i];
         recognizedBoard[r][c] = (label === 'null') ? null : label;
     }
 
@@ -379,101 +351,3 @@ async function analyzePlayerHighPrecision(canvas, originalBitmap, cropData, conf
 
     return { board: fullBoard, holdMino, nextQueue };
 }
-
-function extractCellPixels(sourceImgData, x, y, w, h) {
-    const sw = sourceImgData.width;
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const iw = Math.floor(w), ih = Math.floor(h);
-    const data = new Uint8ClampedArray(iw * ih * 4);
-    for (let row = 0; row < ih; row++) {
-        const srcRowStart = ((iy + row) * sw + ix) * 4;
-        const destRowStart = (row * iw) * 4;
-        const rowPixels = sourceImgData.data.subarray(srcRowStart, srcRowStart + iw * 4);
-        data.set(rowPixels, destRowStart);
-    }
-    return data;
-}
-
-function extractFeaturesJS(pixelsRGBA, w, h) {
-    const numPixels = w * h;
-    const feats = [];
-    const bCh = new Float32Array(numPixels);
-    const gCh = new Float32Array(numPixels);
-    const rCh = new Float32Array(numPixels);
-    const hCh = new Float32Array(numPixels);
-    const sCh = new Float32Array(numPixels);
-    const vCh = new Float32Array(numPixels);
-
-    for (let i = 0; i < numPixels; i++) {
-        const r = pixelsRGBA[i * 4];
-        const g = pixelsRGBA[i * 4 + 1];
-        const b = pixelsRGBA[i * 4 + 2];
-        bCh[i] = b; gCh[i] = g; rCh[i] = r;
-        
-        const maxVal = Math.max(r, g, b);
-        const minVal = Math.min(r, g, b);
-        const diff = maxVal - minVal;
-        const v = maxVal;
-        let s = (maxVal !== 0) ? (diff / maxVal) * 255 : 0;
-        let h_val = 0;
-        if (maxVal === minVal) h_val = 0;
-        else if (maxVal === r) h_val = (60 * (g - b) / diff + 360) % 360;
-        else if (maxVal === g) h_val = (60 * (b - r) / diff + 120) % 360;
-        else if (maxVal === b) h_val = (60 * (r - g) / diff + 240) % 360;
-        h_val = h_val / 2;
-        vCh[i] = v; sCh[i] = s; hCh[i] = h_val;
-    }
-
-    const getStats = (arr) => {
-        let sum = 0;
-        for(let v of arr) sum += v;
-        const mean = sum / arr.length;
-        let sqDiffSum = 0;
-        for(let v of arr) sqDiffSum += (v - mean) ** 2;
-        const std = Math.sqrt(sqDiffSum / arr.length);
-        return [mean, std];
-    };
-
-    const statsB = getStats(bCh); const statsG = getStats(gCh); const statsR = getStats(rCh);
-    feats.push(statsB[0], statsB[1], statsG[0], statsG[1], statsR[0], statsR[1]);
-    
-    const statsH = getStats(hCh); const statsS = getStats(sCh); const statsV = getStats(vCh);
-    feats.push(statsH[0], statsH[1], statsS[0], statsS[1], statsV[0], statsV[1]);
-
-    const tinyFeats = [];
-    const stepX = w / 4;
-    const stepY = h / 4;
-    for (let ty = 0; ty < 4; ty++) {
-        for (let tx = 0; tx < 4; tx++) {
-            const sx = Math.floor(tx * stepX), sy = Math.floor(ty * stepY);
-            const ex = Math.floor((tx + 1) * stepX), ey = Math.floor((ty + 1) * stepY);
-            let sumB=0, sumG=0, sumR=0, count=0;
-            for(let py=sy; py<ey; py++){
-                for(let px=sx; px<ex; px++){
-                    const idx = py * w + px;
-                    if(idx < numPixels) { sumB += bCh[idx]; sumG += gCh[idx]; sumR += rCh[idx]; count++; }
-                }
-            }
-            if(count===0) { tinyFeats.push(0,0,0); } else { tinyFeats.push(sumB/count, sumG/count, sumR/count); }
-        }
-    }
-    feats.push(...tinyFeats);
-
-    const cx = Math.floor(w/2), cy = Math.floor(h/2);
-    const cw = Math.floor(w/4), ch = Math.floor(h/4);
-    const startX = cx - cw, endX = cx + cw;
-    const startY = cy - ch, endY = cy + ch;
-    let cSumB=0, cSumG=0, cSumR=0, cCount=0;
-    for(let py=startY; py<endY; py++){
-        for(let px=startX; px<endX; px++){
-            if(px>=0 && px<w && py>=0 && py<h){
-                const idx = py * w + px;
-                cSumB += bCh[idx]; cSumG += gCh[idx]; cSumR += rCh[idx]; cCount++;
-            }
-        }
-    }
-    if(cCount===0) feats.push(0,0,0); else feats.push(cSumB/cCount, cSumG/cCount, cSumR/cCount);
-
-    return new Float32Array(feats);
-}
-
