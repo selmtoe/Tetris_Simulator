@@ -1,10 +1,10 @@
-const CACHE_NAME = 'tetris-simulator-v21-cell-cnn';
+const CACHE_NAME = 'tetris-simulator-v22-cold-clear-garbage-replan';
 const APP_SHELL = [
   './index.html',
   './styles/simulator.css?v=app-v7',
   './simulator/app/virtual-controller.js',
   './simulator/app/runtime-config.js?v=app-v7',
-  './simulator/app/player-engine.js?v=app-v7',
+  './simulator/app/player-engine.js?v=app-v8',
   './simulator/app/pc-finder.js?v=app-v5',
   './simulator/app/editor.js',
   './simulator/app/settings.js?v=app-v5',

@@ -823,6 +823,7 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
     
     riseGarbage() {
         if (this.pendingGarbage <= 0) return;
+        let garbageRose = false;
         
         if (this.lastGarbageHoleX === -1) {
             this.lastGarbageHoleX = Math.floor(Math.random() * BOARD_WIDTH);
@@ -841,8 +842,16 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
             const newRow = Array(BOARD_WIDTH).fill('G');
             newRow[this.lastGarbageHoleX] = null;
             this.board.push(newRow);
+            garbageRose = true;
         }
         this.pendingGarbage = 0;
+
+        // Garbage changes every placement in the retained Cold Clear DAG.
+        // Drop both the worker tree and any result that was produced for the
+        // pre-rise board; the next update will analyze the new board afresh.
+        if (garbageRose && this.isAi) {
+            this.invalidateAiSearch('garbage rise');
+        }
 
 }
 
@@ -1066,6 +1075,21 @@ requestAiMove() {
         if (this.aiWorker) {
             this.aiSearchInitialized = true;
             this.aiWorker.postMessage(aiWorkerStartPayload);
+        }
+    }
+
+    invalidateAiSearch(reason = '') {
+        if (!this.isAi) return;
+
+        this.aiRequestId++;
+        this.isAiThinking = false;
+        this.aiSearchInitialized = false;
+        if (this.aiWorker) this.aiWorker.postMessage({ type: 'reset' });
+
+        const debugDisplay = document.getElementById('ai-tree-debug-display');
+        if (debugDisplay && gameSettings.debugEnabled) {
+            const suffix = reason ? `: ${reason}` : '';
+            debugDisplay.dataset.status = `Tree RESET${suffix}`;
         }
     }
 
@@ -1368,7 +1392,7 @@ requestAiMove() {
         return null;
 
     }
-async executeAiMove(move) {
+    async executeAiMove(move) {
 
 
         
@@ -1377,10 +1401,21 @@ async executeAiMove(move) {
             return;
         }
 
+        const executionRequestId = move.requestId ?? this.aiRequestId;
+        const isCurrentExecution = () => (
+            gameState === 'PLAYING'
+            && !this.gameOver
+            && this.isAiThinking
+            && executionRequestId === this.aiRequestId
+        );
+
+        if (!isCurrentExecution()) return;
+
         if (this.player.pieceType !== move.piece) {
             if (this.canHold) {
                 this.hold();
                 await new Promise(resolve => setTimeout(resolve, gameSettings.aiMoveDelay));
+                if (!isCurrentExecution()) return;
             } else {
                 this.isAiThinking = false;
                 return;
@@ -1404,8 +1439,16 @@ debugDisplay.innerHTML += `<br><span style="color:#ff88ff">AI Path: ${minoType} 
         const pathfinderBoard = this.board.map(row => row.map(cell => (cell === null ? 0 : 1)));
 const path = this.findShortestPath_forAI(startState, targetState, minoType, pathfinderBoard);
 
-        if (path) {
-            for (const action of path) {
+        // Never teleport to a stale Cold Clear placement. A garbage rise can
+        // occupy the old target and make its input path disappear; in that
+        // case rebuild the search from the current board and ask again.
+        if (!path) {
+            this.invalidateAiSearch('unreachable placement');
+            return;
+        }
+
+        for (const action of path) {
+                if (!isCurrentExecution()) return;
                                 switch (action) {
                     case '←': this.player.x--;
 break;
@@ -1440,7 +1483,7 @@ this.player.y = newState.y;
                     delay = gameSettings.aiSdfDelay;
                 }
                 await new Promise(resolve => setTimeout(resolve, delay));
-            }
+                if (!isCurrentExecution()) return;
         }
 
         if (path && path.length > 0) {
@@ -1449,6 +1492,12 @@ this.player.y = newState.y;
         } else {
             this.lastMoveWasRotation = false;
 }
+
+        const targetShape = this.getShape(minoType, move.rotation);
+        if (!isCurrentExecution() || this.player.pieceType !== minoType || this.checkCollision(move.x, move.y, targetShape)) {
+            this.invalidateAiSearch('stale placement');
+            return;
+        }
 
         this.player.rotation = move.rotation;
         this.player.x = move.x;
