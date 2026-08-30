@@ -75,12 +75,20 @@ async function postAnalysis(data) {
         : 'Tree REUSED / reference WASM thinking ahead';
     self.postMessage({ type: 'debug', message: status });
     postNodeCount();
+    if (!move) {
+        self.postMessage({
+            type: 'noLegalMove',
+            requestId: data.requestId ?? null,
+            reason: 'no-legal-placement'
+        });
+        return;
+    }
     self.postMessage({
         type: 'move',
         requestId: data.requestId ?? null,
-        ...(move || {})
+        ...move
     });
-    if (move) startBackground(data);
+    startBackground(data);
 }
 
 async function handle(data) {

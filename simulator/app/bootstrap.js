@@ -1144,6 +1144,7 @@ p.ruleWorker.postMessage({
 
     lastTime = performance.now(); 
     requestAnimationFrame(gameLoop);
+    window.TetrisLeague?.autoRunFromLocation();
 
     
     window.addEventListener('resize', updateScale);

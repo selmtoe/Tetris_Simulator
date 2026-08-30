@@ -34,6 +34,13 @@ pub struct ActionKey {
 /// that follows the placement. This is deliberately independent from Cold
 /// Clear's evaluator so tactical branches cannot disappear during reranking.
 pub fn legal_actions(board: &Board) -> Vec<PlacementAction> {
+    legal_actions_with_hold(board, true)
+}
+
+/// Enumerate reachable root placements while respecting the active piece's
+/// HOLD lock. Descendant searches use `legal_actions` again after a lock,
+/// where HOLD is available normally.
+pub fn legal_actions_with_hold(board: &Board, can_hold: bool) -> Vec<PlacementAction> {
     let mut root = board.clone();
     let current = match root.advance_queue() {
         Some(piece) => piece,
@@ -43,14 +50,16 @@ pub fn legal_actions(board: &Board) -> Vec<PlacementAction> {
     let mut actions = Vec::with_capacity(96);
     add_piece_actions(&mut actions, &root, current, false, 1);
 
-    let mut held_board = root;
-    let held_piece = match held_board.hold(current) {
-        Some(piece) => Some((piece, 1)),
-        None => held_board.advance_queue().map(|piece| (piece, 2)),
-    };
-    if let Some((piece, consumed)) = held_piece {
-        if piece != current || consumed == 2 {
-            add_piece_actions(&mut actions, &held_board, piece, true, consumed);
+    if can_hold {
+        let mut held_board = root;
+        let held_piece = match held_board.hold(current) {
+            Some(piece) => Some((piece, 1)),
+            None => held_board.advance_queue().map(|piece| (piece, 2)),
+        };
+        if let Some((piece, consumed)) = held_piece {
+            if piece != current || consumed == 2 {
+                add_piece_actions(&mut actions, &held_board, piece, true, consumed);
+            }
         }
     }
 
@@ -144,6 +153,19 @@ mod tests {
         assert!(actions.len() >= 20, "only {} actions", actions.len());
         assert!(actions.iter().any(|action| action.hold));
         assert!(actions.iter().any(|action| !action.hold));
+    }
+
+    #[test]
+    fn hold_lock_filters_only_the_root_branch() {
+        let board = board_with_queue(&[Piece::I, Piece::T, Piece::O, Piece::S]);
+        let with_hold = legal_actions_with_hold(&board, true);
+        let locked = legal_actions_with_hold(&board, false);
+        assert!(with_hold.iter().any(|action| action.hold));
+        assert!(!locked.is_empty());
+        assert!(locked.iter().all(|action| !action.hold));
+        assert!(locked.iter().all(|action| with_hold
+            .iter()
+            .any(|candidate| candidate.key() == action.key())));
     }
 
     #[test]

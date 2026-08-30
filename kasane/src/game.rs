@@ -1,6 +1,6 @@
 use crate::agent::{
     AgentConfig, AgentController, AgentKind, IncomingPacket, Intent, Observation, PhaseView,
-    PlayerView, SelectedAction,
+    PlayerView, PolicyOverride, SelectedAction, StrategyEvent,
 };
 use crate::rules::Rules;
 use crate::search::attack_with_pc;
@@ -87,6 +87,42 @@ pub struct PlayerStats {
     pub waited_ms: u64,
     pub cancellation_dodges: u64,
     pub tank_actions: u64,
+    pub policy_overrides: u64,
+    pub placement_overrides: u64,
+    pub wait_overrides: u64,
+    pub dodge_overrides: u64,
+    pub counter_overrides: u64,
+    pub charge_entries: u64,
+    pub charge_actions: u64,
+    pub armed_actions: u64,
+    pub releases: u64,
+    pub release_dodges: u64,
+    pub release_counters: u64,
+    pub release_immediate: u64,
+    pub charge_aborts: u64,
+    pub charge_overrides: u64,
+    pub release_overrides: u64,
+    pub attack_expert_actions: u64,
+    pub survival_expert_actions: u64,
+    pub attack_expert_overrides: u64,
+    pub survival_expert_overrides: u64,
+    pub hold_fire_actions: u64,
+    pub hold_fire_raw_attack: u64,
+    pub hold_fire_sent: u64,
+    pub charge_release_incoming_edges: u64,
+    pub charge_release_garbage_rise_edges: u64,
+    pub charge_release_raw_attack: u64,
+    pub charge_release_sent: u64,
+    pub ren_starts: u64,
+    pub ren_continuations: u64,
+    pub stack_ren_entries: u64,
+    pub stack_ren_build_actions: u64,
+    pub stack_ren_fires: u64,
+    pub stack_ren_continuations: u64,
+    pub stack_ren_aborts: u64,
+    pub stack_ren_fire_raw_attack: u64,
+    pub stack_ren_fire_sent: u64,
+    pub stack_ren_entry_wells: BTreeMap<String, u64>,
     pub intents: BTreeMap<String, u64>,
 }
 
@@ -173,6 +209,7 @@ impl PlayerRuntime {
         };
         PlayerView {
             board: self.board.clone(),
+            can_hold: true,
             incoming: self
                 .incoming
                 .iter()
@@ -388,10 +425,137 @@ impl Engine {
             if selected.intent == Intent::TankThenFire {
                 player.stats.tank_actions += 1;
             }
+            if selected.policy_override != PolicyOverride::None {
+                player.stats.policy_overrides += 1;
+                player.stats.placement_overrides +=
+                    selected.policy_override.changed_placement() as u64;
+                player.stats.wait_overrides += selected.policy_override.changed_wait() as u64;
+                player.stats.dodge_overrides +=
+                    (selected.policy_override == PolicyOverride::SamePlacementDodge) as u64;
+                player.stats.counter_overrides +=
+                    (selected.policy_override == PolicyOverride::SamePlacementCounter) as u64;
+            }
+            match selected.strategy_event {
+                StrategyEvent::None => {}
+                StrategyEvent::AttackExpert => {
+                    player.stats.attack_expert_actions += 1;
+                }
+                StrategyEvent::AttackExpertHoldFire => {
+                    player.stats.attack_expert_actions += 1;
+                    player.stats.hold_fire_actions += 1;
+                }
+                StrategyEvent::SurvivalExpert => {
+                    player.stats.survival_expert_actions += 1;
+                }
+                StrategyEvent::SurvivalExpertHoldFire => {
+                    player.stats.survival_expert_actions += 1;
+                    player.stats.hold_fire_actions += 1;
+                }
+                StrategyEvent::ChargeEnter => {
+                    player.stats.charge_entries += 1;
+                    player.stats.charge_actions += 1;
+                }
+                StrategyEvent::ChargeContinue => player.stats.charge_actions += 1,
+                StrategyEvent::Armed => {
+                    player.stats.charge_actions += 1;
+                    player.stats.armed_actions += 1;
+                }
+                StrategyEvent::ChargeReleaseIncomingEdge => {
+                    player.stats.releases += 1;
+                    player.stats.charge_release_incoming_edges += 1;
+                }
+                StrategyEvent::ChargeReleaseGarbageRiseEdge => {
+                    player.stats.releases += 1;
+                    player.stats.charge_release_garbage_rise_edges += 1;
+                }
+                StrategyEvent::ReleaseDodge => {
+                    player.stats.releases += 1;
+                    player.stats.release_dodges += 1;
+                }
+                StrategyEvent::ReleaseCounter => {
+                    player.stats.releases += 1;
+                    player.stats.release_counters += 1;
+                }
+                StrategyEvent::ReleaseImmediate => {
+                    player.stats.releases += 1;
+                    player.stats.release_immediate += 1;
+                }
+                StrategyEvent::ChargeAbort => player.stats.charge_aborts += 1,
+                StrategyEvent::RenStart => player.stats.ren_starts += 1,
+                StrategyEvent::RenContinue => player.stats.ren_continuations += 1,
+                StrategyEvent::StackRenEnter => {
+                    player.stats.stack_ren_entries += 1;
+                    player.stats.stack_ren_build_actions += 1;
+                    let width = (selected.strategy_detail >> 4) as usize;
+                    let start = (selected.strategy_detail & 0x0f) as usize;
+                    if (2..=4).contains(&width) && start + width <= 10 {
+                        let key = format!("C{}-C{}", start + 1, start + width);
+                        *player.stats.stack_ren_entry_wells.entry(key).or_default() += 1;
+                    }
+                }
+                StrategyEvent::StackRenBuild => player.stats.stack_ren_build_actions += 1,
+                StrategyEvent::StackRenFire => player.stats.stack_ren_fires += 1,
+                StrategyEvent::StackRenContinue => player.stats.stack_ren_continuations += 1,
+                StrategyEvent::StackRenAbort => player.stats.stack_ren_aborts += 1,
+            }
+            if selected.policy_override != PolicyOverride::None {
+                if matches!(
+                    selected.strategy_event,
+                    StrategyEvent::AttackExpert | StrategyEvent::AttackExpertHoldFire
+                ) {
+                    player.stats.attack_expert_overrides += 1;
+                }
+                if matches!(
+                    selected.strategy_event,
+                    StrategyEvent::SurvivalExpert | StrategyEvent::SurvivalExpertHoldFire
+                ) {
+                    player.stats.survival_expert_overrides += 1;
+                }
+                if matches!(
+                    selected.strategy_event,
+                    StrategyEvent::ChargeEnter
+                        | StrategyEvent::ChargeContinue
+                        | StrategyEvent::Armed
+                ) {
+                    player.stats.charge_overrides += 1;
+                }
+                if matches!(
+                    selected.strategy_event,
+                    StrategyEvent::ChargeReleaseIncomingEdge
+                        | StrategyEvent::ChargeReleaseGarbageRiseEdge
+                        | StrategyEvent::ReleaseDodge
+                        | StrategyEvent::ReleaseCounter
+                        | StrategyEvent::ReleaseImmediate
+                ) {
+                    player.stats.release_overrides += 1;
+                }
+            }
             let cancelled = player.cancel_incoming(raw_attack);
             outgoing[index] = raw_attack - cancelled;
             player.stats.cancelled += cancelled as u64;
             player.stats.sent += outgoing[index] as u64;
+            if matches!(
+                selected.strategy_event,
+                StrategyEvent::AttackExpertHoldFire | StrategyEvent::SurvivalExpertHoldFire
+            ) {
+                player.stats.hold_fire_raw_attack += raw_attack as u64;
+                player.stats.hold_fire_sent += outgoing[index] as u64;
+            }
+            if matches!(
+                selected.strategy_event,
+                StrategyEvent::ChargeReleaseIncomingEdge
+                    | StrategyEvent::ChargeReleaseGarbageRiseEdge
+            ) {
+                player.stats.charge_release_raw_attack += raw_attack as u64;
+                player.stats.charge_release_sent += outgoing[index] as u64;
+            }
+            if matches!(
+                selected.strategy_event,
+                StrategyEvent::StackRenFire | StrategyEvent::StackRenContinue
+            ) {
+                player.stats.stack_ren_fire_raw_attack += raw_attack as u64;
+                player.stats.stack_ren_fire_sent += outgoing[index] as u64;
+            }
             if selected.action.lock.locked_out {
                 player.dead = true;
             }

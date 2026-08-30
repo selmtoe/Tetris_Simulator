@@ -13,7 +13,7 @@ class Player {
         
         if (this.isAi) {
             const workerScript = this.aiModel.startsWith('kasane-')
-                ? './simulator/workers/kasane-wasm-worker.js?v=kasane-v2'
+                ? './simulator/workers/kasane-wasm-worker.js?v=kasane-v8'
                 : './simulator/workers/cold-clear-wasm-worker.js';
             this.aiWorker = new Worker(workerScript);
 
@@ -35,6 +35,8 @@ class Player {
                         debugDisplay.style.display = 'block';
                         debugDisplay.innerHTML = `Status: <span style="color: ${color}">${status}</span><br>Nodes: ${e.data.count}`;
                     }
+                } else if (e.data && e.data.type === 'noLegalMove') {
+                    this.handleAiNoLegalMove(e.data);
                 } else if (e.data && e.data.type === 'error') {
                     console.error(`${AI_MODEL_CATALOG[this.aiModel].name} worker error:`, e.data.message);
                     this.aiSearchInitialized = false;
@@ -1126,11 +1128,20 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
             opponent,
             hasOpponent: Boolean(this.opponent),
             model: this.aiModel,
+            // Search controls are budgets, not hard-coded KASANE presets.  The
+            // WASM wrapper clamps them and selects an adaptive search profile.
+            searchThinkTimeMs: Math.max(0, Math.floor(Number(gameSettings.aiThinkTime) || 0)),
+            nodeLimit: Number.isFinite(gameSettings.aiNodeLimit)
+                ? Math.max(32, Math.floor(gameSettings.aiNodeLimit))
+                : 120000,
             rules: {
                 inputIntervalMs: Math.max(1, Math.floor(gameSettings.aiMoveDelay)),
                 lineClearDelayMs: Math.max(0, Math.floor(gameSettings.lineClearDelay)),
                 garbageGraceMs: Math.max(0, Math.floor(gameSettings.garbageGrace)),
-                decisionLatencyMs: Math.max(0, Math.floor(gameSettings.aiThinkTime)),
+                // KASANE's worker reports as soon as its bounded search ends,
+                // matching Cold Clear. Actual search time is deducted from a
+                // tactical wait by the worker instead of being charged twice.
+                decisionLatencyMs: 0,
                 previewCount: Math.max(1, Math.floor(gameSettings.maxNext)),
                 garbageRandomness: Math.max(0, Math.min(1, Number(gameSettings.garbageRandomness) || 0)),
                 perfectClearSpecialAttack: 10,
@@ -1201,13 +1212,31 @@ requestAiMove() {
         this.aiRequestId++;
         this.isAiThinking = false;
         this.aiSearchInitialized = false;
-        if (this.aiWorker) this.aiWorker.postMessage({ type: 'reset' });
+        if (this.aiWorker) {
+            const preserveStrategy = reason === 'garbage rise' && this.aiModel.startsWith('kasane-');
+            this.aiWorker.postMessage({ type: preserveStrategy ? 'invalidate' : 'reset' });
+        }
 
         const debugDisplay = document.getElementById('ai-tree-debug-display');
         if (debugDisplay && gameSettings.debugEnabled) {
             const suffix = reason ? `: ${reason}` : '';
             debugDisplay.dataset.status = `Tree RESET${suffix}`;
         }
+    }
+
+    handleAiNoLegalMove(message) {
+        // A no-legal-move result is terminal only for the exact snapshot that
+        // is still being played.  Stale/unreachable placements take the
+        // invalidateAiSearch path instead and must remain recoverable.
+        if (gameState !== 'PLAYING' || this.gameOver || !this.isAiThinking ||
+            !message || message.requestId !== this.aiRequestId) {
+            return false;
+        }
+
+        this.isAiThinking = false;
+        this.aiSearchInitialized = false;
+        this.lose();
+        return true;
     }
 
 

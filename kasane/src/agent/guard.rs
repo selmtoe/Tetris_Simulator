@@ -36,7 +36,7 @@ pub(crate) fn choose_guard(
     }
 }
 
-fn safety_gate_accepts(
+pub(crate) fn safety_gate_accepts(
     observation: &Observation,
     tactical: &SelectedAction,
     fallback: &SelectedAction,
@@ -93,7 +93,10 @@ fn safety_metrics_accept(
         || tactical.cancelled >= fallback.cancelled.saturating_add(minimum_cancel_gain)
 }
 
-fn project_action_safety(observation: &Observation, selected: &SelectedAction) -> ActionSafety {
+pub(crate) fn project_action_safety(
+    observation: &Observation,
+    selected: &SelectedAction,
+) -> ActionSafety {
     let raw_attack = attack_with_pc(
         &selected.action.lock,
         observation.rules.perfect_clear_special_attack,

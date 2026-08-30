@@ -14,6 +14,37 @@ const KASANE_INTENTS = [
     'Combo continue',
     'Survival'
 ];
+const KASANE_STRATEGY_EVENTS = [
+    'None',
+    'Attack expert',
+    'Attack expert hold-fire',
+    'Survival expert',
+    'Survival expert hold-fire',
+    'Charge enter',
+    'Charge continue',
+    'Armed',
+    'Charge release incoming edge',
+    'Charge release garbage rise edge',
+    'Release dodge',
+    'Release counter',
+    'Release immediate',
+    'Charge abort',
+    'REN start',
+    'REN continue',
+    'Stack-REN enter',
+    'Stack-REN build',
+    'Stack-REN fire',
+    'Stack-REN continue',
+    'Stack-REN abort'
+];
+const KASANE_POLICY_OVERRIDES = [
+    'None',
+    'Same placement dodge',
+    'Same placement counter',
+    'Same placement wait',
+    'Placement',
+    'Placement and wait'
+];
 
 class KasaneWasmBridge {
     constructor(instance) {
@@ -27,7 +58,7 @@ class KasaneWasmBridge {
         }
     }
 
-    static async load(wasmPath = './kasane.wasm?v=kasane-v2') {
+    static async load(wasmPath = './kasane.wasm?v=kasane-v8') {
         const response = await fetch(wasmPath, { credentials: 'same-origin' });
         if (!response.ok) throw new Error(`KASANE WASM HTTP ${response.status}`);
         let result;
@@ -98,11 +129,26 @@ class KasaneWasmBridge {
                 waitMs: view.getUint32(16, true),
                 score: view.getFloat32(20, true),
                 intent: KASANE_INTENTS[intentIndex] || `Intent ${intentIndex}`,
+                strategyEvent: KASANE_STRATEGY_EVENTS[view.getUint8(25)] || 'None',
+                policyOverride: KASANE_POLICY_OVERRIDES[view.getUint8(26)] || 'None',
+                strategyDetail: view.getUint8(27),
                 attack: view.getUint32(28, true)
             };
         } finally {
             this.exports.ks_dealloc(outputPtr, this.moveSize);
             this.exports.ks_dealloc(inputPtr, bytes.length);
+        }
+    }
+
+    resetController() {
+        if (this.exports.ks_reset_controller_cache) {
+            this.exports.ks_reset_controller_cache();
+        }
+    }
+
+    invalidateSearch() {
+        if (this.exports.ks_invalidate_search) {
+            this.exports.ks_invalidate_search();
         }
     }
 }

@@ -1479,6 +1479,7 @@ impl Runtime {
         };
         PlayerView {
             board: self.board.clone(),
+            can_hold: true,
             incoming: self
                 .incoming
                 .iter()
@@ -1978,6 +1979,7 @@ fn cheese_field(rows: u32, rng: &mut StdRng) -> [[bool; 10]; 40] {
 fn fixed_sink_view() -> PlayerView {
     PlayerView {
         board: Board::new(),
+        can_hold: true,
         incoming: Vec::new(),
         phase: PhaseView::Ready,
         pieces: 0,

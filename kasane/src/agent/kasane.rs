@@ -2,28 +2,28 @@ use super::{
     forecast_opponent, matured_lines, packet_lines_after_cancel, AgentConfig, IncomingPacket,
     Intent, Observation, OpponentForecast, SelectedAction,
 };
-use crate::base::{analyze_base, BaseModel};
+use crate::base::{analyze_base_with_hold, BaseModel};
 use crate::model::{BoardGeometry, TempoModel, FEATURE_NAMES};
 #[cfg(test)]
 use crate::search::pc0_attack;
-use crate::search::{attack_with_pc, legal_actions, PlacementAction};
+use crate::search::{attack_with_pc, legal_actions, legal_actions_with_hold, PlacementAction};
 use std::cmp::Ordering;
 
 #[derive(Clone, Copy, Debug)]
-struct TimingProjection {
-    sent: u32,
-    pressure: u32,
-    cancelled: u32,
-    incoming_at_lock: u32,
-    rise: u32,
-    dodge_gain: i32,
-    fires_after: bool,
-    fires_before: bool,
-    fires_simultaneously: bool,
-    tank_window: bool,
-    predicted_attack: u32,
-    predicted_outgoing: u32,
-    target_lock_ms: u64,
+pub(crate) struct TimingProjection {
+    pub(crate) sent: u32,
+    pub(crate) pressure: u32,
+    pub(crate) cancelled: u32,
+    pub(crate) incoming_at_lock: u32,
+    pub(crate) rise: u32,
+    pub(crate) dodge_gain: i32,
+    pub(crate) fires_after: bool,
+    pub(crate) fires_before: bool,
+    pub(crate) fires_simultaneously: bool,
+    pub(crate) tank_window: bool,
+    pub(crate) predicted_attack: u32,
+    pub(crate) predicted_outgoing: u32,
+    pub(crate) target_lock_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -40,12 +40,13 @@ pub fn choose_base_only(
     config: &AgentConfig,
     base_model: &BaseModel,
 ) -> Option<SelectedAction> {
-    let analysis = analyze_base(
+    let analysis = analyze_base_with_hold(
         &observation.own.board,
         base_model,
         config.base_depth,
         config.base_beam_width,
         observation.own.incoming_total(),
+        observation.own.can_hold,
     );
     let action = analysis.chosen?;
     let score = analysis
@@ -58,6 +59,9 @@ pub fn choose_base_only(
         wait_ms: 0,
         intent: Intent::Stack,
         score,
+        policy_override: super::PolicyOverride::None,
+        strategy_event: super::StrategyEvent::None,
+        strategy_detail: 0,
     })
 }
 
@@ -67,16 +71,17 @@ pub fn choose_kasane(
     base_model: &BaseModel,
     model: &TempoModel,
 ) -> Option<SelectedAction> {
-    let actions = legal_actions(&observation.own.board);
+    let actions = legal_actions_with_hold(&observation.own.board, observation.own.can_hold);
     if actions.is_empty() {
         return None;
     }
-    let own_base = analyze_base(
+    let own_base = analyze_base_with_hold(
         &observation.own.board,
         base_model,
         config.base_depth,
         config.base_beam_width,
         observation.own.incoming_total(),
+        observation.own.can_hold,
     );
     let forecast = forecast_opponent(observation, config);
     let own_before = BoardGeometry::measure(&observation.own.board);
@@ -228,6 +233,9 @@ pub fn choose_kasane(
                 wait_ms,
                 intent,
                 score,
+                policy_override: super::PolicyOverride::None,
+                strategy_event: super::StrategyEvent::None,
+                strategy_detail: 0,
             };
             if best
                 .as_ref()
@@ -395,7 +403,7 @@ fn wait_candidates(
     waits
 }
 
-fn project_timing(
+pub(crate) fn project_timing(
     observation: &Observation,
     action: &PlacementAction,
     forecast: &OpponentForecast,
@@ -614,6 +622,7 @@ mod tests {
             .expect("vertical I must complete the four-row well");
         let player = PlayerView {
             board: board.clone(),
+            can_hold: true,
             incoming: Vec::new(),
             phase: PhaseView::Ready,
             pieces: 0,

@@ -16,6 +16,7 @@ pub struct CheeseBenchmarkConfig {
     pub time_limit_ms: u64,
     pub horizons_ms: Vec<u64>,
     pub threads: usize,
+    pub kasane_agent: AgentKind,
     pub agent_config: AgentConfig,
 }
 
@@ -27,6 +28,7 @@ impl Default for CheeseBenchmarkConfig {
             time_limit_ms: 30_000,
             horizons_ms: vec![5_000, 10_000, 15_000, 20_000, 30_000],
             threads: 0,
+            kasane_agent: AgentKind::Kasane,
             agent_config: AgentConfig::default(),
         }
     }
@@ -58,6 +60,39 @@ pub struct RunSummary {
     pub mean_max_combo: f64,
     pub mean_cancellation_dodges: f64,
     pub mean_tank_actions: f64,
+    pub mean_policy_overrides: f64,
+    pub mean_placement_overrides: f64,
+    pub mean_wait_overrides: f64,
+    pub mean_dodge_overrides: f64,
+    pub mean_counter_overrides: f64,
+    pub mean_charge_entries: f64,
+    pub mean_charge_actions: f64,
+    pub mean_armed_actions: f64,
+    pub mean_releases: f64,
+    pub mean_release_dodges: f64,
+    pub mean_release_counters: f64,
+    pub mean_charge_aborts: f64,
+    pub mean_charge_overrides: f64,
+    pub mean_release_overrides: f64,
+    pub mean_attack_expert_actions: f64,
+    pub mean_survival_expert_actions: f64,
+    pub mean_attack_expert_overrides: f64,
+    pub mean_survival_expert_overrides: f64,
+    pub mean_hold_fire_actions: f64,
+    pub mean_hold_fire_raw_attack: f64,
+    pub mean_hold_fire_sent: f64,
+    pub mean_charge_release_incoming_edges: f64,
+    pub mean_charge_release_garbage_rise_edges: f64,
+    pub mean_charge_release_raw_attack: f64,
+    pub mean_charge_release_sent: f64,
+    pub mean_ren_starts: f64,
+    pub mean_ren_continuations: f64,
+    pub mean_stack_ren_entries: f64,
+    pub mean_stack_ren_build_actions: f64,
+    pub mean_stack_ren_fires: f64,
+    pub mean_stack_ren_continuations: f64,
+    pub mean_stack_ren_aborts: f64,
+    pub mean_stack_ren_fire_sent: f64,
     pub intent_totals: BTreeMap<String, u64>,
 }
 
@@ -106,7 +141,7 @@ pub fn run_cheese_benchmark(config: CheeseBenchmarkConfig) -> Result<CheeseBench
                 let seed = benchmark_seed(config.seed, index as u64);
                 Ok(PairResult {
                     cold_clear: run_scenario(seed, AgentKind::ColdClear, &config)?,
-                    kasane: run_scenario(seed, AgentKind::Kasane, &config)?,
+                    kasane: run_scenario(seed, config.kasane_agent, &config)?,
                 })
             })
             .collect::<Result<Vec<_>>>()
@@ -123,10 +158,10 @@ pub fn run_cheese_benchmark(config: CheeseBenchmarkConfig) -> Result<CheeseBench
     let cold_results: Vec<_> = pairs.iter().map(|pair| &pair.cold_clear).collect();
     let kasane_results: Vec<_> = pairs.iter().map(|pair| &pair.kasane).collect();
     let cold_clear = summarize(AgentKind::ColdClear, &cold_results, &config.horizons_ms);
-    let kasane = summarize(AgentKind::Kasane, &kasane_results, &config.horizons_ms);
+    let kasane = summarize(config.kasane_agent, &kasane_results, &config.horizons_ms);
     let paired = paired_comparison(&pairs, 20_000);
     Ok(CheeseBenchmarkReport {
-        schema: "kasane-cheese12-benchmark/v1".to_owned(),
+        schema: "kasane-cheese12-benchmark/v2-agent-selectable".to_owned(),
         rules: Rules::pinned(),
         scenario: "attacker empty vs Cold Clear defender on bottom 12 strict random-hole rows; PC special attack/reward zero"
             .to_owned(),
@@ -189,6 +224,41 @@ fn summarize(attacker: AgentKind, results: &[&MatchResult], horizons: &[u64]) ->
             sum.max_combo += result.stats[0].max_combo;
             sum.cancellation_dodges += result.stats[0].cancellation_dodges;
             sum.tank_actions += result.stats[0].tank_actions;
+            sum.policy_overrides += result.stats[0].policy_overrides;
+            sum.placement_overrides += result.stats[0].placement_overrides;
+            sum.wait_overrides += result.stats[0].wait_overrides;
+            sum.dodge_overrides += result.stats[0].dodge_overrides;
+            sum.counter_overrides += result.stats[0].counter_overrides;
+            sum.charge_entries += result.stats[0].charge_entries;
+            sum.charge_actions += result.stats[0].charge_actions;
+            sum.armed_actions += result.stats[0].armed_actions;
+            sum.releases += result.stats[0].releases;
+            sum.release_dodges += result.stats[0].release_dodges;
+            sum.release_counters += result.stats[0].release_counters;
+            sum.release_immediate += result.stats[0].release_immediate;
+            sum.charge_aborts += result.stats[0].charge_aborts;
+            sum.charge_overrides += result.stats[0].charge_overrides;
+            sum.release_overrides += result.stats[0].release_overrides;
+            sum.attack_expert_actions += result.stats[0].attack_expert_actions;
+            sum.survival_expert_actions += result.stats[0].survival_expert_actions;
+            sum.attack_expert_overrides += result.stats[0].attack_expert_overrides;
+            sum.survival_expert_overrides += result.stats[0].survival_expert_overrides;
+            sum.hold_fire_actions += result.stats[0].hold_fire_actions;
+            sum.hold_fire_raw_attack += result.stats[0].hold_fire_raw_attack;
+            sum.hold_fire_sent += result.stats[0].hold_fire_sent;
+            sum.charge_release_incoming_edges += result.stats[0].charge_release_incoming_edges;
+            sum.charge_release_garbage_rise_edges +=
+                result.stats[0].charge_release_garbage_rise_edges;
+            sum.charge_release_raw_attack += result.stats[0].charge_release_raw_attack;
+            sum.charge_release_sent += result.stats[0].charge_release_sent;
+            sum.ren_starts += result.stats[0].ren_starts;
+            sum.ren_continuations += result.stats[0].ren_continuations;
+            sum.stack_ren_entries += result.stats[0].stack_ren_entries;
+            sum.stack_ren_build_actions += result.stats[0].stack_ren_build_actions;
+            sum.stack_ren_fires += result.stats[0].stack_ren_fires;
+            sum.stack_ren_continuations += result.stats[0].stack_ren_continuations;
+            sum.stack_ren_aborts += result.stats[0].stack_ren_aborts;
+            sum.stack_ren_fire_sent += result.stats[0].stack_ren_fire_sent;
             for (intent, count) in &result.stats[0].intents {
                 *sum.intents.entry(intent.clone()).or_default() += count;
             }
@@ -226,6 +296,41 @@ fn summarize(attacker: AgentKind, results: &[&MatchResult], horizons: &[u64]) ->
         mean_max_combo: totals.max_combo as f64 / games as f64,
         mean_cancellation_dodges: totals.cancellation_dodges as f64 / games as f64,
         mean_tank_actions: totals.tank_actions as f64 / games as f64,
+        mean_policy_overrides: totals.policy_overrides as f64 / games as f64,
+        mean_placement_overrides: totals.placement_overrides as f64 / games as f64,
+        mean_wait_overrides: totals.wait_overrides as f64 / games as f64,
+        mean_dodge_overrides: totals.dodge_overrides as f64 / games as f64,
+        mean_counter_overrides: totals.counter_overrides as f64 / games as f64,
+        mean_charge_entries: totals.charge_entries as f64 / games as f64,
+        mean_charge_actions: totals.charge_actions as f64 / games as f64,
+        mean_armed_actions: totals.armed_actions as f64 / games as f64,
+        mean_releases: totals.releases as f64 / games as f64,
+        mean_release_dodges: totals.release_dodges as f64 / games as f64,
+        mean_release_counters: totals.release_counters as f64 / games as f64,
+        mean_charge_aborts: totals.charge_aborts as f64 / games as f64,
+        mean_charge_overrides: totals.charge_overrides as f64 / games as f64,
+        mean_release_overrides: totals.release_overrides as f64 / games as f64,
+        mean_attack_expert_actions: totals.attack_expert_actions as f64 / games as f64,
+        mean_survival_expert_actions: totals.survival_expert_actions as f64 / games as f64,
+        mean_attack_expert_overrides: totals.attack_expert_overrides as f64 / games as f64,
+        mean_survival_expert_overrides: totals.survival_expert_overrides as f64 / games as f64,
+        mean_hold_fire_actions: totals.hold_fire_actions as f64 / games as f64,
+        mean_hold_fire_raw_attack: totals.hold_fire_raw_attack as f64 / games as f64,
+        mean_hold_fire_sent: totals.hold_fire_sent as f64 / games as f64,
+        mean_charge_release_incoming_edges: totals.charge_release_incoming_edges as f64
+            / games as f64,
+        mean_charge_release_garbage_rise_edges: totals.charge_release_garbage_rise_edges as f64
+            / games as f64,
+        mean_charge_release_raw_attack: totals.charge_release_raw_attack as f64 / games as f64,
+        mean_charge_release_sent: totals.charge_release_sent as f64 / games as f64,
+        mean_ren_starts: totals.ren_starts as f64 / games as f64,
+        mean_ren_continuations: totals.ren_continuations as f64 / games as f64,
+        mean_stack_ren_entries: totals.stack_ren_entries as f64 / games as f64,
+        mean_stack_ren_build_actions: totals.stack_ren_build_actions as f64 / games as f64,
+        mean_stack_ren_fires: totals.stack_ren_fires as f64 / games as f64,
+        mean_stack_ren_continuations: totals.stack_ren_continuations as f64 / games as f64,
+        mean_stack_ren_aborts: totals.stack_ren_aborts as f64 / games as f64,
+        mean_stack_ren_fire_sent: totals.stack_ren_fire_sent as f64 / games as f64,
         intent_totals: totals.intents,
     }
 }

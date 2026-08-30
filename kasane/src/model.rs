@@ -52,6 +52,97 @@ pub const FEATURE_NAMES: [&str; 44] = [
     "charge_feasible",
 ];
 
+/// Additional policy-improvement inputs used by the v2 strategic model.  The
+/// first 44 inputs intentionally remain byte-for-byte compatible with the v1
+/// Tempo model.  A v1 JSON can therefore still be loaded and used by the
+/// legacy policy while v2 models opt in by carrying this extended schema.
+pub const STRATEGY_EXTRA_FEATURE_NAMES: [&str; 56] = [
+    "baseline_same_action",
+    "candidate_is_alternative",
+    "base_value_delta",
+    "base_spike_delta",
+    "headroom_delta_vs_cc",
+    "holes_delta_vs_cc",
+    "covered_delta_vs_cc",
+    "bumpiness_delta_vs_cc",
+    "accessible_delta_vs_cc",
+    "rise_delta_vs_cc",
+    "cancel_delta_vs_cc",
+    "sent_delta_vs_cc",
+    "pressure_delta_vs_cc",
+    "action_seconds_delta_vs_cc",
+    "own_headroom_after_rise",
+    "opponent_headroom_after_pressure",
+    "lethal_overflow",
+    "incoming_matured_now",
+    "incoming_due_250",
+    "incoming_due_500",
+    "incoming_due_1000",
+    "first_rise_seconds",
+    "cancelled_due_500",
+    "uncancelled_due_500",
+    "forecast_confidence",
+    "forecast_attack_500",
+    "forecast_attack_1000",
+    "forecast_attack_2000",
+    "forecast_outgoing_500",
+    "forecast_outgoing_1000",
+    "forecast_outgoing_2000",
+    "forecast_max_burst",
+    "first_attack_seconds",
+    "forecast_event_count",
+    "next_action_count",
+    "next_clear_count",
+    "next_attack_count",
+    "next_max_attack",
+    "next_mean_top_attack",
+    "combo_continuation_count",
+    "combo_max_attack",
+    "ren_length",
+    "dense_rows_after",
+    "hole_burden",
+    "attack_per_second",
+    "pressure_per_second",
+    "initiative_seconds",
+    "synchronized_pressure",
+    "resource_balance_blocks",
+    "opponent_dig_burden",
+    "own_dig_burden",
+    "survival_risk",
+    "wait_fraction",
+    "timing_slack_seconds",
+    "baseline_raw_attack",
+    "baseline_sent",
+];
+
+pub const STRATEGY_STATE_FEATURE_NAMES: [&str; 16] = [
+    "phase_charge",
+    "phase_armed",
+    "charge_pieces",
+    "charge_state_seconds",
+    "immediate_attack_options",
+    "safe_nonfire_options",
+    "max_immediate_attack",
+    "incoming_delta_observed",
+    "release_trigger",
+    "opponent_attack_eta",
+    "charge_safety_score",
+    "accumulated_resource_gain",
+    "next_i_distance",
+    "next_t_distance",
+    "hold_is_i_or_t",
+    "ren_continuation_potential",
+];
+
+pub fn strategy_feature_names() -> Vec<String> {
+    FEATURE_NAMES
+        .iter()
+        .chain(STRATEGY_EXTRA_FEATURE_NAMES.iter())
+        .chain(STRATEGY_STATE_FEATURE_NAMES.iter())
+        .map(|name| (*name).to_owned())
+        .collect()
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DenseLayer {
     pub weights: Vec<Vec<f32>>,
@@ -154,6 +245,162 @@ impl Default for TempoModel {
 }
 
 impl TempoModel {
+    /// Construct the v2 residual strategy network.  Cold Clear remains the
+    /// policy floor; this network only scores timing changes and safety-gated
+    /// alternatives relative to that floor.  Hidden projections are fixed
+    /// deterministic random features so CEM/ES can train the compact output
+    /// genome without evaluating thousands of independent parameters.
+    pub fn strategy_v2_bootstrap() -> Self {
+        let legacy = Self::default();
+        let mut model = Self {
+            schema: "kasane-strategy-model/v2-cc-floor-mlp".to_owned(),
+            feature_names: strategy_feature_names(),
+            input_mean: legacy.input_mean,
+            input_scale: legacy.input_scale,
+            linear_weights: legacy.linear_weights,
+            linear_bias: legacy.linear_bias,
+            hidden_layers: Vec::new(),
+            neural_output_weights: Vec::new(),
+            neural_output_bias: 0.0,
+        };
+
+        let extras: [(&str, f32, f32); 56] = [
+            ("baseline_same_action", 1.0, 0.10),
+            ("candidate_is_alternative", 1.0, -0.35),
+            ("base_value_delta", 4.0, 0.20),
+            ("base_spike_delta", 4.0, 0.12),
+            ("headroom_delta_vs_cc", 4.0, 0.90),
+            ("holes_delta_vs_cc", 3.0, -1.10),
+            ("covered_delta_vs_cc", 5.0, -0.70),
+            ("bumpiness_delta_vs_cc", 6.0, -0.18),
+            ("accessible_delta_vs_cc", 3.0, 0.28),
+            ("rise_delta_vs_cc", 4.0, -1.60),
+            ("cancel_delta_vs_cc", 4.0, 1.20),
+            ("sent_delta_vs_cc", 4.0, 0.75),
+            ("pressure_delta_vs_cc", 4.0, 1.35),
+            ("action_seconds_delta_vs_cc", 1.0, -0.35),
+            ("own_headroom_after_rise", 10.0, 0.80),
+            ("opponent_headroom_after_pressure", 10.0, -0.70),
+            ("lethal_overflow", 4.0, 2.20),
+            ("incoming_matured_now", 4.0, -1.00),
+            ("incoming_due_250", 4.0, -0.90),
+            ("incoming_due_500", 4.0, -0.65),
+            ("incoming_due_1000", 4.0, -0.35),
+            ("first_rise_seconds", 1.0, 0.20),
+            ("cancelled_due_500", 4.0, 0.85),
+            ("uncancelled_due_500", 4.0, -1.10),
+            ("forecast_confidence", 1.0, 0.08),
+            ("forecast_attack_500", 4.0, -0.10),
+            ("forecast_attack_1000", 4.0, -0.08),
+            ("forecast_attack_2000", 8.0, -0.04),
+            ("forecast_outgoing_500", 4.0, -0.22),
+            ("forecast_outgoing_1000", 4.0, -0.15),
+            ("forecast_outgoing_2000", 8.0, -0.08),
+            ("forecast_max_burst", 6.0, -0.16),
+            ("first_attack_seconds", 1.0, 0.05),
+            ("forecast_event_count", 4.0, 0.02),
+            ("next_action_count", 48.0, 0.08),
+            ("next_clear_count", 12.0, 0.14),
+            ("next_attack_count", 10.0, 0.20),
+            ("next_max_attack", 6.0, 0.32),
+            ("next_mean_top_attack", 4.0, 0.18),
+            ("combo_continuation_count", 10.0, 0.38),
+            ("combo_max_attack", 6.0, 0.52),
+            ("ren_length", 6.0, 0.30),
+            ("dense_rows_after", 8.0, -0.08),
+            ("hole_burden", 10.0, -0.70),
+            ("attack_per_second", 8.0, 0.32),
+            ("pressure_per_second", 8.0, 0.48),
+            ("initiative_seconds", 1.0, -0.08),
+            ("synchronized_pressure", 6.0, 1.20),
+            ("resource_balance_blocks", 50.0, 0.08),
+            ("opponent_dig_burden", 10.0, 0.18),
+            ("own_dig_burden", 10.0, -0.42),
+            ("survival_risk", 6.0, -1.60),
+            ("wait_fraction", 1.0, -0.20),
+            ("timing_slack_seconds", 1.0, 0.06),
+            ("baseline_raw_attack", 4.0, 0.04),
+            ("baseline_sent", 4.0, 0.03),
+        ];
+        for (name, scale, weight) in extras {
+            debug_assert_eq!(model.feature_names[model.input_scale.len()], name);
+            model.input_mean.push(0.0);
+            model.input_scale.push(scale);
+            model.linear_weights.push(weight);
+        }
+        let state_features: [(&str, f32, f32); 16] = [
+            ("phase_charge", 1.0, 0.16),
+            ("phase_armed", 1.0, 0.24),
+            ("charge_pieces", 6.0, 0.12),
+            ("charge_state_seconds", 3.0, -0.08),
+            ("immediate_attack_options", 8.0, 0.22),
+            ("safe_nonfire_options", 12.0, 0.10),
+            ("max_immediate_attack", 6.0, 0.38),
+            ("incoming_delta_observed", 4.0, 0.70),
+            ("release_trigger", 1.0, 0.70),
+            ("opponent_attack_eta", 1.0, -0.05),
+            ("charge_safety_score", 10.0, 0.30),
+            ("accumulated_resource_gain", 8.0, 0.34),
+            ("next_i_distance", 7.0, -0.06),
+            ("next_t_distance", 7.0, -0.05),
+            ("hold_is_i_or_t", 1.0, 0.12),
+            ("ren_continuation_potential", 10.0, 0.38),
+        ];
+        for (name, scale, weight) in state_features {
+            debug_assert_eq!(model.feature_names[model.input_scale.len()], name);
+            model.input_mean.push(0.0);
+            model.input_scale.push(scale);
+            model.linear_weights.push(weight);
+        }
+
+        let width = model.feature_names.len();
+        let pc_index = model
+            .feature_names
+            .iter()
+            .position(|name| name == "perfect_clear")
+            .expect("PC feature is part of the legacy prefix");
+        let first_width = 64;
+        let mut first = DenseLayer {
+            weights: vec![vec![0.0; width]; first_width],
+            bias: vec![0.0; first_width],
+        };
+        let mut state = 0x4B41_5341_4E45_0002_u64;
+        for unit in 0..first_width {
+            first.bias[unit] = if unit % 3 == 0 { -0.15 } else { 0.0 };
+            for _ in 0..10 {
+                state = splitmix64(state);
+                let index = (state as usize) % width;
+                if index == pc_index {
+                    continue;
+                }
+                state = splitmix64(state);
+                let magnitude = 0.08 + ((state >> 48) as f32 / u16::MAX as f32) * 0.22;
+                let sign = if state & 1 == 0 { -1.0 } else { 1.0 };
+                first.weights[unit][index] += sign * magnitude;
+            }
+        }
+        let second_width = 32;
+        let mut second = DenseLayer {
+            weights: vec![vec![0.0; first_width]; second_width],
+            bias: vec![0.0; second_width],
+        };
+        for unit in 0..second_width {
+            for input in 0..first_width {
+                state = splitmix64(state);
+                let centered = ((state >> 48) as f32 / u16::MAX as f32) * 2.0 - 1.0;
+                second.weights[unit][input] = centered * 0.16;
+            }
+        }
+        model.hidden_layers = vec![first, second];
+        model.neural_output_weights = vec![0.0; second_width];
+        model
+    }
+
+    pub fn is_strategy_v2(&self) -> bool {
+        self.schema.starts_with("kasane-strategy-model/v2")
+            && self.feature_names == strategy_feature_names()
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let data = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -171,10 +418,15 @@ impl TempoModel {
     }
 
     pub fn validate(&self) -> Result<()> {
-        let width = FEATURE_NAMES.len();
-        if self.feature_names != FEATURE_NAMES {
+        let legacy_names: Vec<String> = FEATURE_NAMES
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect();
+        let strategy_names = strategy_feature_names();
+        if self.feature_names != legacy_names && self.feature_names != strategy_names {
             bail!("tempo model feature schema does not match this KASANE build");
         }
+        let width = self.feature_names.len();
         if self.input_mean.len() != width
             || self.input_scale.len() != width
             || self.linear_weights.len() != width
@@ -204,7 +456,7 @@ impl TempoModel {
     }
 
     pub fn score(&self, raw: &[f32]) -> f32 {
-        debug_assert_eq!(raw.len(), FEATURE_NAMES.len());
+        debug_assert_eq!(raw.len(), self.feature_names.len());
         let normalized: Vec<f32> = raw
             .iter()
             .zip(&self.input_mean)
@@ -227,6 +479,13 @@ impl TempoModel {
         }
         score
     }
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^ (value >> 31)
 }
 
 fn dot(left: &[f32], right: &[f32]) -> f32 {

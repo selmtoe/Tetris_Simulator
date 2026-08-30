@@ -34,6 +34,18 @@ const AI_MODEL_CATALOG = Object.freeze({
         shortName: 'KASANE Guard',
         description: '相殺当て・おじゃま上昇回避・生存余白に特化した防御モデル'
     }),
+    'kasane-strategy': Object.freeze({
+        id: 'kasane-strategy',
+        name: 'KASANE Strategy v2',
+        shortName: 'KASANE Strategy',
+        description: 'Cold Clear床 + 相殺待機・蓄積→即発火・防御反撃を学習した戦略NN'
+    }),
+    'kasane-stack-ren': Object.freeze({
+        id: 'kasane-stack-ren',
+        name: 'KASANE Stack-REN v3',
+        shortName: 'KASANE Stack-REN',
+        description: '積み込み→発火REN戦略用の独立AIモデル'
+    }),
     'kasane-base': Object.freeze({
         id: 'kasane-base',
         name: 'KASANE Base v3',
@@ -125,7 +137,7 @@ let gameSettings = {
     das: 140,
     arr: 30,
     sdf: 20,
-    lineClearDelay: 0,
+    lineClearDelay: 750,
     spawnDelay: 0,
     gravity: 9999999,
     lockDelay: 9999999,
@@ -136,8 +148,8 @@ let gameSettings = {
     showTimer: false,
     touchControlsEnabled: 'ontouchstart' in window,
     touchControlType: 'button',
-    aiMoveDelay: 30,
-    aiSdfDelay: 30,
+    aiMoveDelay: 50,
+    aiSdfDelay: 50,
     aiThinkTime: 180,
     aiNodeLimit: 120000,
     drawMoveDelay: 30,

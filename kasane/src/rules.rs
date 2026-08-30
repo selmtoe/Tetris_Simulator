@@ -40,6 +40,17 @@ impl Rules {
         }
     }
 
+    /// Production battle rules. Base/PC0 experiments and the bottom-12
+    /// benchmark use `pinned()`, while ordinary simulator duels and Stack-REN
+    /// live-duel training use the real 10-line perfect-clear attack.
+    pub fn live() -> Self {
+        Self {
+            schema: "kasane-rules/ppt-50-750-1000-pc10-v1".to_owned(),
+            perfect_clear_special_attack: 10,
+            ..Self::pinned()
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.input_interval_ms != 50 {
             bail!("KASANE v1 requires input_interval_ms=50");
@@ -56,8 +67,8 @@ impl Rules {
         if !(0.0..=1.0).contains(&self.garbage_randomness) {
             bail!("garbage_randomness must be in [0, 1]");
         }
-        if self.perfect_clear_special_attack != 0 {
-            bail!("the PC0 benchmark requires perfect_clear_special_attack=0");
+        if !matches!(self.perfect_clear_special_attack, 0 | 10) {
+            bail!("perfect_clear_special_attack must be 0 (PC0) or 10 (live)");
         }
         Ok(())
     }
@@ -82,5 +93,16 @@ mod tests {
         assert_eq!(rules.line_clear_delay_ms, 750);
         assert_eq!(rules.garbage_grace_ms, 1000);
         assert_eq!(rules.controller_time_ms(3, true), 250);
+    }
+
+    #[test]
+    fn live_contract_changes_only_the_pc_attack() {
+        let pinned = Rules::pinned();
+        let live = Rules::live();
+        live.validate().unwrap();
+        assert_eq!(live.input_interval_ms, pinned.input_interval_ms);
+        assert_eq!(live.line_clear_delay_ms, pinned.line_clear_delay_ms);
+        assert_eq!(live.garbage_grace_ms, pinned.garbage_grace_ms);
+        assert_eq!(live.perfect_clear_special_attack, 10);
     }
 }

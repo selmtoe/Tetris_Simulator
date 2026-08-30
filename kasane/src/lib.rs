@@ -12,8 +12,9 @@ pub mod game;
 pub mod model;
 pub mod rules;
 pub mod search;
+pub mod strategy_training;
 pub mod training;
 
-pub use agent::{AgentConfig, AgentKind, Intent};
+pub use agent::{AgentConfig, AgentKind, Intent, PolicyOverride, StrategyEvent};
 pub use game::{Match, MatchConfig, MatchOutcome, MatchResult};
 pub use rules::Rules;

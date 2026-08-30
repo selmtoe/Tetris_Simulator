@@ -1,5 +1,7 @@
 use crate::model::{BoardGeometry, DenseLayer};
-use crate::search::{legal_actions, pc0_attack, ActionKey, PlacementAction};
+use crate::search::{
+    legal_actions, legal_actions_with_hold, pc0_attack, ActionKey, PlacementAction,
+};
 use anyhow::{bail, Context, Result};
 use libtetris::{Board, Piece, PlacementKind, RotationState, TspinStatus};
 use serde::{Deserialize, Serialize};
@@ -340,7 +342,18 @@ pub fn analyze_base(
     beam_width: usize,
     incoming: u32,
 ) -> BaseAnalysis {
-    let root_actions = legal_actions(board);
+    analyze_base_with_hold(board, model, depth, beam_width, incoming, true)
+}
+
+pub fn analyze_base_with_hold(
+    board: &Board,
+    model: &BaseModel,
+    depth: usize,
+    beam_width: usize,
+    incoming: u32,
+    can_hold: bool,
+) -> BaseAnalysis {
+    let root_actions = legal_actions_with_hold(board, can_hold);
     if root_actions.is_empty() {
         return BaseAnalysis {
             chosen: None,
