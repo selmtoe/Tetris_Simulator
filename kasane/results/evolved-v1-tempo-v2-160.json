@@ -1,0 +1,163 @@
+{
+  "schema": "kasane-cheese12-benchmark/v1",
+  "rules": {
+    "schema": "kasane-rules/ppt-50-750-1000-pc0-v1",
+    "input_interval_ms": 50,
+    "line_clear_delay_ms": 750,
+    "garbage_grace_ms": 1000,
+    "decision_latency_ms": 180,
+    "preview_count": 8,
+    "garbage_randomness": 0.3,
+    "perfect_clear_special_attack": 0,
+    "spawn_delay_ms": 0
+  },
+  "scenario": "attacker empty vs Cold Clear defender on bottom 12 strict random-hole rows; PC special attack/reward zero",
+  "config": {
+    "games": 160,
+    "seed": 5422706966281912321,
+    "time_limit_ms": 30000,
+    "horizons_ms": [
+      5000,
+      10000,
+      15000,
+      20000,
+      30000
+    ],
+    "threads": 24,
+    "agent_config": {
+      "cold_clear_nodes": 1000,
+      "kasane_nodes": 1500,
+      "forecast_nodes": 300,
+      "maximum_wait_ms": 2000,
+      "base_depth": 4,
+      "base_beam_width": 64,
+      "base_model_path": "models\\base-model-evolved-v1.json",
+      "tempo_model_path": "config\\tempo-model-bootstrap-v2.json",
+      "enable_tempo": true
+    }
+  },
+  "cold_clear": {
+    "attacker": "cold_clear",
+    "defender": "cold_clear",
+    "games": 160,
+    "attacker_wins": 98,
+    "attacker_losses": 0,
+    "draws_or_timeouts": 62,
+    "ko_cdf": [
+      {
+        "horizon_ms": 5000,
+        "successes": 0,
+        "probability": 0.0,
+        "wilson_low": -1.734723475976807e-18,
+        "wilson_high": 0.023447036650032713
+      },
+      {
+        "horizon_ms": 10000,
+        "successes": 1,
+        "probability": 0.00625,
+        "wilson_low": 0.00110410335439148,
+        "wilson_high": 0.03454984533751582
+      },
+      {
+        "horizon_ms": 15000,
+        "successes": 11,
+        "probability": 0.06875,
+        "wilson_low": 0.03881901944217292,
+        "wilson_high": 0.11890404966848031
+      },
+      {
+        "horizon_ms": 20000,
+        "successes": 37,
+        "probability": 0.23125,
+        "wilson_low": 0.17268254006735462,
+        "wilson_high": 0.30242024213203794
+      },
+      {
+        "horizon_ms": 30000,
+        "successes": 98,
+        "probability": 0.6125,
+        "wilson_low": 0.5352166087104928,
+        "wilson_high": 0.6845078080432498
+      }
+    ],
+    "mean_attack_sent": 20.33125,
+    "mean_attack_cancelled": 4.46875,
+    "mean_cancellation_dodges": 0.0,
+    "mean_tank_actions": 0.0,
+    "intent_totals": {
+      "stack": 7645
+    }
+  },
+  "kasane": {
+    "attacker": "kasane",
+    "defender": "cold_clear",
+    "games": 160,
+    "attacker_wins": 91,
+    "attacker_losses": 0,
+    "draws_or_timeouts": 69,
+    "ko_cdf": [
+      {
+        "horizon_ms": 5000,
+        "successes": 0,
+        "probability": 0.0,
+        "wilson_low": -1.734723475976807e-18,
+        "wilson_high": 0.023447036650032713
+      },
+      {
+        "horizon_ms": 10000,
+        "successes": 1,
+        "probability": 0.00625,
+        "wilson_low": 0.00110410335439148,
+        "wilson_high": 0.03454984533751582
+      },
+      {
+        "horizon_ms": 15000,
+        "successes": 12,
+        "probability": 0.075,
+        "wilson_low": 0.043420566103405354,
+        "wilson_high": 0.12650941504912244
+      },
+      {
+        "horizon_ms": 20000,
+        "successes": 36,
+        "probability": 0.225,
+        "wilson_low": 0.1671816695685448,
+        "wilson_high": 0.29571420058897313
+      },
+      {
+        "horizon_ms": 30000,
+        "successes": 91,
+        "probability": 0.56875,
+        "wilson_low": 0.4912859643792512,
+        "wilson_high": 0.6429900680813693
+      }
+    ],
+    "mean_attack_sent": 20.26875,
+    "mean_attack_cancelled": 4.675,
+    "mean_cancellation_dodges": 0.1125,
+    "mean_tank_actions": 3.0,
+    "intent_totals": {
+      "cancellation_dodge": 18,
+      "combo_continue": 55,
+      "counter": 86,
+      "dig": 89,
+      "spike_now": 916,
+      "stack": 6096,
+      "survival": 12,
+      "tank_then_fire": 480
+    }
+  },
+  "paired": {
+    "primary_horizon_ms": 20000,
+    "cold_clear_probability": 0.23125,
+    "kasane_probability": 0.225,
+    "difference_percentage_points": -0.625,
+    "paired_ci95_low_pp": -9.400179180739737,
+    "paired_ci95_high_pp": 8.150179180739736,
+    "kasane_only_wins": 25,
+    "cold_clear_only_wins": 26,
+    "target_difference_pp": 15.0,
+    "target_lower_ci_pp": 10.0,
+    "passed_ambitious_target": false
+  }
+}

@@ -5,6 +5,119 @@ document.addEventListener('DOMContentLoaded', () => {
     let debugClickCount = 0;
     let debugClickTimer = null;
     let recordedReplayEvents = [];
+    let modelPickerPlayer = null;
+
+    function updateAiModelBadges() {
+        ['p1', 'p2'].forEach(playerKey => {
+            const badge = document.querySelector(`[data-ai-player="${playerKey}"] .ai-model-badge`);
+            if (!badge) return;
+            const model = AI_MODEL_CATALOG[playerAiModelId(playerKey)];
+            badge.textContent = `${model.shortName} · 長押しで変更`;
+            badge.title = `${model.name}: ${model.description}`;
+        });
+    }
+
+    function closeAiModelPicker() {
+        const modal = document.getElementById('ai-model-modal');
+        if (modal) modal.classList.remove('open');
+        modelPickerPlayer = null;
+    }
+
+    function selectAiModel(playerKey, modelId) {
+        const normalized = normalizeAiModelId(modelId);
+        gameSettings.aiModels = {
+            p1: playerAiModelId('p1'),
+            p2: playerAiModelId('p2'),
+            [playerKey]: normalized
+        };
+        saveGameSettings();
+        updateAiModelBadges();
+        closeAiModelPicker();
+    }
+
+    function openAiModelPicker(playerKey) {
+        if (!gameSettings.debugEnabled) return;
+        modelPickerPlayer = playerKey;
+        const modal = document.getElementById('ai-model-modal');
+        const playerLabel = document.getElementById('ai-model-modal-player');
+        const options = document.getElementById('ai-model-options');
+        if (!modal || !playerLabel || !options) return;
+
+        playerLabel.textContent = `PLAYER ${playerKey === 'p1' ? '1' : '2'} のAIモデル`;
+        options.innerHTML = '';
+        const selected = playerAiModelId(playerKey);
+        Object.values(AI_MODEL_CATALOG).forEach(model => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `ai-model-option${model.id === selected ? ' selected' : ''}`;
+            button.dataset.model = model.id;
+
+            const marker = document.createElement('span');
+            marker.className = 'ai-model-option-marker';
+            marker.textContent = model.id === selected ? '●' : '○';
+            const name = document.createElement('span');
+            name.className = 'ai-model-option-name';
+            name.textContent = model.name;
+            const description = document.createElement('span');
+            description.className = 'ai-model-option-description';
+            description.textContent = model.description;
+            button.append(marker, name, description);
+            button.addEventListener('click', () => selectAiModel(playerKey, model.id));
+            options.appendChild(button);
+        });
+        modal.classList.add('open');
+        options.querySelector('.selected')?.focus();
+    }
+
+    function installAiModelLongPress(playerKey) {
+        const label = document.querySelector(`[data-ai-player="${playerKey}"]`);
+        const badge = label?.querySelector('.ai-model-badge');
+        if (!label || !badge) return;
+
+        let timer = null;
+        let suppressClick = false;
+        const clearTimer = () => {
+            if (timer !== null) clearTimeout(timer);
+            timer = null;
+        };
+        label.addEventListener('pointerdown', event => {
+            if (!gameSettings.debugEnabled || (event.button !== undefined && event.button !== 0)) return;
+            clearTimer();
+            timer = setTimeout(() => {
+                timer = null;
+                suppressClick = true;
+                openAiModelPicker(playerKey);
+                navigator.vibrate?.(30);
+            }, 650);
+        });
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach(type => {
+            label.addEventListener(type, clearTimer);
+        });
+        label.addEventListener('click', event => {
+            if (!suppressClick) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            suppressClick = false;
+        }, true);
+        label.addEventListener('contextmenu', event => {
+            if (!gameSettings.debugEnabled) return;
+            event.preventDefault();
+            clearTimer();
+            openAiModelPicker(playerKey);
+        });
+        badge.addEventListener('click', event => {
+            if (!gameSettings.debugEnabled || suppressClick) return;
+            event.preventDefault();
+            event.stopPropagation();
+            openAiModelPicker(playerKey);
+        });
+        badge.addEventListener('keydown', event => {
+            if ((event.key === 'Enter' || event.key === ' ') && gameSettings.debugEnabled) {
+                event.preventDefault();
+                openAiModelPicker(playerKey);
+            }
+        });
+    }
 
     function ensureMemoryMonitor() {
         let memMon = document.getElementById('memory-monitor');
@@ -28,6 +141,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function applyDebugModeUi() {
         const enabled = gameSettings.debugEnabled === true;
+        document.body.classList.toggle('debug-mode-enabled', enabled);
+        updateAiModelBadges();
         const analyzeButton = document.getElementById('analyzeBtn');
         if (analyzeButton) {
             analyzeButton.hidden = !enabled;
@@ -39,6 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (analysisModal) analysisModal.style.display = 'none';
             // Analysis is debug-only; do not retain samples collected while it was enabled.
             analysisData = [];
+            closeAiModelPicker();
         }
 
         const memMon = enabled ? ensureMemoryMonitor() : document.getElementById('memory-monitor');
@@ -165,6 +281,15 @@ document.addEventListener('DOMContentLoaded', () => {
     loadKeyBindings();
     loadGameSettings();
     applyDebugModeUi();
+    installAiModelLongPress('p1');
+    installAiModelLongPress('p2');
+    document.getElementById('ai-model-close')?.addEventListener('click', closeAiModelPicker);
+    document.getElementById('ai-model-modal')?.addEventListener('click', event => {
+        if (event.target.id === 'ai-model-modal') closeAiModelPicker();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && modelPickerPlayer) closeAiModelPicker();
+    });
 
     if (loadSkinsFromLocalStorage()) {
         console.log('Custom skins loaded from localStorage.');
@@ -294,23 +419,26 @@ document.getElementById('advanced-link-btn').addEventListener('click', () => {
 document.getElementById('startGameBtn').addEventListener('click', () => {
         gameHistoryLog = [];
         window.resetRecordedReplay?.();
+        resetGarbageDeliveryBatch();
+        const p1_isAi = document.getElementById('p1-ai-toggle').checked;
+        const p2_isAi = document.getElementById('p2-ai-toggle').checked;
         let currentRunSettings = { ...gameSettings };
         gameStartTime = performance.now();
         let startTime = gameStartTime;
         
         players = [];
-        const p1_isAi = document.getElementById('p1-ai-toggle').checked;
-        const p2_isAi = document.getElementById('p2-ai-toggle').checked;
+        const p1_aiModel = playerAiModelId('p1');
+        const p2_aiModel = playerAiModelId('p2');
         
         if (gameMode === '1P') {
           
-           const player = new Player('1', 0, keyBindings.p1, 0, p1_isAi);
+           const player = new Player('1', 0, keyBindings.p1, 0, p1_isAi, p1_aiModel);
             player.holdDisabled = autoStartParams.nh;
             players.push(player);
         } else {
-            const p1 = new Player('1', 0, keyBindings.p1, 0, p1_isAi);
+            const p1 = new Player('1', 0, keyBindings.p1, 0, p1_isAi, p1_aiModel);
             p1.holdDisabled = autoStartParams.nh;
-            const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1, p2_isAi);
+            const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1, p2_isAi, p2_aiModel);
             p2.holdDisabled = autoStartParams.nh;
       
             p1.opponent = p2;
@@ -598,6 +726,7 @@ if (gameSettings.touchControlsEnabled && gameSettings.touchControlType === 'butt
 
 document.getElementById('backToEditorBtn').addEventListener('click', () => {
         gameState = 'EDITING';
+        resetGarbageDeliveryBatch();
         gameHistoryLog = [];
         window.resetRecordedReplay?.();
         
@@ -789,26 +918,27 @@ document.getElementById('retryBtn').addEventListener('click', () => {
         loadGameSettings();
         gameHistoryLog = [];
         window.resetRecordedReplay?.();
-     
+        resetGarbageDeliveryBatch();
+        const p1_isAi_retry = document.getElementById('p1-ai-toggle').checked;
+        const p2_isAi_retry = document.getElementById('p2-ai-toggle').checked;
         let currentRunSettings = { ...gameSettings };
         gameStartTime = performance.now();
         let startTime = gameStartTime;
         const wasHoldDisabled = players[0].holdDisabled;
 
         players = [];
-        const p1_isAi_retry 
-= document.getElementById('p1-ai-toggle').checked;
-        const p2_isAi_retry = document.getElementById('p2-ai-toggle').checked;
+        const p1_aiModel_retry = playerAiModelId('p1');
+        const p2_aiModel_retry = playerAiModelId('p2');
 
         if (gameMode === '1P') {
-            const player = new Player('1', 0, keyBindings.p1, 0, p1_isAi_retry);
+            const player = new Player('1', 0, keyBindings.p1, 0, p1_isAi_retry, p1_aiModel_retry);
             player.holdDisabled = wasHoldDisabled;
             players.push(player);
         } else {
          
-   const p1 = new Player('1', 0, keyBindings.p1, 0, p1_isAi_retry);
+   const p1 = new Player('1', 0, keyBindings.p1, 0, p1_isAi_retry, p1_aiModel_retry);
             p1.holdDisabled = wasHoldDisabled;
-const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1, p2_isAi_retry);
+const p2 = new Player('2', PLAYER_CANVAS_WIDTH, keyBindings.p2, 1, p2_isAi_retry, p2_aiModel_retry);
             p2.holdDisabled = wasHoldDisabled;
             p1.opponent = p2;
             p2.opponent = p1;
@@ -1062,6 +1192,7 @@ p.ruleWorker.postMessage({
         const recordedBase64 = btoa(recordedBinary);
 
         gameState = 'EDITING';
+        resetGarbageDeliveryBatch();
         players.forEach(player => {
             player.aiWorker?.terminate();
             player.ruleWorker?.terminate();
@@ -1184,6 +1315,7 @@ p.ruleWorker.postMessage({
             
             
             gameState = 'EDITING';
+            resetGarbageDeliveryBatch();
             
             if (players.length > 0) {
                 players.forEach(p => {

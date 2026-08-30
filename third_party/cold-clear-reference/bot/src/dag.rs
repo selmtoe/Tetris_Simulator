@@ -77,7 +77,13 @@
 //! piece laid flat in the center is represented as `0x7F 0x1E 0x81 0x4D 0x81 0x7F 0x1E`.
 #![allow(dead_code)]
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "deterministic-search"))]
+use std::cell::Cell;
+#[cfg(any(target_arch = "wasm32", feature = "deterministic-search"))]
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
+#[cfg(any(target_arch = "wasm32", feature = "deterministic-search"))]
+use std::hash::BuildHasherDefault;
 use std::ops::ControlFlow;
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -95,6 +101,11 @@ use crate::evaluation::Evaluation;
 
 use self::ouroboros_impl_generation::BorrowedMutFields;
 
+#[cfg(any(target_arch = "wasm32", feature = "deterministic-search"))]
+type DedupMap<'a> = HashMap<SimplifiedBoard<'a>, u32, BuildHasherDefault<DefaultHasher>>;
+#[cfg(not(any(target_arch = "wasm32", feature = "deterministic-search")))]
+type DedupMap<'a> = HashMap<SimplifiedBoard<'a>, u32>;
+
 // The browser ABI is deliberately raw wasm (no wasm-bindgen glue), so wasm
 // uses a per-call seeded deterministic RNG instead of importing the browser's
 // crypto API. It preserves the same WeightedIndex/choose algorithm while
@@ -108,6 +119,26 @@ fn simulator_rng() -> rand::rngs::mock::StepRng {
     x ^= x >> 27;
     x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
     x ^= x >> 31;
+    rand::rngs::mock::StepRng::new(x, 0x9E37_79B9_7F4A_7C15)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "deterministic-search"))]
+thread_local! {
+    static SEARCH_RNG_STATE: Cell<u64> = Cell::new(0xA076_1D64_78BD_642F);
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "deterministic-search"))]
+pub(crate) fn seed_deterministic_search(seed: u64) {
+    SEARCH_RNG_STATE.with(|state| state.set(seed));
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "deterministic-search"))]
+fn simulator_rng() -> rand::rngs::mock::StepRng {
+    let x = SEARCH_RNG_STATE.with(|state| {
+        let current = state.get();
+        state.set(current.wrapping_add(0x9E37_79B9_7F4A_7C15));
+        current
+    });
     rand::rngs::mock::StepRng::new(x, 0x9E37_79B9_7F4A_7C15)
 }
 
@@ -154,7 +185,7 @@ struct Generation<E: 'static, R: 'static> {
 struct GenerationData<'c, E, R> {
     nodes: Vec<Node<'c, E>>,
     children: Children<'c, R>,
-    deduplicator: HashMap<SimplifiedBoard<'c>, u32>,
+    deduplicator: DedupMap<'c>,
 }
 
 enum Children<'c, R> {
@@ -224,7 +255,7 @@ impl<E: Evaluation<R> + 'static, R: Clone + 'static> DagState<E, R> {
                     },
                     // nothing new will ever be put in the root generation, so we won't bother to
                     // put anything in the hashmap.
-                    deduplicator: HashMap::new(),
+                    deduplicator: DedupMap::default(),
                 }
             }));
         // initialize the remaining known generations
@@ -279,9 +310,9 @@ impl<E: Evaluation<R> + 'static, R: Clone + 'static> DagState<E, R> {
                 .map(|(i, c)| evaluation(c).map_or(0, |e| e.weight(&min_eval, i)));
             // Choose a node randomly (the Monte-Carlo part)
             let sampler = rand::distributions::WeightedIndex::new(weights).ok()?;
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(any(target_arch = "wasm32", feature = "deterministic-search"))]
             let selected = simulator_rng().sample(sampler);
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(all(not(target_arch = "wasm32"), not(feature = "deterministic-search")))]
             let selected = thread_rng().sample(sampler);
             Some(&children[selected])
         })
@@ -312,9 +343,12 @@ impl<E: Evaluation<R> + 'static, R: Clone + 'static> DagState<E, R> {
                                     pick_from.push((p, &**c));
                                 }
                             }
-                            #[cfg(target_arch = "wasm32")]
+                            #[cfg(any(target_arch = "wasm32", feature = "deterministic-search"))]
                             let mut rng = simulator_rng();
-                            #[cfg(not(target_arch = "wasm32"))]
+                            #[cfg(all(
+                                not(target_arch = "wasm32"),
+                                not(feature = "deterministic-search")
+                            ))]
                             let mut rng = thread_rng();
                             let (piece, children) = *pick_from.choose(&mut rng).unwrap();
                             board.add_next_piece(piece);
@@ -881,7 +915,7 @@ impl<E: 'static, R: 'static> Generation<E, R> {
         Generation::new(Box::new(bumpalo::Bump::with_capacity(1 << 20)), |_| {
             GenerationData {
                 nodes: Vec::with_capacity(1 << 17),
-                deduplicator: HashMap::with_capacity(1 << 17),
+                deduplicator: DedupMap::with_capacity_and_hasher(1 << 17, Default::default()),
                 children: Children::Known(piece, Vec::with_capacity(1 << 17)),
             }
         })
@@ -891,7 +925,7 @@ impl<E: 'static, R: 'static> Generation<E, R> {
         Generation::new(Box::new(bumpalo::Bump::with_capacity(1 << 20)), |_| {
             GenerationData {
                 nodes: Vec::with_capacity(1 << 17),
-                deduplicator: HashMap::with_capacity(1 << 17),
+                deduplicator: DedupMap::with_capacity_and_hasher(1 << 17, Default::default()),
                 children: Children::Speculated(Vec::with_capacity(1 << 17)),
             }
         })

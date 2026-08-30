@@ -252,3 +252,131 @@
 #analyzeBtn[hidden] {
     display: none !important;
 }
+
+.ai-toggle-label {
+    position: relative;
+    cursor: pointer;
+    user-select: none;
+    touch-action: manipulation;
+}
+
+.ai-model-badge {
+    display: none;
+    margin-left: 2px;
+    padding: 3px 7px;
+    border: 1px solid #8585ff;
+    border-radius: 999px;
+    background: rgba(106, 106, 255, 0.16);
+    color: #c8c8ff !important;
+    font-family: var(--font-display);
+    font-size: 10px !important;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.debug-mode-enabled .ai-model-badge {
+    display: inline-flex;
+}
+
+.debug-mode-enabled .ai-toggle-label {
+    outline: 1px dashed rgba(133, 133, 255, 0.55);
+    outline-offset: 5px;
+}
+
+.ai-model-badge:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+.ai-model-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 320;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    box-sizing: border-box;
+    background: rgba(5, 5, 12, 0.82);
+    backdrop-filter: blur(5px);
+}
+
+.ai-model-modal.open {
+    display: flex;
+}
+
+.ai-model-dialog {
+    width: min(520px, 100%);
+    padding: 22px;
+    border: 2px solid #6a6aff;
+    border-radius: 12px;
+    box-sizing: border-box;
+    background: #1a1a2e;
+    box-shadow: 0 16px 55px rgba(0, 0, 0, 0.55);
+    text-align: center;
+}
+
+#ai-model-modal-player {
+    margin: 0 0 14px;
+    color: #d7d7ef;
+}
+
+.ai-model-options {
+    display: grid;
+    gap: 10px;
+    margin: 0 0 14px;
+}
+
+.ai-model-option {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    gap: 2px 10px;
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid #4b4b7c;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.045);
+    color: var(--font-color);
+    text-align: left;
+    font-family: var(--font-ui);
+}
+
+.ai-model-option:hover {
+    background: rgba(106, 106, 255, 0.18);
+}
+
+.ai-model-option.selected {
+    border-color: #8d8dff;
+    background: rgba(106, 106, 255, 0.24);
+    box-shadow: 0 0 12px rgba(106, 106, 255, 0.28);
+}
+
+.ai-model-option-marker {
+    grid-row: 1 / span 2;
+    align-self: center;
+    color: #9d9dff;
+    font-size: 18px;
+}
+
+.ai-model-option-name {
+    font-family: var(--font-display);
+    font-weight: 700;
+}
+
+.ai-model-option-description {
+    color: #b8b8ca;
+    font-size: 12px;
+}
+
+.ai-model-rule-note {
+    margin: 12px 0 16px;
+    color: #f0ce76;
+    font-size: 12px;
+}
+
+.ai-settings-model-hint {
+    max-width: 260px;
+    color: #b8b8ca !important;
+    font-size: 12px !important;
+    text-align: right;
+}

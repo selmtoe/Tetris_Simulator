@@ -1,0 +1,24 @@
+{
+  "schema": "kasane-guard-policy/v1",
+  "base_model": "models/base-model-evolved-v3.json",
+  "tempo_model": "models/guard-model-evolved-v1.json",
+  "agent_kind": "kasane",
+  "strict_base_policy": false,
+  "enable_tempo": true,
+  "enable_tank": false,
+  "enable_charge": false,
+  "maximum_wait_ms": 0,
+  "base_guard_margin": 10.0,
+  "base_depth": 2,
+  "base_beam_width": 12,
+  "forecast_nodes": 40,
+  "safety_fallback": "cold_clear",
+  "safety_gate": {
+    "max_headroom_loss": 0,
+    "max_hole_increase": 0,
+    "max_covered_increase": 0,
+    "max_bumpiness_increase": 2,
+    "max_accessible_hole_loss": 0,
+    "minimum_cancel_gain": 1
+  }
+}

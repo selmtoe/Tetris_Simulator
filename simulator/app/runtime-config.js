@@ -15,6 +15,44 @@ const CANVAS_HEIGHT = (BOARD_VISIBLE_HEIGHT + 0.5) * BLOCK_SIZE;
 const PLAYFIELD_X_OFFSET = HOLD_AREA_WIDTH + PADDING;
 const AXIS_THRESHOLD = 0.8;
 
+const AI_MODEL_CATALOG = Object.freeze({
+    'cold-clear': Object.freeze({
+        id: 'cold-clear',
+        name: 'Cold Clear',
+        shortName: 'Cold Clear',
+        description: '参照Rust/WASM版のCold Clear Standard'
+    }),
+    'kasane-basic': Object.freeze({
+        id: 'kasane-basic',
+        name: 'KASANE Basic v1',
+        shortName: 'KASANE Basic',
+        description: 'Base v3 + 相手予測・相殺外しTempoモデル'
+    }),
+    'kasane-guard': Object.freeze({
+        id: 'kasane-guard',
+        name: 'KASANE Guard v1',
+        shortName: 'KASANE Guard',
+        description: '相殺当て・おじゃま上昇回避・生存余白に特化した防御モデル'
+    }),
+    'kasane-base': Object.freeze({
+        id: 'kasane-base',
+        name: 'KASANE Base v3',
+        shortName: 'KASANE Base',
+        description: '戦術介入なしの学習済み基盤モデル'
+    })
+});
+
+function normalizeAiModelId(modelId) {
+    return Object.prototype.hasOwnProperty.call(AI_MODEL_CATALOG, modelId)
+        ? modelId
+        : 'cold-clear';
+}
+
+function playerAiModelId(playerId) {
+    const key = String(playerId).toLowerCase().replace('player', 'p');
+    return normalizeAiModelId(gameSettings.aiModels?.[key]);
+}
+
 // The previous Worker exposed hand-written opening templates.  Cold Clear's
 // Standard mode does not force those templates; opening books are a separate
 // optional feature and no book data is bundled here.
@@ -83,6 +121,7 @@ function generateDefaultLayout() {
 
 let gameSettings = {
     aiType: 'cold-clear',
+    aiModels: { p1: 'cold-clear', p2: 'cold-clear' },
     das: 140,
     arr: 30,
     sdf: 20,
@@ -176,6 +215,34 @@ const SRS_OFFSETS = { "JLSTZ": { "0_1": [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1,
 let players = [], gameMode = '1P', gameState = 'EDITING', lastTime = 0, mainCanvas, ctx, gameStartTime = 0;
 let gameHistoryLog = [];
 let analysisData = []; // { time, p1_R, p2_R, offsetLines }
+
+// Attacks locked during the same rendered frame are delivered together. This
+// preserves the simultaneous-fire rule needed by cancellation dodges: each
+// player offsets only packets that existed before that frame, then both new
+// packets cross instead of update order deciding the winner.
+let garbageDeliveryBatch = [];
+
+function queueGarbageDelivery(source, target, lines) {
+    if (!target || !Number.isFinite(lines) || lines <= 0) return;
+    garbageDeliveryBatch.push({ source, target, lines: Math.floor(lines) });
+}
+
+function flushGarbageDeliveryBatch() {
+    if (garbageDeliveryBatch.length === 0) return;
+    const deliveries = garbageDeliveryBatch;
+    garbageDeliveryBatch = [];
+    if (gameState !== 'PLAYING') return;
+    deliveries.forEach(delivery => {
+        if (players.includes(delivery.source) && players.includes(delivery.target) &&
+            !delivery.source.gameOver && !delivery.target.gameOver) {
+            delivery.target.addGarbage(delivery.lines);
+        }
+    });
+}
+
+function resetGarbageDeliveryBatch() {
+    garbageDeliveryBatch = [];
+}
 function updateAiDebugDisplay(payload) {
     const display = document.getElementById('ai-debug-display');
 

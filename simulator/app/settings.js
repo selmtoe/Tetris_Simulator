@@ -61,7 +61,15 @@ if (saved) {
             if (migrateFirstPortBudget) gameSettings.aiThinkTime = 180;
             if (!Number.isFinite(gameSettings.aiNodeLimit)) gameSettings.aiNodeLimit = 120000;
             gameSettings.aiType = 'cold-clear';
+            const savedModels = compatibleSettings.aiModels || {};
+            gameSettings.aiModels = {
+                p1: normalizeAiModelId(savedModels.p1),
+                p2: normalizeAiModelId(savedModels.p2)
+            };
 }
+        // PC0 belongs only to offline training/benchmarks. The live simulator
+        // intentionally has no persisted perfect-clear damage override.
+        delete gameSettings.perfectClearAttack;
     } catch(e) { console.error('Failed to load settings from localStorage:', e);
 }
 }
@@ -147,11 +155,14 @@ function populateGeneralSettingsTab() {
         let currentValue = gameSettings[key];
         if (key === 'garbageRandomness') currentValue *= 100;
         input.value = currentValue;
-        input.onchange = e => {
+        const updateSetting = e => {
             let val = parseFloat(e.target.value);
+            if (!Number.isFinite(val)) return;
             if (key === 'garbageRandomness') gameSettings[key] = Math.max(0, Math.min(100, val)) / 100;
             else gameSettings[key] = Math.max(settingDetails[key].min, Math.min(settingDetails[key].max, val));
         };
+        input.oninput = updateSetting;
+        input.onchange = updateSetting;
         item.append(label, input); list.appendChild(item);
     });
     
@@ -210,21 +221,13 @@ function populateAiSettingsTab() {
     const itemType = document.createElement('div');
     itemType.className = 'setting-item';
     const labelType = document.createElement('span');
-    labelType.textContent = 'AIの種類';
-    
-    const selectType = document.createElement('select');
-    selectType.id = 'ai-type-select';
-    selectType.style.minWidth = '150px';
-    selectType.style.backgroundColor = 'var(--primary-color)';
-    selectType.style.color = 'var(--font-color)';
-    selectType.style.border = '1px solid var(--border-color)';
-    selectType.style.padding = '5px';
-    selectType.style.borderRadius = '4px';
-    selectType.innerHTML = '<option value="cold-clear">Cold Clear</option>';
-    selectType.disabled = true;
-    gameSettings.aiType = 'cold-clear';
-
-    itemType.append(labelType, selectType);
+    labelType.textContent = 'AIモデル';
+    const modelHint = document.createElement('span');
+    modelHint.className = 'ai-settings-model-hint';
+    modelHint.textContent = gameSettings.debugEnabled
+        ? '編集画面のAI欄を長押しして、P1/P2別に選択'
+        : 'モデル選択はデバッグモードで利用できます';
+    itemType.append(labelType, modelHint);
     list.appendChild(itemType);
 
     const settingDetails = {
@@ -243,9 +246,13 @@ function populateAiSettingsTab() {
         input.type = 'number';
         Object.assign(input, settingDetails[key]);
         input.value = gameSettings[key];
-        input.onchange = e => {
-            gameSettings[key] = Math.max(settingDetails[key].min, Math.min(settingDetails[key].max, parseInt(e.target.value, 10)));
+        const updateSetting = e => {
+            const value = parseInt(e.target.value, 10);
+            if (!Number.isFinite(value)) return;
+            gameSettings[key] = Math.max(settingDetails[key].min, Math.min(settingDetails[key].max, value));
         };
+        input.oninput = updateSetting;
+        input.onchange = updateSetting;
                 item.append(label, input);
         list.appendChild(item);
     });

@@ -14,3 +14,4 @@ rand = "0.7.0"
 default = []
 fumen = []
 pcf = []
+deterministic-search = []

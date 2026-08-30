@@ -1,0 +1,34 @@
+{
+  "schema": "kasane-runtime-config/basic-v1",
+  "rules": {
+    "schema": "kasane-rules/ppt-50-750-1000-pc0-v1",
+    "input_interval_ms": 50,
+    "line_clear_delay_ms": 750,
+    "garbage_grace_ms": 1000,
+    "decision_latency_ms": 180,
+    "preview_count": 8,
+    "garbage_randomness": 0.3,
+    "perfect_clear_special_attack": 0,
+    "spawn_delay_ms": 0
+  },
+  "agent": {
+    "base_model": "models/base-model-evolved-v3.json",
+    "tempo_model": "config/tempo-model-bootstrap-v3.json",
+    "base_depth": 4,
+    "base_beam_width": 64,
+    "forecast_nodes": 300,
+    "maximum_wait_ms": 2000,
+    "dodge_wait_cap_ms": 750,
+    "dodge_finish_height": 13,
+    "dodge_safety_margin": 5,
+    "base_guard_margin": 6.0,
+    "enable_tempo": true,
+    "enable_tank": false,
+    "enable_charge": false,
+    "strict_base_policy": true
+  },
+  "sha256": {
+    "base_model": "098913bd7b4e8fcaaacedc51231c0c38560f429517fe1367e93b152533ea7ded",
+    "tempo_model": "7615bfbae5904b467c440ae968d0d7a596b9c0dc3ba505f75e99eda9231a1dc1"
+  }
+}

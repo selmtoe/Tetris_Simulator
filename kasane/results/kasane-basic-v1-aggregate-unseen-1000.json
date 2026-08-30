@@ -1,0 +1,59 @@
+{
+  "schema": "kasane-cheese12-aggregate/v1",
+  "description": "Two disjoint, unseen 500-game paired evaluations of KASANE-Basic-v1 versus the 1000-node Cold Clear baseline.",
+  "source_reports": [
+    {
+      "path": "results/kasane-basic-v1-final-unseen-500.json",
+      "seed": 5422712408173666305,
+      "sha256": "b14df2ffa49a22778a662b4a9fd70c394ac8d7761c0e5208a9fc34ed5c8afa87"
+    },
+    {
+      "path": "results/kasane-basic-v1-replication-unseen-500.json",
+      "seed": 5422712408173694977,
+      "sha256": "06c40c4522ccb24b6dd5e7d66e4d71e22093719a97d4a3b7ba46164defe06c27"
+    }
+  ],
+  "rules": {
+    "input_interval_ms": 50,
+    "line_clear_delay_ms": 750,
+    "garbage_grace_ms": 1000,
+    "perfect_clear_special_attack": 0
+  },
+  "scenario": "attacker empty vs Cold Clear defender on bottom 12 strict random-hole rows",
+  "games": 1000,
+  "cold_clear": {
+    "nodes": 1000,
+    "ko20_successes": 213,
+    "ko20_probability": 0.213,
+    "ko20_wilson_low": 0.1887465321165962,
+    "ko20_wilson_high": 0.239450107671992,
+    "ko30_successes": 582,
+    "ko30_probability": 0.582,
+    "ko30_wilson_low": 0.5511724096520939,
+    "ko30_wilson_high": 0.612199978979738,
+    "mean_attack_sent": 20.556
+  },
+  "kasane": {
+    "ko20_successes": 272,
+    "ko20_probability": 0.272,
+    "ko20_wilson_low": 0.2453307743262653,
+    "ko20_wilson_high": 0.3004142914291289,
+    "ko30_successes": 643,
+    "ko30_probability": 0.643,
+    "ko30_wilson_low": 0.6128087342717188,
+    "ko30_wilson_high": 0.6720967727325735,
+    "mean_attack_sent": 20.616,
+    "mean_waited_ms": 53.8,
+    "mean_cancellation_dodges": 0.145
+  },
+  "paired_ko20": {
+    "kasane_only_wins": 179,
+    "cold_clear_only_wins": 120,
+    "difference_percentage_points": 5.9,
+    "ci95_low_pp": 2.528943500039501,
+    "ci95_high_pp": 9.271056499960498,
+    "target_difference_pp": 15.0,
+    "target_lower_ci_pp": 10.0,
+    "passed_ambitious_target": false
+  }
+}

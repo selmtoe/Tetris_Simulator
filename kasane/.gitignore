@@ -1,0 +1,4 @@
+/target/
+/data/*.jsonl
+/tools/__pycache__/
+*.pyc

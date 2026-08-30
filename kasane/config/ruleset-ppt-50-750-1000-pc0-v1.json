@@ -1,0 +1,11 @@
+{
+  "schema": "kasane-rules/ppt-50-750-1000-pc0-v1",
+  "input_interval_ms": 50,
+  "line_clear_delay_ms": 750,
+  "garbage_grace_ms": 1000,
+  "decision_latency_ms": 180,
+  "preview_count": 8,
+  "garbage_randomness": 0.3,
+  "perfect_clear_special_attack": 0,
+  "spawn_delay_ms": 0
+}

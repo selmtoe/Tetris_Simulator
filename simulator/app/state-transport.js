@@ -292,8 +292,12 @@ lastTime = currentTime;
     ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
     if (gameState === 'PLAYING') {
 
-        
+        flushGarbageDeliveryBatch();
         players.forEach(p => p.update(dt || 0));
+        // Gravity/lock-delay placements may have fired during update(). Keep
+        // those attacks in the same frame, then expose them before next
+        // frame's AI observation.
+        flushGarbageDeliveryBatch();
         players.forEach(p => p.draw());
 
         // 分析用データサンプリング (約200ms毎)

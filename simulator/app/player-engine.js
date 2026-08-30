@@ -1,20 +1,21 @@
 /* Player lifecycle, movement, rendering, AI execution, garbage, and custom-rule integration. */
 
 class Player {
-    constructor(id, offsetX, keyBindings, padIndex, isAi = false) {
+    constructor(id, offsetX, keyBindings, padIndex, isAi = false, aiModel = 'cold-clear') {
         this.id = id;
         this.offsetX = offsetX; this.keyBindings = keyBindings; this.padIndex = padIndex;
         this.isAi = isAi;
+        this.aiModel = normalizeAiModelId(aiModel);
         this.isAiThinking = false;
         this.aiWorker = null;
         this.aiRequestId = 0;
         this.aiSearchInitialized = false;
         
         if (this.isAi) {
-            // AIタイプによって読み込むスクリプトを変える
-            // Use the reference Cold Clear Standard core compiled to raw WASM.
-            // The legacy JS port remains available for compatibility tests.
-            this.aiWorker = new Worker('./simulator/workers/cold-clear-wasm-worker.js');
+            const workerScript = this.aiModel.startsWith('kasane-')
+                ? './simulator/workers/kasane-wasm-worker.js?v=kasane-v2'
+                : './simulator/workers/cold-clear-wasm-worker.js';
+            this.aiWorker = new Worker(workerScript);
 
             this.aiWorker.onmessage = (e) => {
                 if (e.data && e.data.type === 'debug') {
@@ -23,7 +24,7 @@ class Player {
                         debugDisplay.dataset.status = e.data.message;
                         const count = debugDisplay.dataset.count || 0;
                         debugDisplay.style.display = 'block';
-                        debugDisplay.innerHTML = `Status: <span style="color: ${e.data.message.includes('RESET') ? '#ff4444' : '#44ff44'}">${e.data.message}</span><br>Nodes: ${count}`;
+                        debugDisplay.innerHTML = `P${this.id} [${AI_MODEL_CATALOG[this.aiModel].shortName}]<br>Status: <span style="color: ${e.data.message.includes('RESET') ? '#ff4444' : '#44ff44'}">${e.data.message}</span><br>Nodes: ${count}`;
                     }
                 } else if (e.data && e.data.type === 'nodeCount') {
                     const debugDisplay = document.getElementById('ai-tree-debug-display');
@@ -35,7 +36,7 @@ class Player {
                         debugDisplay.innerHTML = `Status: <span style="color: ${color}">${status}</span><br>Nodes: ${e.data.count}`;
                     }
                 } else if (e.data && e.data.type === 'error') {
-                    console.error('Cold Clear worker error:', e.data.message);
+                    console.error(`${AI_MODEL_CATALOG[this.aiModel].name} worker error:`, e.data.message);
                     this.aiSearchInitialized = false;
                     this.isAiThinking = false;
                 } else if (e.data && e.data.type === 'move') {
@@ -76,6 +77,9 @@ reset() {
         if (this.aiWorker) this.aiWorker.postMessage({ type: 'reset' });
         if (this.id === '1') analysisData = []; // P1リセット時に分析データも初期化
         this.pieceCount = 0;
+        this.averagePieceMs = 350;
+        this.measuredPieceCount = 0;
+        this.pieceStartedAtMs = performance.now();
         this.linesClearedLastLock = 0;
         // Records whether the active piece was selected through HOLD. An
         // empty HOLD still consumes the current piece and one NEXT piece.
@@ -128,13 +132,14 @@ this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
         // flag after calling spawnNewPiece when its slot was empty.
         this.holdActionUsed = false;
         this.player.pieceType = this.nextQueue.shift();
+        this.pieceStartedAtMs = performance.now();
         const newMino = this.minoGenerator.next().value;
         this.nextQueue.push(newMino);
         this.fullMinoSequence.push(newMino);
 
         // Initial previews are part of the first snapshot.  Every later
         // rolling preview is a real Cold Clear add_next_piece event.
-        if (this.isAi && this.aiSearchInitialized && this.aiWorker && ['I', 'O', 'T', 'L', 'J', 'S', 'Z'].includes(newMino)) {
+        if (this.isAi && this.aiModel === 'cold-clear' && this.aiSearchInitialized && this.aiWorker && ['I', 'O', 'T', 'L', 'J', 'S', 'Z'].includes(newMino)) {
             this.aiWorker.postMessage({ type: 'addNextPiece', piece: newMino });
         }
 
@@ -530,8 +535,10 @@ hold() {
                 }
             }
         } else {
+            const originalPieceStartedAtMs = this.pieceStartedAtMs;
             this.holdPiece = this.player.pieceType;
             this.spawnNewPiece();
+            this.pieceStartedAtMs = originalPieceStartedAtMs;
             // spawnNewPiece resets the per-piece flag for ordinary spawns,
             // but this replacement was selected by the HOLD action.
             this.holdActionUsed = true;
@@ -544,6 +551,14 @@ hold() {
 
     lockPiece() {
         if (!this.player.pieceType) return;
+
+        const measuredPieceMs = performance.now() - this.pieceStartedAtMs;
+        if (Number.isFinite(measuredPieceMs) && measuredPieceMs >= 0) {
+            this.averagePieceMs = this.measuredPieceCount === 0
+                ? Math.max(50, measuredPieceMs)
+                : this.averagePieceMs * 0.75 + Math.max(50, measuredPieceMs) * 0.25;
+            this.measuredPieceCount++;
+        }
 
         const replayOperation = {
             type: this.player.pieceType,
@@ -692,7 +707,7 @@ this.pendingGarbage -= offset; remainingAttack -= offset;
                 });
             }
 
-                if (remainingAttack > 0) { this.opponent.addGarbage(remainingAttack);
+                if (remainingAttack > 0) { queueGarbageDelivery(this, this.opponent, remainingAttack);
             }
 }
         
@@ -1034,6 +1049,96 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
         ctx.textBaseline = 'alphabetic';
     }
 
+    aiIncomingSnapshot(player, nowMs) {
+        const packets = player.garbageQueue
+            .filter(packet => packet.lines > 0)
+            .map(packet => ({
+                lines: packet.lines,
+                arrivalMs: Math.max(0, Math.floor(packet.receivedTime - gameStartTime))
+            }));
+        if (player.pendingGarbage > 0) {
+            packets.unshift({
+                lines: player.pendingGarbage,
+                arrivalMs: Math.max(0, Math.floor(nowMs - gameSettings.garbageGrace - 1))
+            });
+        }
+        return packets;
+    }
+
+    aiPhaseSnapshot(player, nowMs) {
+        if (player.isClearingLine) {
+            return {
+                kind: 'lineClear',
+                endsMs: Math.floor(nowMs + Math.max(0, player.lineClearDelayTimer))
+            };
+        }
+        if (player.player?.pieceType) {
+            return {
+                kind: 'moving',
+                startedMs: Math.max(0, Math.floor(player.pieceStartedAtMs - gameStartTime))
+            };
+        }
+        return { kind: 'ready' };
+    }
+
+    aiPlayerSnapshot(player, nowMs) {
+        const waitingForSpawn = player.isClearingLine || player.isSpawning;
+        return {
+            board: player.board,
+            currentPiece: waitingForSpawn ? player.nextQueue[0] : player.player.pieceType,
+            nextQueue: waitingForSpawn ? player.nextQueue.slice(1) : player.nextQueue,
+            holdPiece: player.holdPiece || null,
+            canHold: player.canHold && !player.holdDisabled,
+            isB2B: player.isB2B,
+            ren: player.ren,
+            incoming: this.aiIncomingSnapshot(player, nowMs),
+            phase: this.aiPhaseSnapshot(player, nowMs),
+            pieces: player.pieceCount,
+            averagePieceMs: Number.isFinite(player.averagePieceMs) ? player.averagePieceMs : 350
+        };
+    }
+
+    kasaneObservationSnapshot() {
+        const nowAbsoluteMs = performance.now();
+        const nowMs = Math.max(0, Math.floor(nowAbsoluteMs - gameStartTime));
+        const own = this.aiPlayerSnapshot(this, nowMs);
+        let opponent;
+        if (this.opponent) {
+            opponent = this.aiPlayerSnapshot(this.opponent, nowMs);
+        } else {
+            opponent = {
+                board: Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null)),
+                currentPiece: own.currentPiece,
+                nextQueue: own.nextQueue,
+                holdPiece: null,
+                canHold: true,
+                isB2B: false,
+                ren: -1,
+                incoming: [],
+                phase: { kind: 'ready' },
+                pieces: 0,
+                averagePieceMs: 350
+            };
+        }
+        return {
+            nowMs,
+            own,
+            opponent,
+            hasOpponent: Boolean(this.opponent),
+            model: this.aiModel,
+            rules: {
+                inputIntervalMs: Math.max(1, Math.floor(gameSettings.aiMoveDelay)),
+                lineClearDelayMs: Math.max(0, Math.floor(gameSettings.lineClearDelay)),
+                garbageGraceMs: Math.max(0, Math.floor(gameSettings.garbageGrace)),
+                decisionLatencyMs: Math.max(0, Math.floor(gameSettings.aiThinkTime)),
+                previewCount: Math.max(1, Math.floor(gameSettings.maxNext)),
+                garbageRandomness: Math.max(0, Math.min(1, Number(gameSettings.garbageRandomness) || 0)),
+                perfectClearSpecialAttack: 10,
+                spawnDelayMs: Math.max(0, Math.floor(gameSettings.spawnDelay))
+            }
+        };
+    }
+
 requestAiMove() {
         const requestId = ++this.aiRequestId;
         this.isAiThinking = true; 
@@ -1048,10 +1153,22 @@ requestAiMove() {
         };
         updateAiDebugDisplay(debugPayload);
 
-        const currentWeights = { ...gameSettings.aiWeights };
-        if (gameSettings.banPC) {
-            currentWeights.perfect_clear = -999;
+        if (this.aiModel.startsWith('kasane-')) {
+            if (this.aiWorker) {
+                this.aiSearchInitialized = true;
+                this.aiWorker.postMessage({
+                    type: 'analyze',
+                    requestId,
+                    model: this.aiModel,
+                    decisionLatencyMs: Math.max(0, Number(gameSettings.aiThinkTime) || 0),
+                    snapshot: this.kasaneObservationSnapshot()
+                });
+            }
+            return;
         }
+
+        const currentWeights = { ...gameSettings.aiWeights };
+        if (gameSettings.banPC) currentWeights.perfect_clear = -999;
 
         // Keep the real state separate: current is not the hold piece when
         // hold is empty.  Cold Clear can then preserve/re-root its DAG after
@@ -1410,6 +1527,12 @@ requestAiMove() {
         );
 
         if (!isCurrentExecution()) return;
+
+        const tacticalWaitMs = Math.max(0, Number(move.waitMs) || 0);
+        if (tacticalWaitMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, tacticalWaitMs));
+            if (!isCurrentExecution()) return;
+        }
 
         if (this.player.pieceType !== move.piece) {
             if (this.canHold) {

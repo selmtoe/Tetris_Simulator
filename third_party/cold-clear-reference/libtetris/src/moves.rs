@@ -208,7 +208,18 @@ pub fn find_moves(board: &Board, mut spawned: FallingPiece, mode: MovementMode) 
         lock_check(position, &mut locks, moves);
     }
 
-    locks.into_iter().map(|(_, v)| v).collect()
+    let mut result: Vec<_> = locks.into_iter().map(|(_, value)| value).collect();
+    #[cfg(feature = "deterministic-search")]
+    result.sort_by_key(|placement| {
+        (
+            placement.location.kind.0 as u8,
+            placement.location.kind.1 as u8,
+            placement.location.x,
+            placement.location.y,
+            placement.location.tspin as u8,
+        )
+    });
+    result
 }
 
 fn lock_check(piece: FallingPiece, locks: &mut HashMap<FallingPiece, Placement>, moves: InputList) {

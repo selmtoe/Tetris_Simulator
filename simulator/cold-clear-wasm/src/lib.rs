@@ -21,6 +21,11 @@ use opening_book::Book;
 use serde::{Deserialize, Serialize};
 use std::slice;
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "deterministic-search"))]
+pub fn seed_deterministic_search(seed: u64) {
+    dag::seed_deterministic_search(seed);
+}
+
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Options {
