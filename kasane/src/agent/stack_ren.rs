@@ -1077,10 +1077,11 @@ fn summarize_forecast(
         forecast
             .events
             .iter()
-            .filter(|event| event.lock_ms <= observation.now_ms.saturating_add(window))
-            .map(|event| {
+            .enumerate()
+            .filter(|(_, event)| event.lock_ms <= observation.now_ms.saturating_add(window))
+            .map(|(index, event)| {
                 if outgoing {
-                    event.outgoing_attack
+                    event.conservative_threat(index)
                 } else {
                     event.raw_attack
                 }
@@ -1097,14 +1098,18 @@ fn summarize_forecast(
         max_burst: forecast
             .events
             .iter()
-            .map(|event| event.outgoing_attack)
+            .enumerate()
+            .map(|(index, event)| event.conservative_threat(index))
             .max()
             .unwrap_or(0),
         eta_ms: forecast
             .events
             .iter()
-            .filter(|event| event.outgoing_attack > 0 && event.lock_ms >= observation.now_ms)
-            .map(|event| event.lock_ms - observation.now_ms)
+            .enumerate()
+            .filter(|(index, event)| {
+                event.conservative_threat(*index) > 0 && event.lock_ms >= observation.now_ms
+            })
+            .map(|(_, event)| event.lock_ms - observation.now_ms)
             .min()
             .unwrap_or(10_000),
     }
@@ -1426,6 +1431,45 @@ mod tests {
         assert_eq!(model.feature_names.len(), 56);
         assert_eq!(model.hidden_layers[0].bias.len(), 64);
         assert_eq!(model.hidden_layers[1].bias.len(), 32);
+    }
+
+    #[test]
+    fn forecast_summary_uses_raw_bound_after_first_event() {
+        let board = queued_board();
+        let observation = Observation {
+            now_ms: 0,
+            rules: crate::Rules::live(),
+            own: view(board.clone(), 0),
+            opponent: view(board.clone(), 0),
+        };
+        let action = legal_actions(&board).into_iter().next().unwrap();
+        let forecast = super::super::OpponentForecast {
+            action: Some(action.clone()),
+            lock_ms: 200,
+            raw_attack: 4,
+            outgoing_attack: 0,
+            confidence: 1.0,
+            events: vec![
+                super::super::ForecastEvent {
+                    action: action.clone(),
+                    lock_ms: 200,
+                    raw_attack: 4,
+                    outgoing_attack: 0,
+                },
+                super::super::ForecastEvent {
+                    action,
+                    lock_ms: 600,
+                    raw_attack: 3,
+                    outgoing_attack: 0,
+                },
+            ],
+        };
+
+        let summary = summarize_forecast(&observation, &forecast);
+        assert_eq!(summary.outgoing_500, 0);
+        assert_eq!(summary.outgoing_1000, 3);
+        assert_eq!(summary.max_burst, 3);
+        assert_eq!(summary.eta_ms, 600);
     }
 
     #[test]

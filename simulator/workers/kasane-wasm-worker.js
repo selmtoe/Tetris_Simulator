@@ -2,7 +2,7 @@
 
 'use strict';
 
-importScripts('./kasane-wasm.js?v=kasane-v8');
+importScripts('./kasane-wasm.js?v=kasane-v9');
 
 let bridge = null;
 let generation = 0;

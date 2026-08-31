@@ -31,7 +31,7 @@ vm.runInContext(`${source}\nglobalThis.PlayerUnderTest = Player;`, context);
 const Player = context.PlayerUnderTest;
 const emptyBoard = () => Array.from({ length: 40 }, () => Array(10).fill(null));
 
-function makeAi() {
+function makeAi(aiModel = 'cold-clear') {
     const messages = [];
     const player = Object.create(Player.prototype);
     Object.assign(player, {
@@ -40,6 +40,7 @@ function makeAi() {
         aiRequestId: 11,
         aiSearchInitialized: true,
         aiWorker: { postMessage: message => messages.push(message) },
+        aiModel,
         gameOver: false,
         board: emptyBoard(),
         player: { pieceType: 'T', x: 3, y: 20, rotation: 0 },
@@ -59,6 +60,14 @@ function makeAi() {
     assert(!risen.player.isAiThinking && !risen.player.aiSearchInitialized, 'Garbage rise retained stale AI state.');
     assert(risen.messages.some(message => message.type === 'reset'), 'Garbage rise did not reset the Cold Clear worker.');
     assert(risen.player.board.slice(-2).every(row => row[4] === null && row.filter(Boolean).length === 9), 'Garbage rows were not applied as expected.');
+
+    const kasaneRisen = makeAi('kasane-strategy');
+    kasaneRisen.player.pendingGarbage = 2;
+    kasaneRisen.player.riseGarbage();
+
+    assert(kasaneRisen.player.aiRequestId === 12, 'KASANE garbage rise did not invalidate the current AI request.');
+    assert(kasaneRisen.messages.some(message => message.type === 'invalidate'), 'KASANE garbage rise did not preserve strategy memory while invalidating search.');
+    assert(!kasaneRisen.messages.some(message => message.type === 'reset'), 'KASANE garbage rise reset strategy memory instead of only invalidating search.');
 
     const unreachable = makeAi();
     unreachable.player.findShortestPath_forAI = () => null;
@@ -91,7 +100,7 @@ function makeAi() {
     assert(valid.messages.some(message => message.type === 'commit'), 'Valid placement was not committed to Cold Clear.');
     assert(locks === 1, 'Valid placement was not locked exactly once.');
 
-    console.log(JSON.stringify({ passed: true, cases: 4 }, null, 2));
+    console.log(JSON.stringify({ passed: true, cases: 5 }, null, 2));
 })().catch(error => {
     console.error(error.stack || error);
     process.exitCode = 1;

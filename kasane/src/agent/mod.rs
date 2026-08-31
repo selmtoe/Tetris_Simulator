@@ -347,7 +347,6 @@ pub struct AgentController {
     cold_clear_fallback: Option<Box<AgentController>>,
     strategy_memory: strategy::StrategyMemory,
     stack_ren_memory: stack_ren::StackRenMemory,
-    #[cfg(any(target_arch = "wasm32", test))]
     cold_clear_session: Option<cc::ColdClearSession>,
 }
 
@@ -389,7 +388,6 @@ impl AgentController {
         } else {
             None
         };
-        #[cfg(any(target_arch = "wasm32", test))]
         let cold_clear_session = (kind == AgentKind::ColdClear).then(cc::ColdClearSession::default);
         Ok(Self {
             kind,
@@ -400,7 +398,6 @@ impl AgentController {
             cold_clear_fallback,
             strategy_memory: strategy::StrategyMemory::default(),
             stack_ren_memory: stack_ren::StackRenMemory::default(),
-            #[cfg(any(target_arch = "wasm32", test))]
             cold_clear_session,
         })
     }
@@ -425,7 +422,6 @@ impl AgentController {
         if let Some(fallback) = &mut self.cold_clear_fallback {
             fallback.invalidate_search();
         }
-        #[cfg(any(target_arch = "wasm32", test))]
         if let Some(session) = &mut self.cold_clear_session {
             session.reset();
         }
@@ -525,16 +521,9 @@ impl AgentController {
     }
 
     fn choose_cold_clear_proposal(&mut self, observation: &Observation) -> Option<SelectedAction> {
-        #[cfg(any(target_arch = "wasm32", test))]
-        {
-            self.cold_clear_session
-                .as_mut()
-                .and_then(|session| session.choose(observation, &self.config))
-        }
-        #[cfg(not(any(target_arch = "wasm32", test)))]
-        {
-            cc::choose_cold_clear(observation, &self.config)
-        }
+        self.cold_clear_session
+            .as_mut()
+            .and_then(|session| session.choose(observation, &self.config))
     }
 
     /// Advances the retained floor along the placement that actually reaches
@@ -551,10 +540,9 @@ impl AgentController {
         }
     }
 
-    fn commit_cold_clear_selection(&mut self, _selected: Option<&SelectedAction>) {
-        #[cfg(any(target_arch = "wasm32", test))]
+    fn commit_cold_clear_selection(&mut self, selected: Option<&SelectedAction>) {
         if let Some(session) = &mut self.cold_clear_session {
-            session.commit_selected(_selected.map(|selected| &selected.action));
+            session.commit_selected(selected.map(|selected| &selected.action));
         }
     }
 }

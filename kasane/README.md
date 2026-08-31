@@ -1,6 +1,6 @@
 # KASANE
 
-KASANE は、相手盤面と時間を読む対戦用テトリスAIです。最初のマイルストーンとして、独自の4手ビーム探索による火力基盤と、Cold Clearで相手の着火時刻を予測する相殺外しを実装しています。KASANE-Base自身の合法手探索・評価値はCold Clearから独立しています。Guard / Strategy v2 / Stack-REN v3は事故時の性能下限を守るため、同じ探索予算のCold Clear候補を安全床として取得し、KASANE独自の予測・NN・状態戦略が十分に有利な時だけ上書きします。
+KASANE は、相手盤面と時間を読む対戦用テトリスAIです。最初のマイルストーンとして、独自の4手ビーム探索による火力基盤と、Cold Clearで相手の着火時刻を予測する相殺外しを実装しています。KASANE-Base自身の合法手探索・評価値はCold Clearから独立しています。Guard / Strategy v2 / Stack-REN v3は事故時の性能下限を守るため、同じCold Clearノード予算の候補を安全床として取得し、KASANE独自の予測・NN・状態戦略が十分に有利な時だけ上書きします。同一なのは埋め込みCold Clear部分のノード数であり、KASANEの追加計算を含むequal CPUまたはequal wall-time比較ではありません。
 
 現在は、相殺外しを狙う `KASANE Basic v1`、相殺当て・生存を優先する `KASANE Guard v1`、攻撃/生存の専門家と状態付き相殺判断を統合した `KASANE Strategy v2`、Strategy v2を安全な土台として独立した積み込み状態機械を重ねる `KASANE Stack-REN v3` を収録しています。Stack-REN v3は2〜4列のウェルを対局中に固定し、蓄積、着火形の仕込み、発火、REN継続、撤退を別々に判断します。
 
@@ -56,11 +56,19 @@ Cold Clearの公開実装にある高さ層、穴・被り、凹凸、行遷移�
 
 ### KASANE Strategy v2（攻守の状態戦略）
 
-- Cold Clearと同じノード予算の永続フォールバックを常に保持し、攻撃・生存・RENの専門家を盤面高、穴負担、1000 ms以内の保留火力、相手余白から切り替えます。
+- 対戦相手と同じCold Clearノード予算の永続フォールバックを常に保持し、攻撃・生存・RENの専門家を盤面高、穴負担、1000 ms以内の保留火力、相手余白から切り替えます。この同一予算は安全床だけを指し、Base・相手予測・戦略判断の追加計算は含みません。
 - 火力をすぐ撃つ、相手着火まで止める、通常手を積みながら貯める、観測したおじゃま到着または上昇を合図に放つ、の状態を明示的に持ちます。
 - 予測だけを根拠に放出せず、実際のincoming edgeまたはgarbage-rise edgeを観測してから発火する安全側ゲートがあります。
 - 相殺は到着順FIFOで処理し、ライン消去中の750 msと1000 ms猶予をまたいで上昇するパケットを先読みします。
 - 方策は [config/kasane-strategy-v2.json](config/kasane-strategy-v2.json)、学習済みゲートは [models/strategy-model-v2.json](models/strategy-model-v2.json) です。
+
+#### 2026-09-01 runtime hardening
+
+- 各プレイヤーのCold Clear安全床を手ごとに作り直さず、盤面・HOLD・B2B・REN・Nextが一致する場合だけ世代DAGを継続します。不一致、未展開の上書き手、外部おじゃま上昇では破棄して再構築します。相手4手予測は独立性を保つため意図的にstatelessです。
+- 盤面40行、HOLD、Next、bag、B2B、REN、node数、incomingを明示的に混合した探索seedを、各bounded think直前に再設定します。並列worker数やforecast実行順で結果が変わらないことを回帰テストしています。
+- 自分と相手のおじゃまを到着順のpacket列として投影し、ライン消去750 ms中と次の予測lockまでに猶予を超えるpacketを先に上昇させます。最初の相手手は正確な送信火力、2手目以降は途中上昇の過小評価を避けるraw火力上限を使います。
+- Strategy v2（`AgentKind::Kasane`）では、埋め込みCold Clear安全床が10,000 nodes以上の場合、安全床とplacement keyが異なる候補をすべて棄却します。同一placementの待機・着火時刻変更と状態観測は残します。10,000 nodes未満では300-node用の配置専門家を使用でき、この制約は別エージェントのStack-RENには適用しません。
+- ベンチマークv5は固定サンプルHoeffding区間を優位判定に使い、旧Wald/WilsonとMcNemar感度検定は単独の採用根拠にしません。placement override数、実行exe、解決済み設定、モデル、Cold Clear DAG/evaluatorのSHA-256と上流revisionもJSONへ保存します。
 
 ### KASANE Stack-REN v3（独立した積み込み・発火モデル）
 
@@ -76,12 +84,12 @@ Cold Clearの公開実装にある高さ層、穴・被り、凹凸、行遷移�
 PowerShellで `kasane` ディレクトリから実行します。
 
 ```powershell
-cargo build --release
-cargo test --release
+cargo build --release --locked
+cargo test --release --locked --all-targets
 .\target\release\kasane.exe benchmark --games 500 --threads 24 --cold-clear-nodes 1000 --seed 5422712408173666305 --output results\reproduce-500.json
 ```
 
-旧 `benchmark` のBasic側既定値はBase v3、Tempo v3、depth 4、beam 64、予測300ノードです。Strategy v2 / Stack-REN v3の通常PC10対戦は `evaluate_duel` を使い、ブラウザ版と同じ通常手の自由な再順位付けが既定です。旧挙動の比較だけは `--strict-base-policy` を指定します。
+旧 `benchmark` のBasic側既定値はBase v3、Tempo v3、depth 4、beam 64、予測300ノードです。Strategy v2 / Stack-REN v3の通常PC10対戦は `evaluate_duel` を使います。Strategy v2の配置再順位付けは埋め込み安全床が10,000 nodes未満の時だけ有効で、10,000 nodes以上ではCold Clearと同一placementのタイミングだけを変更できます。このproduction配置床はStack-RENには適用されません。旧挙動の比較だけは `--strict-base-policy` を指定します。
 
 ```powershell
 .\target\release\evaluate_duel.exe --stack-ren --pairs 64 --threads 20 --cold-clear-nodes 300 --kasane-nodes 300 --strategy-policy config\kasane-stack-ren-v3.json --stack-ren-model models\stack-ren-model-v3.json --output results\stack-ren-holdout.json
@@ -96,10 +104,12 @@ cargo test --release
 
 Web対戦では通常のPC火力10を使い、AI思考時間・操作入力間隔・AI SDF・ライン消去時間・お邪魔猶予などは設定画面の値をそのまま使います。KASANEへは毎手、その実設定と、双方の盤面・Current/NEXT/HOLD・保留お邪魔の到着時刻・現在フェーズ・実測平均速度を渡します。同一描画フレームで発火した攻撃は、双方が既存パケットを相殺してから一括配送するため、相殺外しがプレイヤー更新順に潰されません。
 
+Web版KASANEの思考時間設定は同期探索のsearch tierを選ぶ上限であり、hard wall-time deadlineではありません。一方、standalone Cold Clear workerは実時間deadlineとbackground探索を使います。そのためWeb対戦は動作確認用であり、equal CPU・equal wall-timeの比較や下記native固定node優位の証明には使いません。
+
 モデルを更新した後は、リポジトリ直下から次のコマンドでブラウザ用WASMを再生成します。
 
 ```powershell
-cargo build --release --target wasm32-unknown-unknown --manifest-path simulator/kasane-wasm/Cargo.toml
+cargo build --release --locked --target wasm32-unknown-unknown --manifest-path simulator/kasane-wasm/Cargo.toml
 Copy-Item simulator/kasane-wasm/target/wasm32-unknown-unknown/release/simulator_kasane_wasm.wasm simulator/workers/kasane.wasm -Force
 ```
 
@@ -107,16 +117,28 @@ Copy-Item simulator/kasane-wasm/target/wasm32-unknown-unknown/release/simulator_
 
 主シナリオは「攻撃側は空盤面、守備側Cold Clearは下12段が各行で必ず穴位置の変わる完全穴バラ」です。両者は同じシードのミノ列・穴列を使うpaired比較です。
 
+2026-09-01 final-v2では、source・binary・policy・models・seed・sample数を実行前に凍結しました。PC特別火力0、20秒、両者のCold Clear探索部分を各300 nodesとしたnative固定node試験では、Cold Clearが685/2,048（33.45%）、KASANE Strategyが1,259/2,048（61.47%）でKOしました。paired差は **+28.03 pt**、固定サンプルHoeffding 95%区間は **+22.03〜+34.03 pt** で、優位判定と事前の実用目標（差15 pt、下限10 pt）をともに通過しました。discordant pairはKASANEのみ成功756、Cold Clearのみ成功182でした。完全な条件、凍結hash、判定制約は [final-v2事前プロトコル](results/night-final-v2-protocol-2026-09-01.md) と [final-v2 primary](results/night-final-v2-primary-300n-2048.json) にあります。
+
+この結果が示すのは、固定したCold Clear 1 Standard revisionに対する「PC0・完全穴バラ下12段・300 nodes・20秒native KO」の優位だけです。300 nodesでは10,000-node production配置床は無効で、KASANEの平均placement overrideは13.86279296875回/試合でした。したがって改善をタイミングだけに帰属させず、CC2、公式配布binary、equal CPU、equal wall-time、ブラウザworker、通常PC10対戦、高node設定へ一般化しません。
+
+final-v2の120,000-node stressでは、Cold ClearとKASANEがともに280/2,048（13.67%）で、全2,048 pairの成功/失敗が一致しました。policy・placement・wait overrideはいずれも0、paired差は0 pt、固定サンプルHoeffding 95%区間は **-6.00〜+6.00 pt** です。これはproduction配置床が作動した観測結果ですが、優位も統計的同等性も証明しません。完全レポートは [final-v2 120k stress](results/night-final-v2-stress-120k-2048.json) です。
+
+通常PC10のsecondary direct duelは、512 mirrored seed pair、1,024試合、各120,000 nodesで98勝98敗828時間切れ、all-match score 0.5、固定サンプルHoeffding 95%区間 **[0.43998, 0.56002]** でした。policy・placement・wait overrideはいずれも0です。この結果も優位または統計的同等性を示しません。機械可読値は [final-v2 通常PC10 direct](results/night-final-v2-direct-pc10-120k-512pairs.json)、全体のhash・検証・制約は [final-v2最終報告](results/night-final-v2-report-2026-09-01.md) にあります。
+
+### 過去の開発結果（探索的・v5採用判定には不使用）
+
+以下の旧表とpaired CIは、final-v2とは異なる候補・seed・統計手順による開発履歴です。
+
 | CC探索 | 未見試合 | 時間 | Cold Clear | KASANE | 差 | paired 95% CI |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1000 nodes | 1000 | 20秒 | 21.3% | 27.2% | **+5.9 pt** | **+2.53〜+9.27 pt** |
-| 1000 nodes | 1000 | 30秒 | 58.2% | 64.3% | **+6.1 pt** | — |
+| 1000 nodes | 1000 | 20秒 | 21.3% | 27.2% | +5.9 pt | +2.53〜+9.27 pt |
+| 1000 nodes | 1000 | 30秒 | 58.2% | 64.3% | +6.1 pt | — |
 | 1500 nodes | 500 | 20秒 | 23.6% | 22.4% | -1.2 pt | -5.87〜+3.47 pt |
-| 1500 nodes | 500 | 30秒 | 56.4% | 62.0% | **+5.6 pt** | — |
+| 1500 nodes | 500 | 30秒 | 56.4% | 62.0% | +5.6 pt | — |
 
-1000ノード合算では、20秒でKASANEだけが倒した試合179、Cold Clearだけが倒した試合120でした。KASANEの相殺外しは平均0.145回/試合、待機53.8 ms/試合です。平均送信はKASANE 20.616、Cold Clear 20.556でほぼ同じなので、改善の中心は総火力の水増しではなく送信タイミングです。
+旧Basic-v1の1000ノード合算では、20秒でKASANEだけが倒した試合179、Cold Clearだけが倒した試合120でした。相殺外しは平均0.145回/試合、待機53.8 ms/試合、平均送信はKASANE 20.616、Cold Clear 20.556でした。これは旧候補内の観測値で、final-v2 primaryの改善要因を説明するものではありません。
 
-Strategy v2を安全床にした最終Stack-REN v3を、PC報酬0・完全穴バラ下12段・20秒・同一未見256シード・各300 nodesで評価すると、Cold Clearは90/256（35.16%）、KASANEは125/256（48.83%）で、差は **+13.67 pt**、paired 95% CIは **+6.07〜+21.27 pt** でした。通常PC10の別未見64 mirrored pairsでは、Strategy v2が15勝13敗100時間切れ、積極的なStack-REN設定は悪化したため採用していません。公開既定値は入口96の安全側設定で、このサンプルではStack-REN開始0となりStrategy v2と同じ15勝13敗100時間切れです。したがって、下12段性能のCold Clear超えは確認済みですが、通常対戦でStack-RENがStrategy v2やCold Clearを上回る主張はまだしません。
+旧Stack-REN v3開発試験では、PC報酬0・完全穴バラ下12段・20秒・同一未見256シード・各300 nodesでCold Clear 90/256、KASANE 125/256を観測しました。通常PC10の別未見64 mirrored pairsではStrategy v2が15勝13敗100時間切れで、積極的なStack-REN設定は悪化したため不採用でした。公開既定値は入口96の安全側設定で、このサンプルではStack-REN開始0でした。これらは旧探索的結果であり、Stack-RENや通常対戦に関する現行の優位主張には使いません。
 
 完全レポート:
 
@@ -136,7 +158,7 @@ Guard完全レポート:
 - [学習・標準未使用holdout](results/guard-training-v1.json)
 - [強探索・完全別seed holdout](results/guard-holdout-strong-v1.json)
 
-当初置いた野心目標「20秒差+15 pt、paired CI下限+10 pt」はまだ未達です。Basic-v1は1000ノードCCには統計的に勝ち越しましたが、1500ノードCCの20秒指標では同等以上とまだ言えません。30秒の倒し切りでは両設定で上回っています。
+旧Basic-v1単体では、当初置いた野心目標「20秒差+15 pt、paired CI下限+10 pt」は未達でした。final-v2 primaryは上記の限定タスクでこの目標を通過していますが、その結果を旧Basic-v1、通常PC10、高node設定へ遡って適用しません。
 
 ## 学習系
 

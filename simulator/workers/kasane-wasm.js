@@ -58,7 +58,7 @@ class KasaneWasmBridge {
         }
     }
 
-    static async load(wasmPath = './kasane.wasm?v=kasane-v8') {
+    static async load(wasmPath = './kasane.wasm?v=kasane-v9') {
         const response = await fetch(wasmPath, { credentials: 'same-origin' });
         if (!response.ok) throw new Error(`KASANE WASM HTTP ${response.status}`);
         let result;

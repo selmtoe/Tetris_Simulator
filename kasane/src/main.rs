@@ -29,6 +29,8 @@ enum Command {
         seed: u64,
         #[arg(long, default_value_t = 1_500)]
         cold_clear_nodes: u32,
+        /// Node budget for KASANE's embedded Cold Clear safety floor. The
+        /// independent base search uses `base_depth` and `base_beam_width`.
         #[arg(long, default_value_t = 1_500)]
         kasane_nodes: u32,
         #[arg(long)]

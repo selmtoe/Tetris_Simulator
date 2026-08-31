@@ -238,6 +238,7 @@ enum SearchTier {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct SearchProfile {
+    cold_clear_nodes: u32,
     base_depth: usize,
     base_beam_width: usize,
     forecast_nodes: u32,
@@ -268,6 +269,7 @@ impl SearchTier {
     fn profile(self, is_guard: bool) -> SearchProfile {
         match (is_guard, self) {
             (false, Self::Economy) => SearchProfile {
+                cold_clear_nodes: 10_000,
                 base_depth: 3,
                 base_beam_width: 24,
                 forecast_nodes: 96,
@@ -276,6 +278,7 @@ impl SearchTier {
                 stack_action_limit: 24,
             },
             (false, Self::Standard) => SearchProfile {
+                cold_clear_nodes: 50_000,
                 base_depth: 4,
                 base_beam_width: 48,
                 forecast_nodes: 240,
@@ -284,6 +287,7 @@ impl SearchTier {
                 stack_action_limit: 32,
             },
             (false, Self::Enhanced) => SearchProfile {
+                cold_clear_nodes: 120_000,
                 base_depth: 4,
                 base_beam_width: 80,
                 forecast_nodes: 600,
@@ -292,6 +296,7 @@ impl SearchTier {
                 stack_action_limit: 48,
             },
             (false, Self::Maximum) => SearchProfile {
+                cold_clear_nodes: 200_000,
                 base_depth: 5,
                 base_beam_width: 112,
                 forecast_nodes: 1_200,
@@ -300,6 +305,7 @@ impl SearchTier {
                 stack_action_limit: 64,
             },
             (true, Self::Economy) => SearchProfile {
+                cold_clear_nodes: 10_000,
                 base_depth: 2,
                 base_beam_width: 12,
                 forecast_nodes: 40,
@@ -308,6 +314,7 @@ impl SearchTier {
                 stack_action_limit: 24,
             },
             (true, Self::Standard) => SearchProfile {
+                cold_clear_nodes: 50_000,
                 base_depth: 3,
                 base_beam_width: 24,
                 forecast_nodes: 128,
@@ -316,6 +323,7 @@ impl SearchTier {
                 stack_action_limit: 32,
             },
             (true, Self::Enhanced) => SearchProfile {
+                cold_clear_nodes: 120_000,
                 base_depth: 3,
                 base_beam_width: 48,
                 forecast_nodes: 320,
@@ -324,6 +332,7 @@ impl SearchTier {
                 stack_action_limit: 48,
             },
             (true, Self::Maximum) => SearchProfile {
+                cold_clear_nodes: 200_000,
                 base_depth: 4,
                 base_beam_width: 72,
                 forecast_nodes: 800,
@@ -932,14 +941,13 @@ fn configured_agent(snapshot: &BrowserSnapshot) -> (AgentKind, AgentConfig) {
             config.stack_ren_action_limit = profile.stack_action_limit;
         }
 
-        if let Some(nodes) = bounded_nodes {
-            // Guard's embedded Cold Clear fallback now receives the same UI
-            // node ceiling as standalone Cold Clear. `kasane_nodes` is kept
-            // in sync for forward compatibility even though the current Base
-            // beam search is governed by depth/width.
-            config.cold_clear_nodes = nodes;
-            config.kasane_nodes = nodes;
-        }
+        // Both UI controls are ceilings. A tiny think-time tier must not force
+        // the synchronous embedded floor to a much larger node-slider value.
+        let floor_nodes = bounded_nodes
+            .unwrap_or(profile.cold_clear_nodes)
+            .min(profile.cold_clear_nodes);
+        config.cold_clear_nodes = floor_nodes;
+        config.kasane_nodes = floor_nodes;
     }
 
     let kind = if is_stack_ren {
@@ -1273,6 +1281,8 @@ mod tests {
         time_limited.search_think_time_ms = Some(8);
         time_limited.node_limit = Some(200_000);
         let (_, time_config) = configured_agent(&time_limited);
+        assert_eq!(time_config.cold_clear_nodes, 10_000);
+        assert_eq!(time_config.kasane_nodes, 10_000);
         assert_eq!(time_config.base_depth, 3);
         assert_eq!(time_config.base_beam_width, 24);
         assert_eq!(time_config.forecast_nodes, 96);
@@ -1281,6 +1291,8 @@ mod tests {
         node_limited.search_think_time_ms = Some(200);
         node_limited.node_limit = Some(5_000);
         let (_, node_config) = configured_agent(&node_limited);
+        assert_eq!(node_config.cold_clear_nodes, 5_000);
+        assert_eq!(node_config.kasane_nodes, 5_000);
         assert_eq!(node_config.base_depth, 3);
         assert_eq!(node_config.base_beam_width, 24);
         assert_eq!(node_config.forecast_nodes, 96);

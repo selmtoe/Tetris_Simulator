@@ -433,7 +433,16 @@ fn projection_at(
 ) -> TimingProjection {
     let raw = attack_with_pc(&action.lock, observation.rules.perfect_clear_special_attack);
     let mut packets = observation.own.incoming.clone();
-    let mut opponent_pending = observation.opponent.incoming_total();
+    let mut opponent_packets = observation.opponent.incoming.clone();
+    let mut opponent_risen = 0_u32;
+    if let super::PhaseView::LineClear { ends_ms } = observation.opponent.phase {
+        // The engine raises mature garbage before scheduling the next piece.
+        opponent_risen += drain_matured_packets(
+            &mut opponent_packets,
+            ends_ms,
+            observation.rules.garbage_grace_ms,
+        );
+    }
     let horizon_ms = target_lock_ms.unwrap_or(lock_ms).max(lock_ms);
     let mut fired = false;
     let mut sent = 0;
@@ -452,7 +461,12 @@ fn projection_at(
             cancelled = raw.min(incoming_at_lock);
             sent = raw - cancelled;
             packets = packet_lines_after_cancel(&packets, raw);
-            opponent_pending += sent;
+            if sent > 0 {
+                opponent_packets.push(IncomingPacket {
+                    lines: sent,
+                    arrival_ms: lock_ms,
+                });
+            }
             fired = true;
         }
 
@@ -461,12 +475,18 @@ fn projection_at(
             // Simultaneous lock: each attack sees only packets that existed
             // before this timestamp. New leftovers are delivered afterwards.
             incoming_at_lock = packets.iter().map(|packet| packet.lines).sum();
+            let opponent_pending = packet_total(&opponent_packets);
             let opponent_outgoing = event.raw_attack.saturating_sub(opponent_pending);
-            opponent_pending = opponent_pending.saturating_sub(event.raw_attack);
+            opponent_packets = packet_lines_after_cancel(&opponent_packets, event.raw_attack);
             cancelled = raw.min(incoming_at_lock);
             sent = raw - cancelled;
             packets = packet_lines_after_cancel(&packets, raw);
-            opponent_pending += sent;
+            if sent > 0 {
+                opponent_packets.push(IncomingPacket {
+                    lines: sent,
+                    arrival_ms: lock_ms,
+                });
+            }
             if opponent_outgoing > 0 {
                 packets.push(IncomingPacket {
                     lines: opponent_outgoing,
@@ -477,12 +497,24 @@ fn projection_at(
                 target_attack = event.raw_attack;
                 target_outgoing = opponent_outgoing;
             }
+            let opponent_rise_ms = event.lock_ms
+                + if event.action.lock.cleared_lines.is_empty() {
+                    0
+                } else {
+                    observation.rules.line_clear_delay_ms
+                };
+            opponent_risen += drain_matured_packets(
+                &mut opponent_packets,
+                opponent_rise_ms,
+                observation.rules.garbage_grace_ms,
+            );
             fired = true;
             continue;
         }
 
+        let opponent_pending = packet_total(&opponent_packets);
         let opponent_outgoing = event.raw_attack.saturating_sub(opponent_pending);
-        opponent_pending = opponent_pending.saturating_sub(event.raw_attack);
+        opponent_packets = packet_lines_after_cancel(&opponent_packets, event.raw_attack);
         if opponent_outgoing > 0 {
             packets.push(IncomingPacket {
                 lines: opponent_outgoing,
@@ -493,6 +525,17 @@ fn projection_at(
             target_attack = event.raw_attack;
             target_outgoing = opponent_outgoing;
         }
+        let opponent_rise_ms = event.lock_ms
+            + if event.action.lock.cleared_lines.is_empty() {
+                0
+            } else {
+                observation.rules.line_clear_delay_ms
+            };
+        opponent_risen += drain_matured_packets(
+            &mut opponent_packets,
+            opponent_rise_ms,
+            observation.rules.garbage_grace_ms,
+        );
     }
 
     if !fired {
@@ -500,7 +543,12 @@ fn projection_at(
         cancelled = raw.min(incoming_at_lock);
         sent = raw - cancelled;
         packets = packet_lines_after_cancel(&packets, raw);
-        opponent_pending += sent;
+        if sent > 0 {
+            opponent_packets.push(IncomingPacket {
+                lines: sent,
+                arrival_ms: lock_ms,
+            });
+        }
     }
     if target_lock_ms.is_none() {
         target_attack = forecast.raw_attack;
@@ -530,7 +578,7 @@ fn projection_at(
 
     TimingProjection {
         sent,
-        pressure: opponent_pending,
+        pressure: packet_total(&opponent_packets).saturating_add(opponent_risen),
         cancelled,
         incoming_at_lock,
         rise,
@@ -543,6 +591,22 @@ fn projection_at(
         predicted_outgoing: target_outgoing,
         target_lock_ms: target,
     }
+}
+
+fn packet_total(packets: &[IncomingPacket]) -> u32 {
+    packets.iter().map(|packet| packet.lines).sum()
+}
+
+fn drain_matured_packets(packets: &mut Vec<IncomingPacket>, at_ms: u64, grace_ms: u64) -> u32 {
+    let mut risen = 0_u32;
+    packets.retain(|packet| {
+        let matured = at_ms.saturating_sub(packet.arrival_ms) > grace_ms;
+        if matured {
+            risen = risen.saturating_add(packet.lines);
+        }
+        !matured
+    });
+    risen
 }
 
 fn classify_intent(
@@ -657,5 +721,103 @@ mod tests {
         assert_eq!(simultaneous.sent, 4);
         assert_eq!(simultaneous.predicted_outgoing, 4);
         assert!(simultaneous.fires_simultaneously);
+    }
+
+    #[test]
+    fn opponent_line_clear_rise_cannot_cancel_its_next_attack() {
+        let board = tetris_well_board();
+        let action = legal_actions(&board)
+            .into_iter()
+            .find(|candidate| pc0_attack(&candidate.lock) == 4)
+            .expect("vertical I must complete the four-row well");
+        let own = PlayerView {
+            board: board.clone(),
+            can_hold: true,
+            incoming: Vec::new(),
+            phase: PhaseView::Ready,
+            pieces: 0,
+            average_piece_ms: 300.0,
+        };
+        let mut opponent = own.clone();
+        opponent.incoming = vec![IncomingPacket {
+            lines: 4,
+            arrival_ms: 0,
+        }];
+        opponent.phase = PhaseView::LineClear { ends_ms: 1_001 };
+        let observation = Observation {
+            now_ms: 500,
+            rules: Rules::pinned(),
+            own,
+            opponent,
+        };
+        let forecast = OpponentForecast {
+            action: Some(action.clone()),
+            lock_ms: 1_200,
+            raw_attack: 4,
+            outgoing_attack: 0,
+            confidence: 1.0,
+            events: vec![ForecastEvent {
+                action: action.clone(),
+                lock_ms: 1_200,
+                raw_attack: 4,
+                outgoing_attack: 0,
+            }],
+        };
+
+        let projection = projection_at(&observation, &action, &forecast, 1_200, Some(1_200));
+        assert_eq!(projection.predicted_outgoing, 4);
+    }
+
+    #[test]
+    fn opponent_pending_matures_between_forecast_clears() {
+        let board = tetris_well_board();
+        let action = legal_actions(&board)
+            .into_iter()
+            .find(|candidate| pc0_attack(&candidate.lock) == 4)
+            .expect("vertical I must complete the four-row well");
+        let own = PlayerView {
+            board: board.clone(),
+            can_hold: true,
+            incoming: Vec::new(),
+            phase: PhaseView::Ready,
+            pieces: 0,
+            average_piece_ms: 300.0,
+        };
+        let mut opponent = own.clone();
+        opponent.incoming = vec![IncomingPacket {
+            lines: 6,
+            arrival_ms: 0,
+        }];
+        opponent.phase = PhaseView::Moving { started_ms: 0 };
+        let observation = Observation {
+            now_ms: 0,
+            rules: Rules::pinned(),
+            own,
+            opponent,
+        };
+        let forecast = OpponentForecast {
+            action: Some(action.clone()),
+            lock_ms: 300,
+            raw_attack: 2,
+            outgoing_attack: 0,
+            confidence: 1.0,
+            events: vec![
+                ForecastEvent {
+                    action: action.clone(),
+                    lock_ms: 300,
+                    raw_attack: 2,
+                    outgoing_attack: 0,
+                },
+                ForecastEvent {
+                    action: action.clone(),
+                    lock_ms: 1_200,
+                    raw_attack: 4,
+                    outgoing_attack: 0,
+                },
+            ],
+        };
+
+        let projection = projection_at(&observation, &action, &forecast, 1_200, Some(1_200));
+        assert_eq!(projection.predicted_outgoing, 4);
     }
 }

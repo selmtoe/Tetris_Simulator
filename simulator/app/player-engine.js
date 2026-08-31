@@ -13,7 +13,7 @@ class Player {
         
         if (this.isAi) {
             const workerScript = this.aiModel.startsWith('kasane-')
-                ? './simulator/workers/kasane-wasm-worker.js?v=kasane-v8'
+                ? './simulator/workers/kasane-wasm-worker.js?v=kasane-v9'
                 : './simulator/workers/cold-clear-wasm-worker.js';
             this.aiWorker = new Worker(workerScript);
 

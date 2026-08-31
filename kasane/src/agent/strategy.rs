@@ -165,6 +165,15 @@ enum SelectionMode {
     ChargeReleaseGarbageRiseEdge,
 }
 
+/// The learned placement experts were calibrated against the 300-node floor.
+/// Once the embedded Cold Clear search reaches a production-strength budget,
+/// KASANE may still change *when* that exact placement locks, but it must not
+/// replace the placement itself. This keeps the timing model while preventing
+/// a low-budget value head from degrading a much stronger safety floor.
+fn high_budget_allows_placement(cold_clear_nodes: u32, same_placement: bool) -> bool {
+    cold_clear_nodes < 10_000 || same_placement
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct StateSignals {
     incoming_edge: IncomingObservation,
@@ -260,7 +269,10 @@ pub(crate) fn choose_strategy_v2(
     );
     let baseline_score = model.score(&baseline_features);
 
-    if mode == SelectionMode::Neutral && config.strategy_enable_ren {
+    if mode == SelectionMode::Neutral
+        && config.strategy_enable_ren
+        && config.cold_clear_nodes < 10_000
+    {
         if let Some(selected) = choose_ren_expert(
             observation,
             config,
@@ -365,6 +377,9 @@ pub(crate) fn choose_strategy_v2(
 
     for action in selected_actions {
         let same_placement = action.key() == fallback_key;
+        if !high_budget_allows_placement(config.cold_clear_nodes, same_placement) {
+            continue;
+        }
         let base_lock_ms = lock_ms(observation, &action, 0);
         let context = candidate_context(observation, base_model, &action, &mut contexts);
         let raw_attack =
@@ -620,13 +635,10 @@ fn choose_attack_expert(
     contexts: &mut HashMap<ActionKey, CandidateContext>,
 ) -> Option<SelectedAction> {
     // The placement expert was trained/calibrated against a 300-node floor.
-    // At production budgets Cold Clear's retained 120k-node DAG is a materially
-    // stronger placement oracle; replacing it reduced browser throughput to
-    // 0.262 attack/move. Keep the learned timing/REN/release layers, but do not
-    // run this lower-budget placement expert over a high-confidence floor.
-    if config.cold_clear_nodes >= 10_000 {
-        return None;
-    }
+    // At production budgets the retained CC DAG remains the ordinary oracle;
+    // the legacy expert may replace it only through the narrow hard-finisher
+    // path and explicit sent-pressure/safety checks below.
+    let high_confidence_floor = config.cold_clear_nodes >= 10_000;
     let hole_burden = opponent.holes.saturating_add(opponent.covered / 2);
     // Height alone is not enough to justify abandoning the equal-node CC
     // floor. A clean high stack can downstack efficiently; covered garbage or
@@ -642,18 +654,16 @@ fn choose_attack_expert(
     let staying = memory.expert_mode == ExpertMode::Attack
         && vulnerable
         && opponent.max_height >= config.strategy_attack_stay_height;
-    let forecast_attack = forecast
-        .events
-        .iter()
-        .filter(|event| {
-            event.lock_ms
-                <= observation
-                    .now_ms
-                    .saturating_add(config.strategy_release_window_ms)
-        })
-        .map(|event| event.raw_attack)
-        .sum::<u32>();
+    let forecast_attack = forecast_threat_attack_until(
+        forecast,
+        observation
+            .now_ms
+            .saturating_add(config.strategy_release_window_ms),
+    );
     let forecast_quiet = forecast_attack <= 3;
+    if high_confidence_floor && (!hard_finish || !forecast_quiet) {
+        return None;
+    }
     let due_1000 = matured_lines(
         &observation.own.incoming,
         observation.now_ms.saturating_add(1_000),
@@ -667,9 +677,10 @@ fn choose_attack_expert(
         return None;
     }
 
-    // This is the exact shipped Basic expert used by the +16.41 pp bottom-12
-    // result: Base-v3 loaded by the controller, strict legacy Tempo weights,
-    // charge/tank disabled and the original 2 s timing horizon.
+    // This is the legacy PC0 bottom-12 specialist: Base-v3 loaded by the
+    // controller, strict Tempo weights, charge/tank disabled and the original
+    // 2 s timing horizon. High-budget use still has to beat the retained CC
+    // action on projected sent pressure without weakening the safety gate.
     let mut attack_config = config.clone();
     attack_config.strict_base_policy = true;
     attack_config.enable_charge = false;
@@ -678,6 +689,10 @@ fn choose_attack_expert(
     attack_config.base_guard_margin = 6.0;
     let legacy = LEGACY_ATTACK_MODEL.get_or_init(TempoModel::default);
     let mut selected = choose_kasane(observation, &attack_config, base_model, legacy)?;
+    let same_placement = selected.action.key() == cc_floor.action.key();
+    if !high_budget_allows_placement(config.cold_clear_nodes, same_placement) {
+        return None;
+    }
     let candidate_safety = project_action_safety(observation, &selected);
     if candidate_safety.locked_out
         || candidate_safety.headroom_after_rise < config.strategy_attack_min_headroom
@@ -696,6 +711,18 @@ fn choose_attack_expert(
         selected_lock_ms,
         base_lock_ms,
     );
+    let raw_attack = attack_with_pc(
+        &selected.action.lock,
+        observation.rules.perfect_clear_special_attack,
+    );
+    if high_confidence_floor
+        && (raw_attack == 0
+            || projection.sent <= cc_projection.sent
+            || projection.rise > cc_projection.rise
+            || !safety_gate_accepts(observation, &selected, cc_floor, config))
+    {
+        return None;
+    }
     let features = strategy_features(
         observation,
         forecast,
@@ -716,7 +743,6 @@ fn choose_attack_expert(
         resource_score(&context) - resource_score(cc_context),
     );
     let expert_score = model.score(&features);
-    let same_placement = selected.action.key() == cc_floor.action.key();
     // Entering the attack expert requires the calibrated conservative gate.
     // Once a genuinely constrained high board has already triggered it, keep
     // enough hysteresis to finish the downstack instead of handing tempo back
@@ -739,10 +765,6 @@ fn choose_attack_expert(
     // Preserve Basic's placement/raw attack. When safe, move only the lock to
     // the opponent's exact fire timestamp so both new packets bypass old-queue
     // cancellation and Basic's raw output becomes sent pressure.
-    let raw_attack = attack_with_pc(
-        &selected.action.lock,
-        observation.rules.perfect_clear_special_attack,
-    );
     let mut selected_projection = projection;
     if selected.wait_ms == 0 && raw_attack > 0 && vulnerable {
         let immediate_safety = candidate_safety;
@@ -802,6 +824,18 @@ fn choose_attack_expert(
         }
     }
 
+    // Revalidate the final action after the optional hold-fire rewrite. Keep
+    // these invariants local instead of relying on transitive conditions in
+    // the candidate loop, so future timing changes cannot weaken the 120k
+    // floor silently.
+    if high_confidence_floor
+        && (selected_projection.sent <= cc_projection.sent
+            || selected_projection.rise > cc_projection.rise
+            || !safety_gate_accepts(observation, &selected, cc_floor, config))
+    {
+        return None;
+    }
+
     selected.policy_override = classify_override(
         same_placement,
         selected.wait_ms,
@@ -816,6 +850,35 @@ fn choose_attack_expert(
     selected.score = expert_score;
     memory.expert_mode = ExpertMode::Attack;
     Some(selected)
+}
+
+/// Estimate attacks that can threaten us within the forecast horizon. The
+/// first event's cancellation is exact for the current pending queue. Later
+/// events use raw attack as a conservative bound because the lightweight
+/// forecast does not yet simulate pending-garbage maturation and rises between
+/// locks; trusting its carried `outgoing_attack` would undercount those spikes.
+fn forecast_threat_attack_until(forecast: &OpponentForecast, deadline_ms: u64) -> u32 {
+    forecast
+        .events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.lock_ms <= deadline_ms)
+        .map(|(index, event)| event.conservative_threat(index))
+        .sum()
+}
+
+fn forecast_threat_attack_eta_ms(forecast: &OpponentForecast, now_ms: u64) -> u64 {
+    forecast
+        .events
+        .iter()
+        .enumerate()
+        .filter(|(index, event)| {
+            let threat = event.conservative_threat(*index);
+            threat > 0 && event.lock_ms >= now_ms
+        })
+        .map(|(_, event)| event.lock_ms - now_ms)
+        .min()
+        .unwrap_or(u64::MAX)
 }
 
 fn state_signals(
@@ -847,13 +910,7 @@ fn state_signals(
             }
         }
     }
-    let opponent_attack_eta_ms = forecast
-        .events
-        .iter()
-        .filter(|event| event.raw_attack > 0 && event.lock_ms >= observation.now_ms)
-        .map(|event| event.lock_ms - observation.now_ms)
-        .min()
-        .unwrap_or(u64::MAX);
+    let opponent_attack_eta_ms = forecast_threat_attack_eta_ms(forecast, observation.now_ms);
     let due_soon = matured_lines(
         &observation.own.incoming,
         observation.now_ms.saturating_add(500),
@@ -1157,14 +1214,8 @@ fn choose_ren_expert(
     let opportunistic_continuation =
         existing_combo >= 2 && opponent_vulnerable && board_has_resources;
     let continuing = memory.ren_committed || opportunistic_continuation;
-    let opponent_attack_1000 = forecast
-        .events
-        .iter()
-        .filter(|event| {
-            event.raw_attack > 0 && event.lock_ms <= observation.now_ms.saturating_add(1_000)
-        })
-        .map(|event| event.raw_attack)
-        .sum::<u32>();
+    let opponent_attack_1000 =
+        forecast_threat_attack_until(forecast, observation.now_ms.saturating_add(1_000));
     if !continuing && (!board_has_resources || !opponent_vulnerable) {
         return None;
     }
@@ -1726,10 +1777,11 @@ fn strategy_features(
         forecast
             .events
             .iter()
-            .filter(|event| event.lock_ms <= observation.now_ms.saturating_add(horizon_ms))
-            .map(|event| {
+            .enumerate()
+            .filter(|(_, event)| event.lock_ms <= observation.now_ms.saturating_add(horizon_ms))
+            .map(|(index, event)| {
                 if outgoing {
-                    event.outgoing_attack
+                    event.conservative_threat(index)
                 } else {
                     event.raw_attack
                 }
@@ -1739,7 +1791,8 @@ fn strategy_features(
     let forecast_max_burst = forecast
         .events
         .iter()
-        .map(|event| event.outgoing_attack)
+        .enumerate()
+        .map(|(index, event)| event.conservative_threat(index))
         .max()
         .unwrap_or(0);
     let first_attack_seconds = forecast
@@ -2022,6 +2075,15 @@ mod tests {
     }
 
     #[test]
+    fn production_budget_keeps_the_cold_clear_placement() {
+        assert!(high_budget_allows_placement(300, false));
+        assert!(high_budget_allows_placement(9_999, false));
+        assert!(!high_budget_allows_placement(10_000, false));
+        assert!(!high_budget_allows_placement(120_000, false));
+        assert!(high_budget_allows_placement(120_000, true));
+    }
+
+    #[test]
     fn v2_always_has_equal_node_cc_fallback() {
         let board = queued_board();
         let observation = Observation {
@@ -2074,9 +2136,22 @@ mod tests {
     }
 
     #[test]
-    fn wait_lattice_contains_counter_and_dodge_neighbours() {
-        let board = queued_board();
-        let action = legal_actions(&board)[0].clone();
+    fn cancelled_forecast_attack_is_not_a_threat_but_remains_a_wait_target() {
+        let mut board = Board::new();
+        let mut field = [[false; 10]; 40];
+        for row in field.iter_mut().take(4) {
+            for (x, cell) in row.iter_mut().enumerate() {
+                *cell = x != 4;
+            }
+        }
+        board.set_field(field);
+        for piece in [Piece::I, Piece::O, Piece::T, Piece::S, Piece::Z] {
+            board.add_next_piece(piece);
+        }
+        let action = legal_actions(&board)
+            .into_iter()
+            .find(|action| attack_with_pc(&action.lock, 0) > 0)
+            .expect("vertical I must clear the four-row well");
         let observation = Observation {
             now_ms: 0,
             rules: Rules::pinned(),
@@ -2103,15 +2178,27 @@ mod tests {
             action: action.clone(),
             lock_ms: base + 300,
             raw_attack: 4,
-            outgoing_attack: 4,
+            outgoing_attack: 0,
         });
+        forecast.events.push(super::super::ForecastEvent {
+            action: action.clone(),
+            lock_ms: base + 600,
+            raw_attack: 2,
+            // The lightweight forecast can still show cancellation here even
+            // though queued garbage may rise before this later lock. Threat
+            // estimation must therefore retain the raw conservative bound.
+            outgoing_attack: 0,
+        });
+
+        assert_eq!(forecast_threat_attack_until(&forecast, base + 300), 0);
+        assert_eq!(forecast_threat_attack_until(&forecast, base + 600), 2);
+        assert_eq!(
+            forecast_threat_attack_eta_ms(&forecast, observation.now_ms),
+            base + 600
+        );
         let waits = strategy_wait_candidates(&observation, &action, &forecast, base, 750);
-        if attack_with_pc(&action.lock, 0) > 0 {
-            assert!(waits.contains(&300));
-            assert!(waits.contains(&350));
-        } else {
-            assert_eq!(waits, vec![0]);
-        }
+        assert!(waits.contains(&300));
+        assert!(waits.contains(&350));
     }
 
     #[test]

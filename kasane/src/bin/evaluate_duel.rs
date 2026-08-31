@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
+use kasane::benchmark::sha256_hex;
 use kasane::game::{InitialField, PlayerSpec};
 use kasane::strategy_training::StrategyPolicyArtifact;
 use kasane::{AgentConfig, AgentKind, Match, MatchConfig, MatchOutcome, Rules};
@@ -24,8 +25,11 @@ struct Cli {
     threads: usize,
     #[arg(long, default_value_t = 1_500)]
     cold_clear_nodes: u32,
-    #[arg(long, default_value_t = 1_500)]
-    kasane_nodes: u32,
+    /// Node budget for KASANE's embedded Cold Clear safety floor. KASANE's
+    /// independent base search is controlled by depth/beam width below.
+    /// Omit to use `cold_clear_floor_nodes` from the policy artifact.
+    #[arg(long)]
+    kasane_nodes: Option<u32>,
     #[arg(long)]
     forecast_nodes: Option<u32>,
     #[arg(long, default_value_t = 4)]
@@ -223,8 +227,46 @@ struct Report {
     mean_ended_ms: f64,
     decisive_ci95_low: f64,
     decisive_ci95_high: f64,
+    /// Exploratory only: seat legs are not independent and timeouts are
+    /// conditioned away. Use the paired all-match interval for inference.
+    decisive_ci95_method: &'static str,
+    /// Mean match score CI with the two seat-swapped games for each seed
+    /// treated as one independent cluster. A win scores 1, a loss 0, and a
+    /// draw/timeout 0.5.
+    paired_score_standard_error: f64,
+    paired_score_ci95_low: f64,
+    paired_score_ci95_high: f64,
+    /// Fixed-sample, distribution-free confidence interval used for the
+    /// superiority gate. It is not valid for optional stopping.
+    paired_score_ci95_method: &'static str,
+    /// One auditable score per seed cluster, in deterministic seed order.
+    /// Values are 0, 0.25, 0.5, 0.75, or 1 for the two mirrored legs.
+    paired_scores: Vec<f64>,
+    /// Conservative, machine-readable superiority gate. This is true only
+    /// when the paired all-match score CI excludes an even 50% score.
+    paired_score_superior_to_cold_clear: bool,
+    provenance: DirectDuelProvenance,
     wall_seconds: f64,
     decisions_per_wall_second: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ArtifactProvenance {
+    role: &'static str,
+    path: PathBuf,
+    sha256: Option<String>,
+    read_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct DirectDuelProvenance {
+    comparison_scope: &'static str,
+    cold_clear_upstream_revision: &'static str,
+    cold_clear_evaluator: &'static str,
+    runtime_mode: &'static str,
+    deterministic_search_mode: &'static str,
+    fixed_sample_design: &'static str,
+    artifacts: Vec<ArtifactProvenance>,
 }
 
 #[derive(Debug, Serialize)]
@@ -305,6 +347,71 @@ fn split_seed(seed: u64, index: usize) -> u64 {
     value ^ (value >> 31)
 }
 
+fn artifact_provenance(role: &'static str, path: PathBuf) -> ArtifactProvenance {
+    match fs::read(&path) {
+        Ok(content) => ArtifactProvenance {
+            role,
+            path,
+            sha256: Some(sha256_hex(&content)),
+            read_error: None,
+        },
+        Err(error) => ArtifactProvenance {
+            role,
+            path,
+            sha256: None,
+            read_error: Some(error.to_string()),
+        },
+    }
+}
+
+fn direct_duel_provenance(cli: &Cli, resolved: &AgentConfig) -> DirectDuelProvenance {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut artifacts = vec![
+        artifact_provenance("strategy_policy", cli.strategy_policy.clone()),
+        artifact_provenance(
+            "kasane_strategy_source",
+            manifest.join("src/agent/strategy.rs"),
+        ),
+        artifact_provenance("kasane_timing_source", manifest.join("src/agent/kasane.rs")),
+        artifact_provenance("kasane_cc_bridge_source", manifest.join("src/agent/cc.rs")),
+        artifact_provenance(
+            "local_cold_clear_dag_source",
+            manifest.join("../third_party/cold-clear-reference/bot/src/dag.rs"),
+        ),
+        artifact_provenance(
+            "local_cold_clear_standard_evaluator",
+            manifest.join("../third_party/cold-clear-reference/bot/src/evaluation/standard.rs"),
+        ),
+    ];
+    if let Some(path) = &resolved.base_model_path {
+        artifacts.push(artifact_provenance("base_model", path.clone()));
+    }
+    if let Some(path) = &resolved.tempo_model_path {
+        artifacts.push(artifact_provenance("strategy_model", path.clone()));
+    }
+    if let Some(path) = &resolved.stack_ren_model_path {
+        artifacts.push(artifact_provenance("stack_ren_model", path.clone()));
+    }
+    match std::env::current_exe() {
+        Ok(path) => artifacts.push(artifact_provenance("running_executable", path)),
+        Err(error) => artifacts.push(ArtifactProvenance {
+            role: "running_executable",
+            path: PathBuf::new(),
+            sha256: None,
+            read_error: Some(error.to_string()),
+        }),
+    }
+    DirectDuelProvenance {
+        comparison_scope: "native deterministic fixed-node simulator; KASANE includes additional strategy/forecast computation, so this is not an equal-CPU claim",
+        cold_clear_upstream_revision: "279edd7c3177ff8077f6a930193397814b281f27",
+        cold_clear_evaluator: "Cold Clear 1 Standard evaluator",
+        runtime_mode: "persistent generation-aware DAG per player; opponent forecasts are stateless",
+        deterministic_search_mode: "stable board/node/incoming seed before every bounded think on native and wasm32 KASANE floor",
+        fixed_sample_design: "two seat-swapped legs per precommitted seed; fixed sample only, no optional stopping",
+        artifacts,
+    }
+}
+
 fn agent_config(
     cli: &Cli,
     policy: &StrategyPolicyArtifact,
@@ -315,8 +422,13 @@ fn agent_config(
     if let Some(stack_policy) = stack_policy {
         stack_policy.apply_to(&mut config);
     }
-    config.cold_clear_nodes = cli.cold_clear_nodes;
-    config.kasane_nodes = cli.kasane_nodes;
+    // KASANE owns an embedded Cold Clear safety floor. Its budget is the
+    // KASANE-side budget; the standalone opponent uses `cold_clear_nodes` in
+    // `run_one`. Keeping these separate makes asymmetric calibration runs
+    // real instead of merely changing a value printed in the report.
+    let kasane_nodes = cli.kasane_nodes.unwrap_or(policy.cold_clear_floor_nodes);
+    config.cold_clear_nodes = kasane_nodes;
+    config.kasane_nodes = kasane_nodes;
     config.forecast_nodes = cli.forecast_nodes.unwrap_or(policy.forecast_nodes);
     config.base_depth = cli.base_depth;
     config.base_beam_width = cli.base_beam_width;
@@ -444,7 +556,7 @@ fn run_one(
     let kasane_config = agent_config(cli, policy, stack_policy);
     let cc_config = AgentConfig {
         cold_clear_nodes: cli.cold_clear_nodes,
-        kasane_nodes: cli.kasane_nodes,
+        kasane_nodes: cli.kasane_nodes.unwrap_or(policy.cold_clear_floor_nodes),
         ..AgentConfig::default()
     };
     let agent_configs = if kasane_first {
@@ -579,6 +691,53 @@ fn wilson(successes: u64, total: u64) -> (f64, f64) {
     ((center - margin).max(0.0), (center + margin).min(1.0))
 }
 
+fn match_score(totals: &SideTotals) -> f64 {
+    if totals.wins > 0 {
+        1.0
+    } else if totals.losses > 0 {
+        0.0
+    } else {
+        0.5
+    }
+}
+
+fn mirrored_pair_scores(results: &[PairResult]) -> Vec<f64> {
+    results
+        .chunks_exact(2)
+        .map(|pair| (match_score(&pair[0].kasane) + match_score(&pair[1].kasane)) / 2.0)
+        .collect()
+}
+
+/// Two-sided Hoeffding interval over mirrored seed pairs. The two matches in
+/// one pair share the piece/garbage seed and are therefore counted as one
+/// independent bounded observation. Unlike a Wald interval, this remains
+/// conservative when every observed pair has the same score.
+fn paired_score_interval(results: &[PairResult]) -> (f64, f64, f64) {
+    let pair_scores = mirrored_pair_scores(results);
+    if pair_scores.is_empty() {
+        return (0.0, 0.0, 1.0);
+    }
+    let n = pair_scores.len() as f64;
+    let mean = pair_scores.iter().sum::<f64>() / n;
+    let standard_error = if pair_scores.len() == 1 {
+        0.0
+    } else {
+        let sample_variance = pair_scores
+            .iter()
+            .map(|score| (score - mean).powi(2))
+            .sum::<f64>()
+            / (n - 1.0);
+        (sample_variance / n).sqrt()
+    };
+    // P(|sample mean - population mean| >= epsilon) <= 2e^(-2n epsilon^2).
+    let margin = ((2.0_f64 / 0.05).ln() / (2.0 * n)).sqrt();
+    (
+        standard_error,
+        (mean - margin).max(0.0),
+        (mean + margin).min(1.0),
+    )
+}
+
 fn run(cli: Cli) -> Result<()> {
     if cli.pairs == 0 {
         anyhow::bail!("pairs must be positive");
@@ -611,18 +770,26 @@ fn run(cli: Cli) -> Result<()> {
         None
     };
     let resolved = agent_config(&cli, &policy, stack_policy.as_ref());
+    // Snapshot every runtime artifact before workers begin. Long fixed-sample
+    // leagues must not hash a file that changed after its model was loaded.
+    let provenance = direct_duel_provenance(&cli, &resolved);
     let jobs: Vec<_> = (0..cli.pairs)
         .flat_map(|index| {
             let seed = split_seed(cli.seed, index);
             [(seed, true), (seed, false)]
         })
         .collect();
-    let execute = || {
-        jobs.par_iter()
+    let execute = || -> Result<Vec<PairResult>> {
+        // Collect the IndexedParallelIterator before transposing Results.
+        // Rayon then preserves job order, which is required by the adjacent
+        // mirrored-leg clustering below.
+        let indexed_results: Vec<Result<PairResult>> = jobs
+            .par_iter()
             .map(|&(seed, kasane_first)| {
                 run_one(&cli, &policy, stack_policy.as_ref(), seed, kasane_first)
             })
-            .collect::<Result<Vec<_>>>()
+            .collect();
+        indexed_results.into_iter().collect()
     };
     let started = Instant::now();
     let results = if cli.threads == 0 {
@@ -643,12 +810,15 @@ fn run(cli: Cli) -> Result<()> {
     }
     let decisive = totals.wins + totals.losses;
     let (decisive_ci95_low, decisive_ci95_high) = wilson(totals.wins, decisive);
+    let (paired_score_standard_error, paired_score_ci95_low, paired_score_ci95_high) =
+        paired_score_interval(&results);
+    let paired_scores = mirrored_pair_scores(&results);
     let wall_seconds = started.elapsed().as_secs_f64();
     let report = Report {
         schema: if cli.stack_ren {
-            "kasane-direct-duel/v3-stack-ren-paired"
+            "kasane-direct-duel/v5-stack-ren-fixed-sample-provenance"
         } else {
-            "kasane-direct-duel/v2-moe-paired"
+            "kasane-direct-duel/v5-moe-fixed-sample-provenance"
         },
         rules: Rules::live(),
         config: ReportConfig {
@@ -666,7 +836,7 @@ fn run(cli: Cli) -> Result<()> {
             strategy_policy: cli.strategy_policy.clone(),
             policy_schema: policy.schema.clone(),
             cold_clear_nodes: cli.cold_clear_nodes,
-            kasane_nodes: cli.kasane_nodes,
+            kasane_nodes: resolved.kasane_nodes,
             forecast_nodes: resolved.forecast_nodes,
             base_depth: cli.base_depth,
             base_beam_width: cli.base_beam_width,
@@ -741,6 +911,15 @@ fn run(cli: Cli) -> Result<()> {
         mean_ended_ms: ended_ms as f64 / total_matches as f64,
         decisive_ci95_low,
         decisive_ci95_high,
+        decisive_ci95_method:
+            "exploratory unclustered Wilson interval over decisive legs; excludes timeouts",
+        paired_score_standard_error,
+        paired_score_ci95_low,
+        paired_score_ci95_high,
+        paired_score_ci95_method: "two-sided Hoeffding bound over mirrored seed clusters",
+        paired_scores,
+        paired_score_superior_to_cold_clear: paired_score_ci95_low > 0.5,
+        provenance,
         wall_seconds,
         decisions_per_wall_second: totals.pieces as f64 / wall_seconds.max(1e-9),
         kasane: totals,
@@ -759,4 +938,47 @@ fn run(cli: Cli) -> Result<()> {
 
 fn main() -> Result<()> {
     run(Cli::parse())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result(wins: u64, losses: u64) -> PairResult {
+        PairResult {
+            kasane: SideTotals {
+                wins,
+                losses,
+                ..SideTotals::default()
+            },
+            matches: 1,
+            ended_ms: 0,
+        }
+    }
+
+    #[test]
+    fn paired_interval_clusters_the_two_seats() {
+        let results = vec![result(1, 0), result(1, 0), result(1, 0), result(0, 1)];
+        let (standard_error, low, high) = paired_score_interval(&results);
+        assert!((standard_error - 0.25).abs() < 1e-12);
+        assert_eq!(low, 0.0);
+        assert_eq!(high, 1.0);
+    }
+
+    #[test]
+    fn paired_interval_keeps_timeouts_as_neutral_scores() {
+        let results = vec![result(0, 0), result(0, 0), result(0, 0), result(0, 0)];
+        let (standard_error, low, high) = paired_score_interval(&results);
+        assert_eq!(standard_error, 0.0);
+        assert_eq!(low, 0.0);
+        assert_eq!(high, 1.0);
+    }
+
+    #[test]
+    fn paired_interval_does_not_claim_certainty_from_identical_small_sample() {
+        let results = vec![result(1, 0), result(0, 0), result(1, 0), result(0, 0)];
+        let (_, low, high) = paired_score_interval(&results);
+        assert_eq!(low, 0.0);
+        assert_eq!(high, 1.0);
+    }
 }

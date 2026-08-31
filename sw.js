@@ -1,10 +1,10 @@
-const CACHE_NAME = 'tetris-simulator-v32-kasane-stack-ren-final';
+const CACHE_NAME = 'tetris-simulator-v33-kasane-stack-ren-final';
 const APP_SHELL = [
   './index.html',
   './styles/simulator.css?v=app-v19',
   './simulator/app/virtual-controller.js',
   './simulator/app/runtime-config.js?v=app-v19',
-  './simulator/app/player-engine.js?v=app-v19',
+  './simulator/app/player-engine.js?v=app-v20',
   './simulator/app/pc-finder.js?v=app-v5',
   './simulator/app/editor.js',
   './simulator/app/settings.js?v=app-v19',
@@ -17,9 +17,9 @@ const APP_SHELL = [
   './simulator/workers/cold-clear-wasm-worker.js',
   './simulator/workers/cold-clear-wasm.js',
   './simulator/workers/cold-clear.wasm',
-  './simulator/workers/kasane-wasm-worker.js?v=kasane-v8',
-  './simulator/workers/kasane-wasm.js?v=kasane-v8',
-  './simulator/workers/kasane.wasm?v=kasane-v8',
+  './simulator/workers/kasane-wasm-worker.js?v=kasane-v9',
+  './simulator/workers/kasane-wasm.js?v=kasane-v9',
+  './simulator/workers/kasane.wasm?v=kasane-v9',
   './simulator/workers/cold-clear-worker.js',
   './simulator/workers/cold-clear-core.js',
   './simulator/workers/pc-finder-worker.js?v=app-v5',

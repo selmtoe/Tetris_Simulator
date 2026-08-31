@@ -15,13 +15,16 @@ pub mod evaluation;
 mod normal;
 
 pub use libtetris::*;
-pub use normal::{BotState, ThinkResult, Thinker};
 use normal::CandidateScore;
+pub use normal::{BotState, ThinkResult, Thinker};
 use opening_book::Book;
 use serde::{Deserialize, Serialize};
 use std::slice;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "deterministic-search"))]
+#[cfg(any(
+    target_arch = "wasm32",
+    all(not(target_arch = "wasm32"), feature = "deterministic-search")
+))]
 pub fn seed_deterministic_search(seed: u64) {
     dag::seed_deterministic_search(seed);
 }
@@ -474,18 +477,17 @@ pub unsafe extern "C" fn cc_think(bot: *mut CcBot, iterations: u32) -> u32 {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn cc_suggest(
-    bot: *mut CcBot,
-    incoming: u32,
-    result: *mut CcMove,
-) -> u32 {
+pub unsafe extern "C" fn cc_suggest(bot: *mut CcBot, incoming: u32, result: *mut CcMove) -> u32 {
     if bot.is_null() || result.is_null() {
         return 0;
     }
     let bot = &mut *bot;
     let output = &mut *result;
     *output = CcMove::default();
-    if let Some((mv, info)) = bot.state.suggest_move(&bot.evaluator, None::<&Book>, incoming) {
+    if let Some((mv, info)) = bot
+        .state
+        .suggest_move(&bot.evaluator, None::<&Book>, incoming)
+    {
         bot.pending = Some(mv.expected_location);
         output_move(output, &mv, &info);
         1

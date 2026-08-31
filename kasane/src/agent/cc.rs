@@ -1,16 +1,13 @@
-use super::{AgentConfig, IncomingPacket, Observation, PhaseView, SelectedAction};
+use super::{matured_lines, AgentConfig, IncomingPacket, Observation, PhaseView, SelectedAction};
 #[cfg(test)]
 use crate::search::legal_actions;
 use crate::search::{
     attack_with_pc, legal_actions_with_hold, same_action, ActionKey, PlacementAction,
 };
 use libtetris::{Board, MovementMode, SpawnRule};
-#[cfg(not(target_arch = "wasm32"))]
 use simulator_cold_clear_wasm::seed_deterministic_search;
 use simulator_cold_clear_wasm::{evaluation::Standard, BotState, Options};
 use std::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Debug)]
 pub struct CcAnalysis {
@@ -37,7 +34,19 @@ pub struct ForecastEvent {
     pub outgoing_attack: u32,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
+impl ForecastEvent {
+    /// The first event's cancellation is reconstructed against the exact
+    /// current queue. For later events the lightweight board forecast cannot
+    /// fully replay garbage rises, so raw attack is the safe threat bound.
+    pub(crate) fn conservative_threat(&self, event_index: usize) -> u32 {
+        if event_index == 0 {
+            self.outgoing_attack
+        } else {
+            self.raw_attack
+        }
+    }
+}
+
 struct PersistentColdClear {
     state: BotState<Standard>,
     evaluator: Standard,
@@ -47,7 +56,6 @@ struct PersistentColdClear {
     commit_candidates: HashMap<ActionKey, libtetris::FallingPiece>,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ColdClearSessionStats {
     pub rebuilds: u32,
@@ -58,10 +66,9 @@ pub(crate) struct ColdClearSessionStats {
     pub resets: u32,
 }
 
-/// Stateful Cold Clear floor used by the browser controller. The mirror is
+/// Stateful Cold Clear floor used by every controller. The mirror is
 /// intentionally stricter than `BotState::reset`: any board/hold/B2B/combo or
 /// queue-prefix mismatch discards the DAG instead of risking a stale root.
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Default)]
 pub(crate) struct ColdClearSession {
     active: Option<PersistentColdClear>,
@@ -191,7 +198,6 @@ fn analyze_existing_state(
     )
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 impl ColdClearSession {
     pub(crate) fn choose(
         &mut self,
@@ -235,7 +241,6 @@ impl ColdClearSession {
             self.stats.reuses = self.stats.reuses.saturating_add(1);
             self.stats.queue_additions = self.stats.queue_additions.saturating_add(added as u32);
         } else {
-            seed_search(board, target, incoming);
             self.active = Some(PersistentColdClear {
                 state: BotState::new(board.clone(), options_for_target(target)),
                 evaluator: evaluator_for_pc(perfect_clear_special_attack),
@@ -248,6 +253,11 @@ impl ColdClearSession {
         }
 
         let active = self.active.as_mut().expect("session was initialized");
+        // Native uses thread-local state and wasm32 uses a module-local atomic
+        // stream. Reseed either implementation immediately before every
+        // bounded think so Rayon work and stateless forecasts cannot perturb a
+        // persistent floor, and both targets start from the same stable seed.
+        seed_search(board, target, incoming);
         let (analysis, commit_candidates) = analyze_existing_state(
             &mut active.state,
             &active.evaluator,
@@ -333,7 +343,6 @@ impl ColdClearSession {
     }
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn sync_observation(active: &mut PersistentColdClear, observed: &Board) -> Option<usize> {
     if !same_board_without_queue(&active.mirror, observed) {
         return None;
@@ -353,7 +362,6 @@ fn sync_observation(active: &mut PersistentColdClear, observed: &Board) -> Optio
     Some(suffix.len())
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn advance_mirror(
     board: &mut Board,
     placement: libtetris::FallingPiece,
@@ -383,7 +391,6 @@ fn advance_mirror(
     Some(board.lock_piece(placement))
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn same_board_without_queue(left: &Board, right: &Board) -> bool {
     left.get_field() == right.get_field()
         && left.hold_piece == right.hold_piece
@@ -391,36 +398,49 @@ fn same_board_without_queue(left: &Board, right: &Board) -> bool {
         && left.combo == right.combo
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn same_public_board(left: &Board, right: &Board) -> bool {
     same_board_without_queue(left, right) && left.next_queue().eq(right.next_queue())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn seed_search(board: &Board, nodes: u32, incoming: u32) {
     seed_deterministic_search(search_seed(board, nodes, incoming));
 }
 
-// The browser build of the bundled Cold Clear DAG already uses its
-// deterministic single-threaded WASM RNG.  There is no process-global seed
-// hook on wasm32, so the native benchmark seeding call intentionally becomes
-// a no-op here.
-#[cfg(target_arch = "wasm32")]
-fn seed_search(_board: &Board, _nodes: u32, _incoming: u32) {}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn search_seed(board: &Board, nodes: u32, incoming: u32) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    board.get_field().hash(&mut hasher);
-    board.combo.hash(&mut hasher);
-    board.b2b_bonus.hash(&mut hasher);
-    board.hold_piece.hash(&mut hasher);
-    for piece in board.next_queue() {
-        piece.hash(&mut hasher);
+    // Explicit stable serialization/mixing keeps native and wasm32 on the
+    // same seed contract; DefaultHasher's algorithm is not a public API.
+    let mut seed = 0xA076_1D64_78BD_642F_u64;
+    for row in board.get_field() {
+        let mask = row.iter().enumerate().fold(0_u64, |bits, (x, occupied)| {
+            bits | ((*occupied as u64) << x)
+        });
+        mix_search_seed(&mut seed, mask);
     }
-    nodes.hash(&mut hasher);
-    incoming.hash(&mut hasher);
-    hasher.finish()
+    mix_search_seed(&mut seed, board.combo as u64);
+    mix_search_seed(&mut seed, board.b2b_bonus as u64);
+    mix_search_seed(
+        &mut seed,
+        board.hold_piece.map_or(0, |piece| piece as u64 + 1),
+    );
+    for piece in board.next_queue() {
+        mix_search_seed(&mut seed, piece as u64 + 1);
+    }
+    // The remaining bag affects speculative continuations after the preview.
+    let bag_mask = board
+        .bag
+        .iter()
+        .fold(0_u64, |bits, piece| bits | (1_u64 << piece as u8));
+    mix_search_seed(&mut seed, bag_mask);
+    mix_search_seed(&mut seed, nodes as u64);
+    mix_search_seed(&mut seed, incoming as u64);
+    seed
+}
+
+fn mix_search_seed(seed: &mut u64, value: u64) {
+    let mut mixed = seed.wrapping_add(value).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    *seed = mixed ^ (mixed >> 31);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -463,7 +483,7 @@ pub fn forecast_opponent(observation: &Observation, config: &AgentConfig) -> Opp
         PhaseView::LineClear { ends_ms } => ends_ms,
     };
     let mut board = observation.opponent.board.clone();
-    let mut pending = observation.opponent.incoming_total();
+    let mut pending = cancellable_pending_at_first_lock(observation);
     let mut next_start_ms = first_start_ms;
     let mut confidence_sum = 0.0;
     let mut events = Vec::with_capacity(4);
@@ -527,6 +547,22 @@ pub fn forecast_opponent(observation: &Observation, config: &AgentConfig) -> Opp
         outgoing_attack: first.outgoing_attack,
         confidence: confidence_sum / events.len() as f32,
         events,
+    }
+}
+
+fn cancellable_pending_at_first_lock(observation: &Observation) -> u32 {
+    let total = observation.opponent.incoming_total();
+    match observation.opponent.phase {
+        // The engine raises mature garbage at `ends_ms` before scheduling the
+        // opponent's next piece. It therefore cannot cancel that garbage with
+        // the first forecast placement, even though the observation still
+        // contains the pre-rise queue while line clear is active.
+        PhaseView::LineClear { ends_ms } => total.saturating_sub(matured_lines(
+            &observation.opponent.incoming,
+            ends_ms,
+            observation.rules.garbage_grace_ms,
+        )),
+        PhaseView::Ready | PhaseView::Moving { .. } => total,
     }
 }
 
@@ -614,6 +650,27 @@ mod tests {
     }
 
     #[test]
+    fn line_clear_forecast_excludes_garbage_that_rises_before_next_piece() {
+        let mut observed = observation(queued_board(), 0);
+        observed.now_ms = 900;
+        observed.opponent.incoming = vec![
+            IncomingPacket {
+                lines: 4,
+                arrival_ms: 0,
+            },
+            IncomingPacket {
+                lines: 3,
+                arrival_ms: 600,
+            },
+        ];
+        observed.opponent.phase = PhaseView::LineClear { ends_ms: 1_501 };
+        assert_eq!(cancellable_pending_at_first_lock(&observed), 3);
+
+        observed.opponent.phase = PhaseView::Ready;
+        assert_eq!(cancellable_pending_at_first_lock(&observed), 7);
+    }
+
+    #[test]
     fn root_scores_cover_the_reachable_cold_clear_frontier() {
         let mut board = Board::new();
         for piece in [
@@ -664,6 +721,69 @@ mod tests {
         );
         assert_eq!(first.root_scores, second.root_scores);
         assert_eq!(first.nodes, second.nodes);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn persistent_search_is_deterministic_across_rayon_workers() {
+        use rayon::prelude::*;
+
+        let signatures: Vec<_> = (0..8_u32)
+            .into_par_iter()
+            .map(|worker_case| {
+                let config = config_with_nodes(1_200);
+                let mut session = ColdClearSession::default();
+                let mut board = queued_board();
+                let mut signature = Vec::new();
+                let mut expanded_after_reuse = false;
+
+                for ply in 0..12_u32 {
+                    // A forecast or another match can consume the worker's
+                    // thread-local deterministic RNG between retained moves.
+                    // Vary that interference so this test fails if a later
+                    // retained-tree expansion relies on leftover RNG state.
+                    let mut noise = queued_board();
+                    for garbage in 0..=(worker_case + ply) % 3 {
+                        noise.add_garbage(((worker_case + garbage) % 10) as usize);
+                    }
+                    let _ = analyze_cold_clear(
+                        &noise,
+                        96 + worker_case * 17 + ply * 13,
+                        worker_case + ply,
+                    );
+
+                    let before = session.retained_nodes();
+                    let analysis = session.analyze(&board, config.cold_clear_nodes, 0, 10, true);
+                    let after = session.retained_nodes();
+                    expanded_after_reuse |= ply > 0 && after > before;
+                    let action = analysis.chosen.expect("persistent move");
+                    signature.push((action.key(), analysis.root_scores, analysis.nodes));
+                    assert!(session.commit_selected(Some(&action)));
+
+                    board = action.board_after.clone();
+                    board.add_next_piece(
+                        [
+                            Piece::I,
+                            Piece::O,
+                            Piece::T,
+                            Piece::S,
+                            Piece::Z,
+                            Piece::L,
+                            Piece::J,
+                        ][ply as usize % 7],
+                    );
+                }
+
+                assert_eq!(session.stats().rebuilds, 1);
+                assert_eq!(session.stats().reuses, 11);
+                assert_eq!(session.stats().commits, 12);
+                assert!(expanded_after_reuse, "retained DAG was never expanded");
+                signature
+            })
+            .collect();
+
+        let expected = signatures.first().expect("at least one signature");
+        assert!(signatures.iter().all(|signature| signature == expected));
     }
 
     #[test]

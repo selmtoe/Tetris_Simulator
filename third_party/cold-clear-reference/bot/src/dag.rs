@@ -111,14 +111,20 @@ type DedupMap<'a> = HashMap<SimplifiedBoard<'a>, u32>;
 // crypto API. It preserves the same WeightedIndex/choose algorithm while
 // making benchmarks reproducible. Native builds retain thread_rng().
 #[cfg(target_arch = "wasm32")]
+static SEARCH_RNG_STATE: AtomicU64 = AtomicU64::new(0xA076_1D64_78BD_642F);
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn seed_deterministic_search(seed: u64) {
+    SEARCH_RNG_STATE.store(seed, AtomicOrdering::Relaxed);
+}
+
+#[cfg(target_arch = "wasm32")]
 fn simulator_rng() -> rand::rngs::mock::StepRng {
-    static STATE: AtomicU64 = AtomicU64::new(0xA076_1D64_78BD_642F);
-    let mut x = STATE.fetch_add(0x9E37_79B9_7F4A_7C15, AtomicOrdering::Relaxed);
-    x ^= x >> 30;
-    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    x ^= x >> 27;
-    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
-    x ^= x >> 31;
+    // Match the native deterministic-search branch exactly: the caller's
+    // board-derived seed is the first StepRng value and subsequent calls add
+    // the same Weyl increment. This keeps native confirmation and the WASM
+    // deployment on the same stochastic search path.
+    let x = SEARCH_RNG_STATE.fetch_add(0x9E37_79B9_7F4A_7C15, AtomicOrdering::Relaxed);
     rand::rngs::mock::StepRng::new(x, 0x9E37_79B9_7F4A_7C15)
 }
 
