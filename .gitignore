@@ -12,3 +12,6 @@ simulator/cold-clear-wasm/target/
 # Local scratch files from the video recovery workflow.
 0.47
 0.81
+
+# Generated public web bundle.
+/dist/pages/

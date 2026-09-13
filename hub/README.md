@@ -1,31 +1,80 @@
-# Tetris Hub
+# Simulator / Viewer workspace
 
-`hub/index.html` is the integration shell for the simulator (`../index.html`) and
-the chart editor (`../F/index.html`). It keeps the original Hub markup, styles,
-storage keys, and postMessage contract intact while the behavior is split into
-small ES modules under `hub/js/`.
+Hub controls the existing simulator and viewer without replacing their designs.
+The public build applies the approved appearance from `tools/tetris-lab/preview-*`
+at build time; it does not require the personal Lab server.
 
-Open it through a local HTTP server, rather than with `file://`, so its service
-worker can register:
+## Navigation
 
-~~~text
-http://localhost:<port>/hub/
-~~~
+- Ordinary entry: full simulator preparation.
+- Start: full simulator play. Its return destination is captured at start.
+- Back after ordinary play: full simulator preparation, even after earlier replay practice.
+- Record: full viewer showing that play's replay.
+- Practice here: simulator on the left, source viewer on the right.
+- Seeking on the right does not change the left draft; applying a different position is explicit.
+- Wide viewer / resume preparation preserve both states without reloading either iframe.
+- Back after practice: split preparation. Source return opens the original practice anchor.
+- Narrow screens show preparation/reference toggles. Play always occupies the full workspace.
 
-The fumen-for-mobile frame remains an external integration by design. The two
-local iframe URLs are deliberately relative, so the complete application can
-run from one repository and one local server.
+Hub has no user save button, replay library or named autosave entries. Files and
+links are opened through the small Open dialog. Sharing and file export remain
+in the viewer. The old Hub's browser storage keys are not read, changed or deleted.
 
-Editor snapshots carried by the existing `postMessage` contract now use the
-shared v4 `te1` event replay. The editor still accepts saved v3 page
-collections, so existing Hub entries remain loadable.
+## Recovery
 
-## Module map
+IndexedDB database `tetris-workspace-recovery` retains the current workspace per
+recent tab (at most eight), with no library UI. The tab identity is stored in
+sessionStorage. A normal launch restores the current tab's state, or the most
+recent workspace when starting a new tab. An explicit incoming replay link takes
+precedence. `?fresh=1` starts with ordinary preparation.
 
-- `bridge.js` — iframe postMessage routing and official-editor clipboard import
-- `layout.js` — tab, split, and splitter behavior
-- `windows.js` — hidden window-mode behavior and persisted window layouts
-- `saves.js` — manual/auto saves, import/export, sharing, and URL loading
-- `settings.js` — persisted Hub preferences and auto-save scheduling
-- `menu.js` — floating action button menu and drag behavior
-- `snapshot.js`, `state.js`, `toast.js` — shared state and small utilities
+Snapshots run about every two seconds and at navigation/visibility changes.
+They include the simulator preparation, current viewer document and cursor,
+practice anchor, normal preparation draft and split width. Thus a crash may lose
+the latest interval, and browser storage removal also removes recovery data.
+
+An interrupted game restores its preparation with play stopped, and exposes the
+last captured replay through “中断前の記録を見る”. It does not resume the live game
+clock, AI worker or partially executed input. Existing rules for transferring
+board/NEXT/HOLD remain unchanged.
+
+## Run and build
+
+`start.bat` builds the static bundle with Python 3, then opens the local workspace.
+Manual build: `python tools/build-web.py`. Output is `dist/pages` only. Serve that
+folder using any static HTTP server. HTML, JavaScript, WASM, approved appearance
+and the image-input model are copied from an explicit allowlist. CUDA applications,
+private Lab data and analysis datasets are outside the public artifact.
+
+The Pages workflow builds this folder and publishes only that artifact on main.
+The feature branch does not deploy the public site.
+
+Native editor access is retained through `F/?view=editor`. `?standalone=1` bypasses
+the static entry redirect. Existing te1/v3/f1/f2, simulator snapshots, native
+recovery exports and legacy Hub shared payloads remain importable.
+
+## Source files
+
+- `js/workflow.js`: four modes and origin-dependent return behavior.
+- `js/workspace.js`: viewport, source/practice state and verified iframe messages.
+- `js/recovery.js`: transactional recovery storage.
+- `workspace.css`: surrounding layout only.
+- `../simulator/app/workspace.js`, `../F/app/85-workspace.js`: native app adapters.
+
+## Verification
+
+Run `tools/test-hub-workflow.cjs` against the built bundle with Playwright. Set
+`PLAYWRIGHT_MODULE` if it is installed outside the repository. The browser checks
+use an isolated profile and cover both return origins, immutable sources, independent
+seeking, mobile layout, direct links, reload recovery and interrupted recordings.
+`tools/test-web-build.py` checks static paths, appearance and deployment boundaries.
+The existing event codec and viewer AI/export regression checks also remain applicable.
+
+## Restore point
+
+The GitHub tag `hub-before-20260913` points to the pre-rebuild web tools and approved
+appearance source (`6f9948a`). The implementation follows it on
+`codex/hub-workflow-20260913`. To inspect the old version without overwriting current
+work, use `git worktree add ../Tetris_Hub_Before hub-before-20260913`.
+The working repository's main checkout and unrelated staged changes are preserved;
+these history snapshots use a separate Git index.

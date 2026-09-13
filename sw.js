@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tetris-simulator-v42-league-download-fallback';
+const CACHE_NAME = 'tetris-simulator-v43-hub-workflow';
 const APP_SHELL = [
   './index.html',
   './styles/simulator.css?v=app-v19',
@@ -16,6 +16,7 @@ const APP_SHELL = [
   './simulator/app/state-transport.js?v=app-v19',
   './simulator/app/league-runner.js?v=league-v15',
   './simulator/app/bootstrap.js?v=app-v19',
+  './simulator/app/workspace.js?v=workflow-v1',
   './simulator/workers/cold-clear-wasm-worker.js?v=controller-timing-v3',
   './simulator/workers/cold-clear-wasm.js?v=controller-timing-v2',
   './simulator/workers/cold-clear.wasm?v=controller-timing-v2',

@@ -293,4 +293,6 @@ document.getElementById('hidden-ppt-loader').addEventListener('change', (e) => {
 
     document.getElementById('viewer-simulator-btn').addEventListener('click', sendToSimulator);
 
+    window.dispatchEvent(new Event('tetris:viewer-ready'));
+
 });

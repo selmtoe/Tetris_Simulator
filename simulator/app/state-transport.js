@@ -200,6 +200,7 @@ function generateAndDisplayLink(options = {}) {
     const uint8Array = new TextEncoder().encode(jsonString);
     const base64Data = btoa(String.fromCharCode.apply(null, uint8Array));
     const url = new URL(window.location);
+    for (const parameter of ['workspace', 'entry', 'practice']) url.searchParams.delete(parameter);
     url.hash = base64Data;
     document.getElementById('share-link-input').value = url.href;
 }

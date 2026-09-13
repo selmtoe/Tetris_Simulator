@@ -220,6 +220,11 @@ function sendToSimulator() {
         stateData.p2 = playerStateForSimulator('p2');
     }
 
+    if (window.TetrisWorkspace) {
+        window.TetrisWorkspace.practice(stateData);
+        return;
+    }
+
     const jsonString = JSON.stringify(stateData);
     // Do not pass a full replay-sized Uint8Array to Function#apply.  A
     // 2P/replay collection is large enough to overflow the JavaScript call
