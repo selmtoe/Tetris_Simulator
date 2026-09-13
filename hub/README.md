@@ -9,13 +9,17 @@ Ordinary entry stays full simulator. Entering practice from a replay starts in
 split view. Drag the divider toward either edge and release to stow that pane.
 Inside the outer 15%, only the pane about to disappear becomes blurred and dim;
 moving back clears the cue, and pointer cancellation restores the previous view.
-Pull the remaining edge grip inward at least 40px to restore the split width.
-Narrow screens use the same edge pull to exchange the visible pane. Keyboard
+Both the divider and either edge grip use the same release position: outside
+the stow zones they keep both panes at the released width, including on narrow
+screens. The blur cue applies to edge pulls too. Keyboard
 arrows adjust the divider, Ctrl+arrows focus one pane, and Enter on the edge
 restores the hidden pane. Folding never changes the practice origin.
 
-There is no divider popup or new Back button. When viewing a play recording,
-pulling from the left returns to the preceding preparation and its reference.
+There is no divider popup or new Back button. Pulling only changes visibility;
+it never replaces the visible replay or navigates back through recording history.
+Once a replay is present, either single-pane view retains the opposite edge grip.
+Ordinary entry without a replay stays a single simulator. The game's return
+origin depends on whether practice was started, not whether two panes are visible.
 Interrupted recordings are accessible from a contextual recovery notice.
 
 Share now contains links, Copy, Save link, and the existing link options shown
@@ -25,7 +29,8 @@ dropping the saved HTML into either pane loads the associated simulator/replay.
 Old JSON and .url drops remain readable; paste outside a text input also loads
 a link. The launcher uses the online application rather than bundling the engine.
 
-For this trial run `tools/test-hub-divider.cjs`, `tools/test-hub-tabs.cjs`, and
+For this trial run `tools/test-pane-drag-regression.cjs` (390/720/1280px),
+`tools/test-hub-divider.cjs`, `tools/test-hub-tabs.cjs`, and
 `tools/test-web-build.py`. The older menu-based workflow/control suites below
 describe production and are superseded by the divider suite for this branch.
 

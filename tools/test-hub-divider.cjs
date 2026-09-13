@@ -18,7 +18,7 @@ const sim=p=>p.frame({url:/index\.html\?.*workspace=1/});
 const viewer=p=>p.frame({url:/\/F\/index\.html\?workspace=1/});
 const state=p=>sim(p).evaluate(()=>getGameStateForExport());
 async function mode(p,value){await p.waitForFunction(v=>document.body.dataset.mode===v,value);checks++;}
-async function ready(p){await p.waitForFunction(()=>document.body.dataset.workspaceReady==='true');}
+async function ready(p){await p.waitForFunction(()=>document.body?.dataset.workspaceReady==='true');}
 async function expand(v){await v.locator('#viewer-page-indicator').hover();if(await v.locator('#viewer-page-indicator').getAttribute('aria-expanded')!=='true')await v.locator('#viewer-page-indicator').click();}
 async function settle(p){await p.waitForTimeout(320);}
 async function pull(p, distance=220){const r=await p.locator('#pane-edge').boundingBox();const left=r.x<50;const x=r.x+r.width/2,y=r.y+r.height/2;await p.mouse.move(x,y);await p.mouse.down();await p.mouse.move(x+(left?distance:-distance),y,{steps:14});await p.mouse.up();await settle(p);}
@@ -58,11 +58,11 @@ async function saved(p, expected){
     await page.keyboard.press('Space');await sim(page).locator('#backToEditorBtn').click();await mode(page,'simulator');
     await sim(page).locator('#startGameBtn').click();await mode(page,'playing');await page.keyboard.press('Space');
     await sim(page).locator('#exportFumenBtn').click();await mode(page,'viewer');await settle(page);
-    equal(await viewer(page).locator('#viewer-return-btn').count(),0,'no Return button');await pull(page);await mode(page,'simulator');await settle(page);
-    ok(await page.locator('#viewer-pane').isHidden(),'normal recording returns to full simulator');
+    equal(await viewer(page).locator('#viewer-return-btn').count(),0,'no Return button');await pull(page);await mode(page,'split');await settle(page);
+    ok(await page.locator('#viewer-pane').isVisible(),'recording remains visible beside simulator');
     await drop(sim(page),JSON.stringify(fixture),'old.tetrisevent.json');await mode(page,'viewer');await settle(page);
     equal(await viewer(page).evaluate(()=>fumenPages.length),4,'legacy file reads through drop');
-    ok(await page.locator('#pane-edge').isHidden(),'import has no invented return');
+    ok(await page.locator('#pane-edge').isVisible(),'import allows simulator to be pulled in');
     await expand(viewer(page));await viewer(page).locator('#viewer-page-slider').fill('1');await viewer(page).locator('#viewer-page-slider').dispatchEvent('input');
     await viewer(page).locator('#viewer-share-btn').click();
     ok(!(await viewer(page).locator('#share-modal').innerText()).includes('リプレイと練習'),'section removed');
@@ -100,20 +100,22 @@ async function saved(p, expected){
     await dragTo(.08);equal(await page.locator('body').getAttribute('data-pane-view'),'viewer','drag left expands viewer');
     await pull(page);await dragTo(.08,true);
     equal(await page.locator('body').getAttribute('data-pane-view'),'both','cancelled drag does not fold');
-    await page.locator('#workspace-divider').press('ArrowRight');equal(await page.locator('#workspace-divider').getAttribute('aria-valuenow'),'55','keyboard width');
+    await page.locator('#workspace-divider').press('Home');await page.locator('#workspace-divider').press('ArrowRight');equal(await page.locator('#workspace-divider').getAttribute('aria-valuenow'),'55','keyboard width');
     await page.locator('#workspace-divider').press('Control+ArrowLeft');await settle(page);
     await sim(page).locator('#startGameBtn').click();await mode(page,'playing');await page.keyboard.press('Space');
     await sim(page).locator('#exportFumenBtn').click();await mode(page,'viewer');await settle(page);
+    const latestRecord=await viewer(page).evaluate(()=>JSON.stringify(getCollectionDataForExport()));
     await pull(page);await mode(page,'split');await settle(page);
-    equal(await viewer(page).evaluate(()=>fumenPages.length),4,'original replay survives practice recording');
-    equal(await viewer(page).evaluate(()=>currentPageIndex),3,'record Back returns last reference cursor');
-    equal(await state(page),draft,'record Back retains draft');
-    await page.setViewportSize({width:390,height:844});await settle(page);ok(await page.locator('#viewer-pane').isHidden(),'narrow preparation');
-    await pull(page,130);ok(await page.locator('#simulator-pane').isHidden(),'narrow edge switches to reference');
+    equal(await viewer(page).evaluate(()=>JSON.stringify(getCollectionDataForExport())),latestRecord,'pulling a pane never replaces the visible recording');
+    equal(await state(page),draft,'record reveal retains draft');
+    await page.setViewportSize({width:390,height:844});await settle(page);ok(await page.locator('#viewer-pane').isVisible()&&await page.locator('#simulator-pane').isVisible(),'narrow view retains split');
+    await page.locator('#workspace-divider').press('Control+ArrowRight');await settle(page);
+    await pull(page,130);ok(await page.locator('#simulator-pane').isVisible()&&await page.locator('#viewer-pane').isVisible(),'narrow left pull restores split');
     await page.screenshot({path:path.join(output,'mobile-reference.png')});
-    await pull(page,130);ok(await page.locator('#viewer-pane').isHidden(),'narrow edge returns to preparation');
+    await page.locator('#workspace-divider').press('Control+ArrowLeft');await settle(page);
+    await pull(page,130);ok(await page.locator('#viewer-pane').isVisible()&&await page.locator('#simulator-pane').isVisible(),'narrow right pull restores split');
     ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'no narrow overflow');
-    await page.setViewportSize({width:1280,height:800});await page.emulateMedia({reducedMotion:'reduce'});await pull(page);
+    await page.setViewportSize({width:1280,height:800});await page.emulateMedia({reducedMotion:'reduce'});
     await page.locator('#workspace-divider').press('Control+ArrowRight');equal(await page.locator('body').getAttribute('data-pane-motion'),'false','reduced motion respected');
     await drop(viewer(page),savedSim,'saved.html');await mode(page,'simulator');await settle(page);
     ok(await page.locator('#pane-edge').isHidden(),'loading simulator link exits old practice');
@@ -123,7 +125,7 @@ async function saved(p, expected){
     await sim(page).waitForFunction(()=>window.createRecordedReplayCollection?.()!=null,null,{timeout:20000});
     await saved(page,{mode:'playing',recording:true});await page.reload({waitUntil:'networkidle'});await ready(page);
     await mode(page,'simulator');ok(await page.locator('#interrupted-notice').isVisible(),'interrupted record appears outside Share');
-    await page.locator('#open-interrupted').click();await mode(page,'viewer');await settle(page);await pull(page);await mode(page,'simulator');
+    await page.locator('#open-interrupted').click();await mode(page,'viewer');await settle(page);await pull(page);await mode(page,'split');
     const touchContext=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
     const touch=await touchContext.newPage();touch.on('pageerror',e=>errors.push(e.message));
     await touch.goto(link.href,{waitUntil:'networkidle'});await ready(touch);await expand(viewer(touch));
@@ -135,8 +137,10 @@ async function saved(p, expected){
         for(let i=1;i<=10;i++)await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:start+delta*i/10,y}]});
         await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await settle(touch);
     }
-    await swipeEdge();equal(await touch.locator('body').getAttribute('data-pane-view'),'viewer','touch swipe opens reference');
-    await swipeEdge();equal(await touch.locator('body').getAttribute('data-pane-view'),'simulator','touch swipe pulls simulator back');
+    await touch.locator('#workspace-divider').press('Control+ArrowRight');await settle(touch);
+    await swipeEdge();equal(await touch.locator('body').getAttribute('data-pane-view'),'both','touch swipe pulls simulator into split');
+    await touch.locator('#workspace-divider').press('Control+ArrowLeft');await settle(touch);
+    await swipeEdge();equal(await touch.locator('body').getAttribute('data-pane-view'),'both','touch swipe pulls viewer into split');
     await touchContext.close();
     equal(errors,[],'no page errors');
     console.log(JSON.stringify({passed:true,checks,output}));

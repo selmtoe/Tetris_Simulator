@@ -13,7 +13,6 @@ let flow = initialWorkflow();
 let currentDocument = null;
 let practice = null;
 let normalDraft = null;
-let recordReturn = null;
 let interruptedDismissed = false;
 let serial = Promise.resolve();
 let noticeTimer;
@@ -39,7 +38,7 @@ function queueRecovery() {
                 : interruptedRecord;
             await writeRecovery(recoveryId, {
                 version: 1, flow: clone(flow), currentDocument: clone(currentDocument),
-                practice: clone(practice), normalDraft: clone(normalDraft), recordReturn: clone(recordReturn), sim: sim.state,
+                practice: clone(practice), normalDraft: clone(normalDraft), sim: sim.state,
                 simConfiguration: sim.configuration,
                 interruptedRecord: clone(recoveryRecord),
                 splitWidth: Number($('workspace-divider').getAttribute('aria-valuenow'))
@@ -99,14 +98,9 @@ async function displayDocument(document) {
     currentDocument = clone(document);
 }
 async function openReplay(input, options = {}) {
-    const returning = options.recording ? {
-        flow: flow.mode === 'playing' ? transition(flow, 'return') : clone(flow),
-        document: currentDocument ? { ...clone(currentDocument), ...await request('editor', 'document') } : null
-    } : null;
     if (flow.mode === 'playing') await request('sim', 'stop');
     const loaded = await request('editor', 'load', { input, context: options.context });
     currentDocument = newDocument(loaded, options.title);
-    recordReturn = returning;
     if (options.external) {
         if (normalDraft) await request('sim', 'apply', normalDraft);
         normalDraft = null;
@@ -117,7 +111,6 @@ async function openReplay(input, options = {}) {
     move('replay');
 }
 async function beginPractice(state, source) {
-    recordReturn = null;
     if (flow.mode === 'playing') await request('sim', 'stop');
     if (!practice) normalDraft = await request('sim', 'state');
     const origin = newDocument(source, currentDocument?.title || source.title);
@@ -127,15 +120,6 @@ async function beginPractice(state, source) {
     currentDocument = clone(origin);
     await request('sim', 'apply', state);
     move('practice');
-}
-async function returnFromRecord() {
-    if (!recordReturn) return;
-    const target = recordReturn;
-    if (target.document) await displayDocument(target.document);
-    else currentDocument = null;
-    flow = clone(target.flow);
-    recordReturn = null;
-    render(); queueRecovery();
 }
 async function openInput(input, name = '') {
     const text = TetrisLinkFile.extract(input);
@@ -152,7 +136,7 @@ async function openInput(input, name = '') {
     if (data?.v === 2 && data.p1) {
         if (flow.mode === 'playing') await request('sim', 'stop');
         await request('sim', 'apply', data);
-        normalDraft = null; practice = null; recordReturn = null;
+        normalDraft = null; practice = null; currentDocument = null;
         move('home');
     } else await openReplay(text, {external:true, title:name.replace(/\.tetrisevent\.json$|\.(?:json|url|html?|txt)$/i, '') || undefined});
 }
@@ -190,11 +174,9 @@ window.addEventListener('message', event => {
 
 const panes = createPanes({
     getFlow: () => flow,
-    canReturn: () => Boolean(recordReturn),
-    focus: role => move('focus-' + role),
-    reveal: role => {
-        if (flow.mode === 'viewer' && recordReturn) enqueue(returnFromRecord);
-        else move(role ? 'focus-' + role : 'unfold');
+    canPair: () => Boolean(currentDocument),
+    commit: view => {
+        if (currentDocument && flow.mode !== 'playing') move(view === 'both' ? 'unfold' : 'focus-' + view);
     },
     changed: queueRecovery,
     resized: () => { inform('sim', 'resize'); inform('editor', 'resize'); }
@@ -266,10 +248,9 @@ enqueue(async () => {
                 if (saved.currentDocument) await displayDocument(saved.currentDocument);
                 practice = clone(saved.practice);
                 normalDraft = clone(saved.normalDraft);
-                recordReturn = clone(saved.recordReturn);
                 interruptedRecord = clone(saved.interruptedRecord);
                 flow = saved.flow.mode === 'playing' ? transition(saved.flow, 'return') : saved.flow;
-                if (flow.mode === 'split' && !practice) flow = initialWorkflow();
+                if (flow.mode === 'split' && !currentDocument) flow = initialWorkflow();
                 if (Number.isFinite(saved.splitWidth)) panes.setRatio(saved.splitWidth);
                 render();
                 if (!interruptedRecord) notice(saved.flow.mode === 'playing' ? 'このタブの作業を復元しました。試合は停止した準備画面に戻しています。' : 'このタブの作業を復元しました。');

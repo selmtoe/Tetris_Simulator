@@ -9,13 +9,13 @@ export function transition(state, event) {
         case 'practice':
             return { ...state, mode: 'split', focusPane: null, hasPractice: true, hasReplay: true, narrowPane: 'simulator' };
         case 'focus-simulator':
-            return state.mode === 'split' ? { ...state, focusPane: 'simulator' } : state;
+            return { ...state, mode: 'split', focusPane: 'simulator' };
         case 'focus-viewer':
-            return state.mode === 'split' ? { ...state, focusPane: 'viewer' } : state;
+            return { ...state, mode: 'split', focusPane: 'viewer' };
         case 'unfold':
-            return { ...state, focusPane: null };
+            return { ...state, mode: 'split', focusPane: null };
         case 'start':
-            return { ...state, mode: 'playing', playOrigin: state.mode === 'split' ? 'practice' : 'simulator' };
+            return { ...state, mode: 'playing', playOrigin: state.hasPractice ? 'practice' : 'simulator' };
         case 'return':
             return { ...state, mode: state.playOrigin === 'practice' ? 'split' : 'simulator', playOrigin: null, focusPane: null, narrowPane: 'simulator' };
         case 'replay':
