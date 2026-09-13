@@ -4,7 +4,7 @@ export function createPanes({getFlow, canPair, commit, changed, resized}) {
     const divider = $('workspace-divider');
     const edge = $('pane-edge'), panes = [$('simulator-pane'), $('viewer-pane')];
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-    let ratio = 50, drag = null, timer, first = true, lastView;
+    let ratio = 50, drag = null, timer, first = true, lastView, suppressEdgeClick = false;
     // The cue and the released position must always agree, for both handles.
     const destination = percent => percent <= 15 ? 'viewer' : percent >= 85 ? 'simulator' : 'both';
     function setRatio(value) {
@@ -36,7 +36,7 @@ export function createPanes({getFlow, canPair, commit, changed, resized}) {
         divider.hidden = view !== 'both';
         edge.hidden = view === 'both' || flow.mode === 'playing' || !canPair();
         edge.dataset.side = view === 'viewer' ? 'left' : 'right';
-        edge.title = view === 'viewer' ? '右へ引いてシミュレータを表示' : '左へ引いてビューワーを表示';
+        edge.title = view === 'viewer' ? 'タップでシミュレータを小さく表示・ドラッグで幅を調整' : 'タップでビューワーを小さく表示・ドラッグで幅を調整';
         edge.setAttribute('aria-label', edge.title);
         function finish() {
             panes[0].hidden = view === 'viewer'; panes[1].hidden = view === 'simulator';
@@ -47,6 +47,7 @@ export function createPanes({getFlow, canPair, commit, changed, resized}) {
     }
     function begin(event, opening) {
         if (event.button !== 0 || drag) return;
+        suppressEdgeClick = false;
         clearTimeout(timer);
         const view = document.body.dataset.paneView;
         drag = {id:event.pointerId, x:event.clientX, start:ratio, percent:ratio, moved:false, opening, view};
@@ -74,6 +75,7 @@ export function createPanes({getFlow, canPair, commit, changed, resized}) {
     function end(event, cancelled = false) {
         if (!drag || event.pointerId !== drag.id) return;
         const completed = drag; drag = null;
+        suppressEdgeClick = completed.opening && (cancelled || completed.moved);
         delete document.body.dataset.dragging; delete document.body.dataset.snapPane; delete document.body.dataset.revealing;
         document.body.dataset.dragSettling = 'true';
         $('divider-hint').textContent = '';
@@ -95,10 +97,22 @@ export function createPanes({getFlow, canPair, commit, changed, resized}) {
         if (event.ctrlKey && event.key !== 'Home') commit(event.key === 'ArrowLeft' ? 'simulator' : 'viewer');
         else { setRatio(event.key === 'Home' ? 50 : ratio + (event.key === 'ArrowLeft' ? -5 : 5)); render(); changed(); }
     });
+    function revealMinimum() {
+        if (edge.hidden || getFlow().mode === 'playing' || !canPair()) return;
+        // Keep a visible strip above the 15% stow zone. A tap never needs an
+        // edge swipe, which Android can reserve for system back navigation.
+        setRatio(document.body.dataset.paneView === 'viewer' ? 20 : 80);
+        commit('both');
+    }
+    edge.addEventListener('click', event => {
+        if (suppressEdgeClick && event.detail !== 0) { suppressEdgeClick = false; return; }
+        revealMinimum();
+    });
     edge.addEventListener('keydown', event => {
         const view = document.body.dataset.paneView;
-        if (!['Enter',' ',view === 'viewer' ? 'ArrowRight' : 'ArrowLeft'].includes(event.key)) return;
-        event.preventDefault(); commit('both');
+        // Enter/Space use the native button click; the inward arrow also opens.
+        if (event.key !== (view === 'viewer' ? 'ArrowRight' : 'ArrowLeft')) return;
+        event.preventDefault(); revealMinimum();
     });
     return {render, setRatio};
 }

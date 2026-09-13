@@ -1,9 +1,10 @@
 # Simulator / Viewer workspace
 
-## Local divider trial (2026-09-14)
+## Pane gestures (2026-09-14)
 
-This branch is a local trial; production remains at `282026f`. Its starting point
-is preserved on GitHub as `hub-before-divider-20260914`.
+The version before the divider changes is preserved on GitHub as
+`hub-before-divider-20260914` (`282026f`). The version before tap-to-open is
+`hub-before-edge-tap-20260914` (`96b32e0`).
 
 Ordinary entry stays full simulator. Entering practice from a replay starts in
 split view. Drag the divider toward either edge and release to stow that pane.
@@ -11,9 +12,11 @@ Inside the outer 15%, only the pane about to disappear becomes blurred and dim;
 moving back clears the cue, and pointer cancellation restores the previous view.
 Both the divider and either edge grip use the same release position: outside
 the stow zones they keep both panes at the released width, including on narrow
-screens. The blur cue applies to edge pulls too. Keyboard
-arrows adjust the divider, Ctrl+arrows focus one pane, and Enter on the edge
-restores the hidden pane. Folding never changes the practice origin.
+screens. The blur cue applies to edge pulls too. Tapping either edge grip opens
+that pane at 20% width, leaving the current pane at 80%. This avoids needing a
+system-edge swipe on Android; the central divider can then adjust the width.
+Keyboard arrows adjust the divider, Ctrl+arrows focus one pane, and Enter/Space
+on an edge grip opens the same small pane. Folding never changes the practice origin.
 
 There is no divider popup or new Back button. Pulling only changes visibility;
 it never replaces the visible replay or navigates back through recording history.
@@ -29,12 +32,10 @@ dropping the saved HTML into either pane loads the associated simulator/replay.
 Old JSON and .url drops remain readable; paste outside a text input also loads
 a link. The launcher uses the online application rather than bundling the engine.
 
-For this trial run `tools/test-pane-drag-regression.cjs` (390/720/1280px),
+Run `tools/test-pane-tap.cjs` and `tools/test-pane-drag-regression.cjs` (390/720/1280px),
 `tools/test-hub-divider.cjs`, `tools/test-hub-tabs.cjs`, and
 `tools/test-web-build.py`. The older menu-based workflow/control suites below
-describe production and are superseded by the divider suite for this branch.
-
-The following sections document the production version preceding this trial.
+describe the previous interface and are superseded by the divider suite.
 
 Hub controls the existing simulator and viewer without replacing their designs.
 The public build applies the approved appearance from `tools/tetris-lab/preview-*`
@@ -48,20 +49,18 @@ at build time; it does not require the personal Lab server.
 - Record: full viewer showing that play's replay.
 - Simulator (シミュレータ): practice on the left, source viewer on the right.
 - Seeking on the right does not change the left draft; applying a different position is explicit.
-- Wide viewer / resume preparation preserve both states without reloading either iframe.
-- Back after practice: split preparation. Source return opens the original practice anchor.
-- Narrow screens switch preparation/reference from the existing Share dialog. Play always occupies the full workspace.
+- Folding and unfolding preserve both states without reloading either iframe.
+- Back after practice: split preparation with the current source replay retained.
+- Narrow screens also support split view. Play always occupies the full workspace.
 
 There is no surrounding toolbar or tab row: the native app receives the full
-viewport height, including during preparation. Open/import and interrupted-record
-actions are inside the simulator's existing Share dialog. Practice reference
-navigation appears there only while preparing a replay position. The viewer has
-no generic Screen button or appearance Settings button. Its secondary return,
-reference and full-view actions are inside the existing Share dialog. Appearance
+viewport height, including during preparation. Import uses file drops or link
+paste outside text inputs; interrupted recordings have a contextual notice.
+The viewer has no generic Screen button, extra Back button or appearance Settings button. Appearance
 follows the same preference as the simulator, including live light/dark changes.
 
 Hub has no user save button, replay library or named autosave entries. Files and
-links are opened through the small Open dialog. Replays are shared as links;
+links are opened directly or dropped into the workspace. Replays are shared as links;
 legacy event files remain readable but their file-save control is removed.
 Image/GIF output and official Fumen links remain available. The old Hub's browser
 storage keys are not read, changed or deleted.
@@ -151,13 +150,13 @@ recovery exports and legacy Hub shared payloads remain importable.
 
 ## Verification
 
-Run `tools/test-hub-workflow.cjs` against the built bundle with Playwright. Set
+Run `tools/test-hub-divider.cjs` against the built bundle with Playwright. Set
 `PLAYWRIGHT_MODULE` if it is installed outside the repository. The browser checks
 use an isolated profile and cover both return origins, immutable sources, independent
 seeking, mobile layout, direct links, reload recovery and interrupted recordings.
 `tools/test-web-build.py` checks static paths, appearance and deployment boundaries.
-`tools/test-web-controls.cjs` covers adaptive controls, touch/keyboard input,
-link updates, legacy imports, model defaults and a browser AI scoring run.
+The old `test-hub-workflow.cjs` / `test-web-controls.cjs` contain assertions for
+removed menus; use the divider, tap and drag suites for the current controls.
 `tools/test-simulator-viewport.cjs` checks the new top row in edit/play input,
 transport and 20-row image recognition.
 `tools/test-hub-tabs.cjs` covers independent tabs, copied browser identities,

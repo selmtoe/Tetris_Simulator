@@ -22,6 +22,7 @@ Windowsでは [start.bat](./start.bat) をダブルクリックしてくださ�
 styles/                 Simulatorの固定スタイル
 simulator/app/          UI、設定、ゲーム、スキャン、共有、起動処理
 simulator/workers/      現行Cold Clear AI Worker
+extensions/ppt-scanner/ YouTube動画から局面を取り込むブラウザ拡張機能
 F/                      譜面管理
 hub/                    統合HubとPWA資産
 Load PPT/tetris.onnx    盤面認識モデル
