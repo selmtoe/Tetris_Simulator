@@ -86,6 +86,9 @@ async function compare(label,expectedFrame,actualFrame,selectors,actualElement,r
             await hub.waitForFunction(()=>document.body.dataset.mode==='viewer');
             await viewer.evaluate(()=>loadPage(2));
             await nativeViewer.evaluate(fixture=>{applyCollectionData(fixture);document.getElementById('view-mode-btn').click();loadPage(2);},fixture);
+            // The user explicitly removed this viewer control. Compare the
+            // remaining native layout with the same removal, not a new design.
+            await nativeViewer.evaluate(()=>{document.getElementById('back-to-editor-btn').style.display='none';});
             await compare(label+'-viewer',nativeViewer.mainFrame(),viewer,viewerSelectors,hub.locator('#iframe-editor-custom'),nativeViewer);
             assert.equal(await viewer.locator('#viewer-simulator-btn').textContent(),'ここから練習');checks++;
             await viewer.locator('#viewer-simulator-btn').click();
@@ -105,7 +108,7 @@ async function compare(label,expectedFrame,actualFrame,selectors,actualElement,r
             await editor.goto(new URL('F/index.html?standalone=1',base).href,{waitUntil:'networkidle'});
             await editor.evaluate(fixture=>{applyCollectionData(fixture);loadPage(2);document.getElementById('back-to-editor-btn').click();},fixture);
             await nativeViewer.setViewportSize({width,height:800});
-            await nativeViewer.locator('#back-to-editor-btn').click();
+            await nativeViewer.evaluate(()=>document.getElementById('back-to-editor-btn').click());
             await nativeViewer.evaluate(()=>document.activeElement?.blur());
             await compare(label+'-editor',nativeViewer.mainFrame(),editor.mainFrame(),['#editor-container','#case-selector','#view-mode-btn','#send-to-simulator'],editor.locator('body'),nativeViewer);
             assert.deepEqual(errors,[]);checks++;

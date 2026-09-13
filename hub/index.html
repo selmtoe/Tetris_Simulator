@@ -11,24 +11,6 @@
     <script type="module" src="./js/workspace.js?v=workflow-v2"></script>
 </head>
 <body data-mode="simulator">
-    <dialog id="navigation-dialog" aria-labelledby="workspace-title">
-        <div class="dialog-heading">
-            <div class="workspace-caption"><span id="workspace-title">シミュレータ</span><span id="workspace-detail"></span></div>
-            <button id="close-navigation">閉じる</button>
-        </div>
-        <nav aria-label="画面の切り替え">
-            <button id="home-button" hidden>通常の準備へ</button>
-            <button id="source-button" hidden>元リプレイに戻る</button>
-            <button id="wide-button" hidden>ビューワーを広く表示</button>
-            <button id="resume-button" hidden>練習準備に戻る</button>
-            <button id="interrupted-button" hidden>中断前の記録を見る</button>
-            <button id="records-button">リプレイを開く</button>
-        </nav>
-        <div class="narrow-switch" role="group" aria-label="表示する画面">
-            <button id="narrow-simulator" aria-pressed="true">練習準備</button>
-            <button id="narrow-viewer" aria-pressed="false">元リプレイ</button>
-        </div>
-    </dialog>
     <main id="workspace-panes" aria-label="プレイと振り返り">
         <section id="simulator-pane" class="workspace-pane" aria-label="シミュレータ">
             <iframe id="iframe-sim" title="シミュレータ" allow="gamepad; clipboard-read; clipboard-write; fullscreen"></iframe>

@@ -14,14 +14,15 @@ at build time; it does not require the personal Lab server.
 - Seeking on the right does not change the left draft; applying a different position is explicit.
 - Wide viewer / resume preparation preserve both states without reloading either iframe.
 - Back after practice: split preparation. Source return opens the original practice anchor.
-- Narrow screens switch preparation/reference from the screen menu. Play always occupies the full workspace.
+- Narrow screens switch preparation/reference from the existing Share dialog. Play always occupies the full workspace.
 
 There is no surrounding toolbar or tab row: the native app receives the full
 viewport height, including during preparation. Open/import and interrupted-record
 actions are inside the simulator's existing Share dialog. Practice reference
-navigation appears there only while preparing a replay position. The viewer's
-former Editor button opens the screen menu in the same slot and at the same width;
-the approved Japanese labels and the simulator's Record label retain their sizes.
+navigation appears there only while preparing a replay position. The viewer has
+no generic Screen button or appearance Settings button. Its secondary return,
+reference and full-view actions are inside the existing Share dialog. Appearance
+follows the same preference as the simulator, including live light/dark changes.
 
 Hub has no user save button, replay library or named autosave entries. Files and
 links are opened through the small Open dialog. Sharing and file export remain

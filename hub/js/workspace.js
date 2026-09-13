@@ -74,19 +74,18 @@ function render() {
     $('simulator-pane').hidden = flow.mode === 'viewer';
     $('viewer-pane').hidden = !['viewer', 'split'].includes(flow.mode);
     $('workspace-divider').hidden = flow.mode !== 'split';
-    $('home-button').hidden = flow.mode === 'simulator';
-    $('wide-button').hidden = flow.mode !== 'split';
-    $('resume-button').hidden = flow.mode !== 'viewer' || !practice;
-    $('interrupted-button').hidden = !interruptedRecord || !['simulator', 'split'].includes(flow.mode);
-    $('source-button').hidden = !(practice || currentDocument?.source) || !['viewer', 'split'].includes(flow.mode);
-    $('workspace-title').textContent = flow.mode === 'split' ? '局面から練習' : flow.mode === 'viewer' ? 'ビューワー' : 'シミュレータ';
-    $('workspace-detail').textContent = flow.mode === 'split' && practice
-        ? `${practice.source.title} · ${practice.source.context.pageIndex + 1}手目`
-        : flow.mode === 'viewer' ? currentDocument?.title || '' : '';
-    $('narrow-simulator').setAttribute('aria-pressed', String(flow.narrowPane === 'simulator'));
-    $('narrow-viewer').setAttribute('aria-pressed', String(flow.narrowPane === 'viewer'));
     document.title = flow.mode === 'viewer' ? `${currentDocument?.title || 'リプレイ'} — Viewer` : 'Simulator';
-    inform('editor', 'layout', flow.mode);
+    const narrow = matchMedia('(max-width: 800px)').matches && flow.mode === 'split';
+    inform('editor', 'layout', { mode: flow.mode, actions: [
+        ['home-button', '通常の準備へ', flow.mode !== 'simulator'],
+        ['source-button', '元リプレイに戻る', Boolean(practice || currentDocument?.source)],
+        ['wide-button', 'ビューワーを広く表示', flow.mode === 'split'],
+        ['resume-button', '練習準備に戻る', flow.mode === 'viewer' && Boolean(practice)],
+        ['interrupted-button', '中断前の記録を見る', Boolean(interruptedRecord) && ['simulator', 'split'].includes(flow.mode)],
+        ['narrow-simulator', '練習準備を表示', narrow && flow.narrowPane !== 'simulator'],
+        ['narrow-viewer', '元リプレイを表示', narrow && flow.narrowPane !== 'viewer'],
+        ['records-button', 'リプレイを開く', true]
+    ] });
     inform('sim', 'layout', { mode: flow.mode, interrupted: Boolean(interruptedRecord) });
     requestAnimationFrame(() => {
         inform('sim', 'resize');
@@ -94,9 +93,8 @@ function render() {
         if (flow.mode === 'playing') frames.sim.contentWindow.focus();
     });
 }
-function move(event) { $('navigation-dialog').close(); flow = transition(flow, event); render(); queueRecovery(); }
+function move(event) { flow = transition(flow, event); render(); queueRecovery(); }
 function showRecords() {
-    $('navigation-dialog').close();
     $('records-dialog').showModal();
 }
 function showInterrupted() {
@@ -175,7 +173,7 @@ window.addEventListener('message', event => {
     } else if (role === 'sim' && message.type === 'workspaceReturned') {
         move('return');
     } else if (message.type === 'workspaceAction') {
-        if (message.action === 'navigation') $('navigation-dialog').showModal();
+        if (navigationActions[message.action]) navigationActions[message.action]();
         else if (message.action === 'records') showRecords();
         else if (message.action === 'interrupted') enqueue(showInterrupted);
         else if (message.action === 'reference' && flow.mode === 'split') move(matchMedia('(max-width: 800px)').matches ? 'narrow-viewer' : 'wide');
@@ -187,15 +185,17 @@ window.addEventListener('message', event => {
     }
 });
 
-$('home-button').addEventListener('click', () => enqueue(goHome));
-$('wide-button').addEventListener('click', () => move('wide'));
-$('resume-button').addEventListener('click', () => enqueue(resumePractice));
-$('source-button').addEventListener('click', () => enqueue(showSource));
-$('interrupted-button').addEventListener('click', () => enqueue(showInterrupted));
-$('narrow-simulator').addEventListener('click', () => move('narrow-simulator'));
-$('narrow-viewer').addEventListener('click', () => move('narrow-viewer'));
-$('records-button').addEventListener('click', showRecords);
-$('close-navigation').addEventListener('click', () => $('navigation-dialog').close());
+const navigationActions = Object.assign(Object.create(null), {
+    'home-button': () => enqueue(goHome),
+    'wide-button': () => move('wide'),
+    'resume-button': () => enqueue(resumePractice),
+    'source-button': () => enqueue(showSource),
+    'interrupted-button': () => enqueue(showInterrupted),
+    'narrow-simulator': () => move('narrow-simulator'),
+    'narrow-viewer': () => move('narrow-viewer'),
+    'records-button': showRecords
+});
+window.addEventListener('resize', render);
 $('close-records').addEventListener('click', () => $('records-dialog').close());
 $('open-file-button').addEventListener('click', () => $('replay-file').click());
 $('open-link-form').addEventListener('submit', event => {
@@ -239,7 +239,7 @@ function applyTheme() {
 applyTheme();
 window.addEventListener('storage', event => { if (event.key === 'lab-appearance-mode') applyTheme(); });
 document.addEventListener('keydown', event => {
-    if (event.defaultPrevented || event.repeat || $('records-dialog').open || $('navigation-dialog').open || event.target.closest('input,textarea,select,button,[contenteditable]')) return;
+    if (event.defaultPrevented || event.repeat || $('records-dialog').open || event.target.closest('input,textarea,select,button,[contenteditable]')) return;
     if (flow.mode === 'viewer') return;
     if (frames.sim.contentWindow?.PCFinder?.searchIfBoundKey?.(event.key)) event.preventDefault();
 });

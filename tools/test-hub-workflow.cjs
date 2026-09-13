@@ -23,15 +23,16 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
  const check = (condition,message)=>{assert.ok(condition,message);checks++;};
  async function mode(expected) { await page.waitForFunction(value=>document.body.dataset.mode===value,expected); checks++; }
  async function navigationAction(id) {
-  if (!await page.locator('#navigation-dialog').evaluate(dialog=>dialog.open)) {
    if (await page.locator('#viewer-pane').isHidden()) {
     const simulator=page.frame({url:/index\.html\?.*workspace=1/});
     await simulator.locator('#shareBtn').click();
     await simulator.locator('#workspace-reference').click();
+    if (id==='#narrow-viewer') { await page.waitForFunction(()=>document.body.dataset.narrowPane==='viewer'); return; }
    }
-   await page.frame({url:/\/F\/index\.html\?workspace=1/}).locator('#back-to-editor-btn').click();
-  }
-  await page.locator(id).click();
+   const viewer=page.frame({url:/\/F\/index\.html\?workspace=1/});
+   await viewer.locator('#viewer-share-btn').click();
+   await viewer.locator(id).click();
+   if (id.startsWith('#narrow-')) await page.waitForFunction(pane=>document.body.dataset.narrowPane===pane,id.slice('#narrow-'.length));
  }
  async function screenshot(name) { if(output) {fs.mkdirSync(output,{recursive:true}); await page.screenshot({path:path.join(output,name+'.png')});} }
  try {
@@ -44,6 +45,12 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   check(await page.locator('#workspace-bar').count()===0,'no surrounding toolbar reduces the native viewport');
   const normal = await sim.evaluate(()=>getGameStateForExport());
   const frameIdentity = await sim.evaluate(()=>{window.__workflowIdentity=crypto.randomUUID();return window.__workflowIdentity;});
+  await sim.locator('#settingsBtn').click();
+  await sim.locator('.lab-appearance-select').selectOption('dark');
+  await viewer.waitForFunction(()=>document.documentElement.dataset.labTheme==='dark'); checks++;
+  await sim.locator('.lab-appearance-select').selectOption('light');
+  await viewer.waitForFunction(()=>document.documentElement.dataset.labTheme==='light'); checks++;
+  await sim.locator('#settings-close').click();
   await screenshot('simulator');
   await sim.locator('#startGameBtn').click();
   await mode('playing');
@@ -57,6 +64,8 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   await sim.locator('#workspace-open-replay').click();
   await page.locator('#replay-file').setInputFiles({name:'practice.tetrisevent.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(fixture))});
   await mode('viewer');
+  check(await viewer.locator('#back-to-editor-btn').isHidden(),'no generic screen button');
+  check(await viewer.locator('#viewer-controls .lab-settings-open').count()===0,'no viewer appearance settings button');
   await viewer.locator('#viewer-page-slider').fill('2');
   await viewer.locator('#viewer-page-slider').dispatchEvent('input');
   check(await viewer.evaluate(()=>currentPageIndex)===2,'source seek applied');
@@ -87,7 +96,7 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   await sim.locator('#startGameBtn').click(); await mode('playing');
   await page.keyboard.press('Space');
   await sim.locator('#exportFumenBtn').click(); await mode('viewer');
-  check(await page.locator('#source-button').evaluate(button=>!button.hidden),'practice recording has source return');
+  check(await viewer.locator('#source-button').evaluate(button=>button.style.display!=='none'),'practice recording has source return');
   check(await viewer.evaluate(()=>fumenPages.length)>0,'practice recording is playable');
   await navigationAction('#source-button');
   await viewer.waitForFunction(()=>currentPageIndex===2);
@@ -156,7 +165,7 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   recoveredSim=page.frame({url:/index\.html\?.*workspace=1/});
   check(await recoveredSim.evaluate(()=>gameState)==='EDITING','recovered game is stopped');
   await navigationAction('#interrupted-button');await mode('viewer');
-  check(await page.locator('#source-button').evaluate(button=>!button.hidden),'interrupted recording retains source');
+  check(await page.frame({url:/\/F\/index\.html\?workspace=1/}).locator('#source-button').evaluate(button=>button.style.display!=='none'),'interrupted recording retains source');
   check(await page.locator('#save-replay-form').count()===0,'no user save form');
   check(await page.locator('#record-list').count()===0,'no replay library');
   await navigationAction('#home-button');await mode('simulator');
