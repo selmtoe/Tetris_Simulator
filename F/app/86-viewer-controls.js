@@ -5,6 +5,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const panel = document.getElementById('viewer-controls-panel');
     const canvas = document.getElementById('viewerCanvas');
     const viewer = document.getElementById('viewer-container');
+    // Keep long presses on the replay surface from opening native selection
+    // controls. Share/export dialogs are outside this surface and retain copy.
+    viewer.addEventListener('contextmenu', event => event.preventDefault());
+    viewer.addEventListener('selectstart', event => event.preventDefault());
     let pinned = false;
     let persistent = false;
     let layoutFrame = 0;

@@ -88,7 +88,7 @@ const receiverHTML = '<script>window.received=[];window.receiveExtensionImage=as
             const count = await receiver.evaluate(() => received.length);
             equal(count, 1, mode + ': image received once');
             equal(await receiver.evaluate(() => received[0].startsWith('data:image/jpeg;base64,')), true, 'real video JPEG delivered');
-            equal(await page.locator('#ppt-scanner-notice').isVisible(), true, 'delivery notification visible');
+            equal(await page.locator('#ppt-scanner-notice').count(), 0, 'successful delivery does not show an explanation');
             await page.close();
         }
         // The Lab bridge asks the worker to capture all frames exactly once.

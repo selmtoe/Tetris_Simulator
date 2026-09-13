@@ -85,6 +85,8 @@ export function createPanes({getFlow, canPair, commit, changed, resized}) {
         commit(target);
     }
     for (const [element, opening] of [[divider,false],[edge,true]]) {
+        element.addEventListener('contextmenu', event => event.preventDefault());
+        element.addEventListener('selectstart', event => event.preventDefault());
         element.addEventListener('pointerdown', event => begin(event, opening));
         element.addEventListener('pointermove', progress);
         element.addEventListener('pointerup', event => end(event));

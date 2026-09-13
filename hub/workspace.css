@@ -11,6 +11,7 @@ button:focus-visible, input:focus-visible, #workspace-divider:focus-visible { ou
 
 #workspace-divider { position: absolute; z-index: 30; top: 0; bottom: 0; width: 7px; transform: translateX(-50%); background: var(--border-color); cursor: col-resize; touch-action: none; }
 #workspace-divider:hover, #workspace-divider:focus-visible { background: var(--lab-accent); }
+#workspace-divider, #workspace-divider *, #pane-edge, #pane-edge *, #divider-hint { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 body[data-dragging="true"] iframe { pointer-events: none; }
 dialog { color: var(--font-color); background: var(--lab-surface); border: 1px solid var(--border-color); border-radius: 12px; width: min(620px, calc(100vw - 48px)); max-height: calc(100dvh - 64px); padding: 20px; }
 dialog::backdrop { background: #0006; }

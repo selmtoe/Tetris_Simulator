@@ -579,6 +579,9 @@ flex-wrap: wrap;
         gap: 10px;
 }
     #viewer-container {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
         display: none;
         position: fixed;
         top: 0;

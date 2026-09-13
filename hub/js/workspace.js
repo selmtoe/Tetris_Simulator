@@ -253,7 +253,6 @@ enqueue(async () => {
                 if (flow.mode === 'split' && !currentDocument) flow = initialWorkflow();
                 if (Number.isFinite(saved.splitWidth)) panes.setRatio(saved.splitWidth);
                 render();
-                if (!interruptedRecord) notice(saved.flow.mode === 'playing' ? 'このタブの作業を復元しました。試合は停止した準備画面に戻しています。' : 'このタブの作業を復元しました。');
             }
         } catch (error) {
             console.warn('Workspace recovery could not be read:', error);

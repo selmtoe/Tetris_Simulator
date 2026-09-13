@@ -132,7 +132,6 @@ async function sendImage(imageData) {
                 if (current.status !== 'loading') throw error;
             }
             if (results?.some(item => item.result?.accepted)) {
-                await notify(target.id, '動画の画像を送りました。認識結果はシミュレータに表示されます。');
                 return target.id;
             }
         }
