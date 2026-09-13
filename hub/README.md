@@ -56,6 +56,12 @@ private Lab data and analysis datasets are outside the public artifact.
 The Pages workflow builds this folder and publishes only that artifact on main.
 The feature branch does not deploy the public site.
 
+The static build fingerprints every HTML script/style URL after applying the
+approved appearance. Its generated service workers precache only present files,
+prefer the network and fall back only to their own build cache. Old native browser
+caches cannot supply saturated palettes to the new silhouette CSS. Recovery
+storage and user preferences are retained across these asset updates.
+
 Native editor access is retained through `F/?view=editor`. `?standalone=1` bypasses
 the static entry redirect. Existing te1/v3/f1/f2, simulator snapshots, native
 recovery exports and legacy Hub shared payloads remain importable.
@@ -75,6 +81,9 @@ Run `tools/test-hub-workflow.cjs` against the built bundle with Playwright. Set
 use an isolated profile and cover both return origins, immutable sources, independent
 seeking, mobile layout, direct links, reload recovery and interrupted recordings.
 `tools/test-web-build.py` checks static paths, appearance and deployment boundaries.
+`tools/test-web-cache-upgrade.cjs` installs a legacy native cache in an isolated
+browser, upgrades to the static build and verifies the soft palette without
+clearing old caches or the saved appearance preference.
 `tools/test-hub-appearance.cjs` compares native and embedded viewport, board and
 control geometry at desktop/mobile widths in both themes, and captures both views.
 The existing event codec and viewer AI/export regression checks also remain applicable.

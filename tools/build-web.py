@@ -10,6 +10,7 @@ import json
 import re
 from pathlib import Path
 import shutil
+from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlsplit, urlunsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('web_appearance', ROOT / 'tools/tetris-lab/preview_appearance.py')
@@ -50,6 +51,47 @@ def approved_labels(html):
     return html
 
 
+def version_assets(output):
+    """The themed scripts must never reuse a native app's cached URL."""
+    precache = set()
+    for page in ('index.html', 'F/index.html', 'hub/index.html'):
+        precache.add(page)
+        def version(match):
+            raw = match[2].replace('&amp;', '&')
+            url = urlsplit(raw)
+            if url.scheme or url.netloc:
+                return match[0]
+            relative = unquote(urlsplit(urljoin('/' + page, raw)).path).lstrip('/')
+            asset = output / relative
+            if asset.suffix not in ('.js', '.css') or not asset.is_file():
+                return match[0]
+            digest = hashlib.sha256(asset.read_bytes()).hexdigest()[:16]
+            query = [(key, value) for key, value in parse_qsl(url.query) if key != 'build']
+            query.append(('build', digest))
+            versioned = urlunsplit(('', '', url.path, urlencode(query), url.fragment))
+            precache.add(urljoin('/' + page, versioned).lstrip('/'))
+            return match[1] + versioned.replace('&', '&amp;') + match[3]
+        html = (output / page).read_text(encoding='utf-8')
+        html = re.sub(r'(<(?:script|link)\b[^>]*\b(?:src|href)=")([^"]+)("[^>]*>)', version, html)
+        (output / page).write_text(html, encoding='utf-8')
+
+    # Use only assets actually present in the public build. The native worker's
+    # precache list contains optional development products; missing ones prevent
+    # its upgrade and leave an older, cache-first worker in control.
+    template = (ROOT / 'tools/web-service-worker.js').read_text(encoding='utf-8')
+    fingerprint = hashlib.sha256(template.encode())
+    for asset in sorted(output.rglob('*')):
+        if asset.is_file() and asset.name != 'sw.js':
+            fingerprint.update(asset.relative_to(output).as_posix().encode())
+            fingerprint.update(hashlib.sha256(asset.read_bytes()).digest())
+    build_id = fingerprint.hexdigest()[:16]
+    for name, root_path in [('sw.js', './'), ('hub/sw.js', '../')]:
+        worker = template.replace('__BUILD_ID__', build_id)
+        worker = worker.replace('__PRECACHE__', json.dumps(sorted(precache)))
+        worker = worker.replace('__ROOT_PATH__', json.dumps(root_path))
+        (output / name).write_text(worker, encoding='utf-8')
+
+
 def build(output):
     output = output.resolve()
     # Refuse to clean any directory other than this dedicated generated tree.
@@ -87,6 +129,7 @@ def build(output):
             shutil.copyfile(source, destination)
     for source, target in [('preview-theme.css', 'appearance.css'), ('preview-appearance.js', 'appearance.js')]:
         shutil.copyfile(ROOT / 'tools/tetris-lab' / source, output / 'shared' / target)
+    version_assets(output)
     (output / '.nojekyll').write_text('', encoding='utf-8')
     manifest = {path.relative_to(output).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in sorted(output.rglob('*')) if path.is_file()}

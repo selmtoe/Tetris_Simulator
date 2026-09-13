@@ -5,7 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import re
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import parse_qs, unquote, urljoin, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / 'dist/pages'
@@ -34,6 +34,10 @@ class AssetParser(HTMLParser):
         resolved = urlsplit(urljoin('/Tetris_Simulator/' + self.page, url)).path
         check(resolved.startswith('/Tetris_Simulator/'), f'Root-absolute asset breaks Pages prefix: {url}')
         check((OUTPUT / unquote(resolved.removeprefix('/Tetris_Simulator/'))).is_file(), f'Missing asset: {url}')
+        asset = OUTPUT / unquote(resolved.removeprefix('/Tetris_Simulator/'))
+        if asset.suffix in ('.js', '.css'):
+            expected = hashlib.sha256(asset.read_bytes()).hexdigest()[:16]
+            check(parse_qs(urlsplit(url).query).get('build') == [expected], f'Asset can collide with a native browser cache: {url}')
 
 
 manifest = json.loads((OUTPUT / 'build-manifest.json').read_text())
