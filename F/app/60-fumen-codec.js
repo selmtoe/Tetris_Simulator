@@ -122,7 +122,7 @@ async function encodeSharedStateHash(text) {
 }
 
 async function decodeSharedStateText(value) {
-    let text = String(value || '').trim().replace(/^\uFEFF/, '');
+    let text = window.TetrisLinkFile?.extract(value) ?? String(value || '').trim().replace(/^\uFEFF/, '');
     if (!text) throw new Error('Empty shared data');
     const internetShortcut = text.match(/^\[InternetShortcut\]\s*URL=(\S+)/i);
     if (internetShortcut) return decodeSharedStateText(internetShortcut[1]);

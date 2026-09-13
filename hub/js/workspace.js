@@ -1,3 +1,4 @@
+import { createPanes } from './panes.js';
 import { initialWorkflow, transition } from './workflow.js';
 import { workspaceIdentity, readRecovery, writeRecovery } from './recovery.js';
 
@@ -12,6 +13,8 @@ let flow = initialWorkflow();
 let currentDocument = null;
 let practice = null;
 let normalDraft = null;
+let recordReturn = null;
+let interruptedDismissed = false;
 let serial = Promise.resolve();
 let noticeTimer;
 const parameters = new URLSearchParams(location.search);
@@ -36,7 +39,7 @@ function queueRecovery() {
                 : interruptedRecord;
             await writeRecovery(recoveryId, {
                 version: 1, flow: clone(flow), currentDocument: clone(currentDocument),
-                practice: clone(practice), normalDraft: clone(normalDraft), sim: sim.state,
+                practice: clone(practice), normalDraft: clone(normalDraft), recordReturn: clone(recordReturn), sim: sim.state,
                 simConfiguration: sim.configuration,
                 interruptedRecord: clone(recoveryRecord),
                 splitWidth: Number($('workspace-divider').getAttribute('aria-valuenow'))
@@ -74,22 +77,10 @@ function inform(role, action, data) {
 function render() {
     document.body.dataset.mode = flow.mode;
     document.body.dataset.narrowPane = flow.narrowPane;
-    $('simulator-pane').hidden = flow.mode === 'viewer';
-    $('viewer-pane').hidden = !['viewer', 'split'].includes(flow.mode);
-    $('workspace-divider').hidden = flow.mode !== 'split';
+    panes.render();
     document.title = flow.mode === 'viewer' ? `${currentDocument?.title || 'リプレイ'} — Viewer` : 'Simulator';
-    const narrow = matchMedia('(max-width: 800px)').matches && flow.mode === 'split';
-    inform('editor', 'layout', { mode: flow.mode, actions: [
-        ['home-button', '通常の準備へ', flow.mode !== 'simulator'],
-        ['source-button', '元リプレイに戻る', Boolean(practice || currentDocument?.source)],
-        ['wide-button', 'ビューワーを広く表示', flow.mode === 'split'],
-        ['resume-button', '練習準備に戻る', flow.mode === 'viewer' && Boolean(practice)],
-        ['interrupted-button', '中断前の記録を見る', Boolean(interruptedRecord) && ['simulator', 'split'].includes(flow.mode)],
-        ['narrow-simulator', '練習準備を表示', narrow && flow.narrowPane !== 'simulator'],
-        ['narrow-viewer', '元リプレイを表示', narrow && flow.narrowPane !== 'viewer'],
-        ['records-button', 'リプレイを開く', true]
-    ] });
-    inform('sim', 'layout', { mode: flow.mode, interrupted: Boolean(interruptedRecord) });
+    inform('editor', 'layout', { mode: flow.mode });
+    $('interrupted-notice').hidden = !interruptedRecord || interruptedDismissed || flow.mode === 'playing' || flow.mode === 'viewer';
     requestAnimationFrame(() => {
         inform('sim', 'resize');
         inform('editor', 'resize');
@@ -97,11 +88,8 @@ function render() {
     });
 }
 function move(event) { flow = transition(flow, event); render(); queueRecovery(); }
-function showRecords() {
-    $('records-dialog').showModal();
-}
 function showInterrupted() {
-    if (interruptedRecord) return openReplay(interruptedRecord.data, { title: '中断前のプレイ記録', source: interruptedRecord.source });
+    if (interruptedRecord) return openReplay(interruptedRecord.data, { title: '中断前のプレイ記録', source: interruptedRecord.source, recording: true });
 }
 function newDocument(value, title) {
     return { id: crypto.randomUUID(), ...clone(value), title: title || value.title || 'リプレイ' };
@@ -111,9 +99,14 @@ async function displayDocument(document) {
     currentDocument = clone(document);
 }
 async function openReplay(input, options = {}) {
+    const returning = options.recording ? {
+        flow: flow.mode === 'playing' ? transition(flow, 'return') : clone(flow),
+        document: currentDocument ? { ...clone(currentDocument), ...await request('editor', 'document') } : null
+    } : null;
     if (flow.mode === 'playing') await request('sim', 'stop');
     const loaded = await request('editor', 'load', { input, context: options.context });
     currentDocument = newDocument(loaded, options.title);
+    recordReturn = returning;
     if (options.external) {
         if (normalDraft) await request('sim', 'apply', normalDraft);
         normalDraft = null;
@@ -121,10 +114,10 @@ async function openReplay(input, options = {}) {
         flow = { ...flow, hasPractice: false };
     }
     if (options.source) currentDocument.source = clone(options.source);
-    $('records-dialog').close();
     move('replay');
 }
 async function beginPractice(state, source) {
+    recordReturn = null;
     if (flow.mode === 'playing') await request('sim', 'stop');
     if (!practice) normalDraft = await request('sim', 'state');
     const origin = newDocument(source, currentDocument?.title || source.title);
@@ -135,23 +128,33 @@ async function beginPractice(state, source) {
     await request('sim', 'apply', state);
     move('practice');
 }
-async function goHome() {
-    if (flow.mode === 'playing') await request('sim', 'stop');
-    if (normalDraft) await request('sim', 'apply', normalDraft);
-    normalDraft = null;
-    practice = null;
-    move('home');
+async function returnFromRecord() {
+    if (!recordReturn) return;
+    const target = recordReturn;
+    if (target.document) await displayDocument(target.document);
+    else currentDocument = null;
+    flow = clone(target.flow);
+    recordReturn = null;
+    render(); queueRecovery();
 }
-async function showSource() {
-    const source = practice?.source || currentDocument?.source;
-    if (!source) return;
-    await displayDocument(source);
-    move('wide');
-}
-async function resumePractice() {
-    if (!practice) return;
-    if (currentDocument?.id !== practice.source.id) await displayDocument(practice.source);
-    move('resume');
+async function openInput(input, name = '') {
+    const text = TetrisLinkFile.extract(input);
+    let data;
+    if (text.startsWith('{')) { try { data = JSON.parse(text); } catch { /* Viewer decoder supplies the error. */ } }
+    else if (/^https?:/i.test(text)) {
+        try {
+            const url = new URL(text);
+            if (!/\/F(?:\/|$)/i.test(url.pathname) && url.searchParams.get('entry') !== 'viewer') {
+                data = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(url.hash.slice(1)), c => c.charCodeAt(0))));
+            }
+        } catch { /* Compressed viewer links are decoded by the viewer. */ }
+    }
+    if (data?.v === 2 && data.p1) {
+        if (flow.mode === 'playing') await request('sim', 'stop');
+        await request('sim', 'apply', data);
+        normalDraft = null; practice = null; recordReturn = null;
+        move('home');
+    } else await openReplay(text, {external:true, title:name.replace(/\.tetrisevent\.json$|\.(?:json|url|html?|txt)$/i, '') || undefined});
 }
 
 window.addEventListener('message', event => {
@@ -175,64 +178,35 @@ window.addEventListener('message', event => {
         move('start');
     } else if (role === 'sim' && message.type === 'workspaceReturned') {
         move('return');
-    } else if (message.type === 'workspaceAction') {
-        if (navigationActions[message.action]) navigationActions[message.action]();
-        else if (message.action === 'records') showRecords();
-        else if (message.action === 'interrupted') enqueue(showInterrupted);
-        else if (message.action === 'reference' && flow.mode === 'split') move(matchMedia('(max-width: 800px)').matches ? 'narrow-viewer' : 'wide');
+    } else if (message.type === 'workspaceImport' && typeof message.input === 'string') {
+        enqueue(() => openInput(message.input, message.name));
     } else if (role === 'sim' && message.target === 'editor' && message.type === 'loadFumen') {
         const source = flow.playOrigin === 'practice' ? practice?.source : null;
-        enqueue(() => openReplay(message.data, { title: '今回のプレイ記録', source }));
+        enqueue(() => openReplay(message.data, { title: '今回のプレイ記録', source, recording: true }));
     } else if (role === 'editor' && message.target === 'sim' && message.type === 'loadState') {
         enqueue(async () => beginPractice(message.data, message.practice || await request('editor', 'document')));
     }
 });
 
-const navigationActions = Object.assign(Object.create(null), {
-    'home-button': () => enqueue(goHome),
-    'wide-button': () => move('wide'),
-    'resume-button': () => enqueue(resumePractice),
-    'source-button': () => enqueue(showSource),
-    'interrupted-button': () => enqueue(showInterrupted),
-    'narrow-simulator': () => move('narrow-simulator'),
-    'narrow-viewer': () => move('narrow-viewer'),
-    'records-button': showRecords
+const panes = createPanes({
+    getFlow: () => flow,
+    canReturn: () => Boolean(recordReturn),
+    focus: role => move('focus-' + role),
+    reveal: role => {
+        if (flow.mode === 'viewer' && recordReturn) enqueue(returnFromRecord);
+        else move(role ? 'focus-' + role : 'unfold');
+    },
+    changed: queueRecovery,
+    resized: () => { inform('sim', 'resize'); inform('editor', 'resize'); }
 });
 window.addEventListener('resize', render);
-$('close-records').addEventListener('click', () => $('records-dialog').close());
-$('open-file-button').addEventListener('click', () => $('replay-file').click());
-$('open-link-form').addEventListener('submit', event => {
-    event.preventDefault();
-    const text = $('replay-link').value.trim();
-    if (text) enqueue(() => openReplay(text, { external: true }));
-});
-function openFile(file) {
-    if (file) enqueue(async () => openReplay(await file.text(), { external: true, title: file.name.replace(/\.tetrisevent\.json$|\.json$|\.url$/i, '') }));
-}
-$('replay-file').addEventListener('change', () => { openFile($('replay-file').files[0]); $('replay-file').value = ''; });
+$('open-interrupted').addEventListener('click', () => enqueue(showInterrupted));
+$('dismiss-interrupted').addEventListener('click', () => { interruptedDismissed = true; render(); });
 window.addEventListener('dragover', event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); });
-window.addEventListener('drop', event => { if (event.dataTransfer.files.length) { event.preventDefault(); openFile(event.dataTransfer.files[0]); } });
-
-const divider = $('workspace-divider');
-function setSplit(percent) {
-    const value = Math.min(70, Math.max(30, percent));
-    document.body.style.setProperty('--simulator-width', `${value}%`);
-    divider.setAttribute('aria-valuenow', String(Math.round(value)));
-}
-divider.addEventListener('pointerdown', event => {
-    divider.setPointerCapture(event.pointerId);
-    document.body.dataset.dragging = 'true';
-});
-divider.addEventListener('pointermove', event => {
-    if (document.body.dataset.dragging !== 'true') return;
-    const rect = $('workspace-panes').getBoundingClientRect();
-    setSplit((event.clientX - rect.left) / rect.width * 100);
-});
-for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) divider.addEventListener(type, () => { delete document.body.dataset.dragging; });
-divider.addEventListener('keydown', event => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) return;
-    event.preventDefault();
-    setSplit(event.key === 'Home' ? 50 : Number(divider.getAttribute('aria-valuenow')) + (event.key === 'ArrowLeft' ? -5 : 5));
+window.addEventListener('drop', event => {
+    const file = event.dataTransfer.files[0];
+    if (!file || !/\.(?:html?|url|json|txt|tetrisevent)$/i.test(file.name)) return;
+    event.preventDefault(); enqueue(async () => openInput(await file.text(), file.name));
 });
 
 function applyTheme() {
@@ -242,7 +216,7 @@ function applyTheme() {
 applyTheme();
 window.addEventListener('storage', event => { if (event.key === 'lab-appearance-mode') applyTheme(); });
 document.addEventListener('keydown', event => {
-    if (event.defaultPrevented || event.repeat || $('records-dialog').open || event.target.closest('input,textarea,select,button,[contenteditable]')) return;
+    if (event.defaultPrevented || event.repeat || event.target.closest('input,textarea,select,button,[contenteditable]')) return;
     if (flow.mode === 'viewer') return;
     if (frames.sim.contentWindow?.PCFinder?.searchIfBoundKey?.(event.key)) event.preventDefault();
 });
@@ -292,12 +266,13 @@ enqueue(async () => {
                 if (saved.currentDocument) await displayDocument(saved.currentDocument);
                 practice = clone(saved.practice);
                 normalDraft = clone(saved.normalDraft);
+                recordReturn = clone(saved.recordReturn);
                 interruptedRecord = clone(saved.interruptedRecord);
                 flow = saved.flow.mode === 'playing' ? transition(saved.flow, 'return') : saved.flow;
                 if (flow.mode === 'split' && !practice) flow = initialWorkflow();
-                if (Number.isFinite(saved.splitWidth)) setSplit(saved.splitWidth);
+                if (Number.isFinite(saved.splitWidth)) panes.setRatio(saved.splitWidth);
                 render();
-                notice(saved.flow.mode === 'playing' ? 'このタブの作業を復元しました。試合は停止した準備画面に戻しています。' : 'このタブの作業を復元しました。');
+                if (!interruptedRecord) notice(saved.flow.mode === 'playing' ? 'このタブの作業を復元しました。試合は停止した準備画面に戻しています。' : 'このタブの作業を復元しました。');
             }
         } catch (error) {
             console.warn('Workspace recovery could not be read:', error);

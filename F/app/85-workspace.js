@@ -3,7 +3,6 @@
     const embedded = window.parent !== window && new URLSearchParams(location.search).get('workspace') === '1';
     const notify = (type, data = {}) => window.parent.postMessage({ target: 'hub', source: 'editor', type, ...data }, location.origin);
     let ready = false;
-    let workspaceActions;
     const context = () => ({ caseIndex: currentCaseIndex, pageIndex: currentPageIndex });
     function documentState() {
         return { data: getCollectionDataForExport(), context: context(), title: currentCase()?.name || 'リプレイ' };
@@ -44,11 +43,12 @@
             }
             applied = applyCollectionData({ v: 3, m: data.m || '1P', cases: [{ name: '局面', kind: 'snapshot', gameMode: data.m || '1P', pages: [page] }] });
         } else if (typeof applyVideoRecoveryData === 'function') applied = applyVideoRecoveryData(data);
-        if (!applied) throw new Error('対応するリプレイファイル・共有リンクを選んでください。');
+        if (!applied) throw new Error('対応する共有リンクを開いてください。');
         showViewer();
         return documentState();
     }
     window.TetrisWorkspace = {
+        import: loadDocument,
         practice(stateData) {
             const source = documentState();
             if (window.parent !== window) {
@@ -86,22 +86,6 @@
                 case 'layout':
                     document.getElementById('viewer-simulator-btn').title = message.data.mode === 'split'
                         ? 'この局面を左に反映' : 'この局面から練習';
-                    for (const [id, label, visible] of message.data.actions) {
-                        let button = workspaceActions.querySelector(`#${id}`);
-                        if (!button) {
-                            button = document.createElement('button');
-                            button.id = id;
-                            button.type = 'button';
-                            button.className = 'button';
-                            button.textContent = label;
-                            button.addEventListener('click', () => {
-                                document.getElementById('share-close').click();
-                                notify('workspaceAction', { action: id });
-                            });
-                            workspaceActions.append(button);
-                        }
-                        button.style.display = visible ? '' : 'none';
-                    }
                     updateScale();
                     break;
                 case 'resize': updateScale(); break;
@@ -118,14 +102,6 @@
         ready = true;
         if (embedded) {
             document.getElementById('back-to-editor-btn').style.display = 'none';
-            const section = document.createElement('div');
-            section.className = 'share-section';
-            const heading = document.createElement('h3');
-            heading.textContent = 'リプレイと練習';
-            workspaceActions = document.createElement('div');
-            workspaceActions.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px';
-            section.append(heading, workspaceActions);
-            document.querySelector('#share-modal .modal-controls').before(section);
             document.getElementById('viewer-simulator-btn').title = 'この局面から練習';
             notify('workspaceReady');
         }

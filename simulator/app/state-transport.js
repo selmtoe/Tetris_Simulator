@@ -211,7 +211,7 @@ function generateAndDisplayLink(options = {
 
 function openShareModal() {
     generateAndDisplayLink();
-    document.getElementById('advanced-link-options').style.display = 'none';
+    document.getElementById('advanced-link-options').style.display = 'block';
     document.getElementById('share-modal').style.display = 'flex';
 }
 function pollGamepads() {

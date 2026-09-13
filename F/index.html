@@ -1,6 +1,7 @@
 <!DOCTYPE html> 
 <html lang="ja">
 <head>
+<script defer src="../shared/link-file.js" data-app="viewer"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -210,6 +211,7 @@ max-width: 500px; font-family: var(--font-ui);">
                 <div style="display: flex;
 gap: 10px; margin-top: 5px; flex-wrap: wrap;">
                     <button id="copy-link-btn" class="button">リンクをコピー</button>
+                    <button id="save-link-btn" class="button">リンクを保存</button>
                     <button id="export-fumen-p1-btn" class="button" title="本家テト譜リンクをコピー（HOLD/NEXTは含まれません）" >本家テト譜をコピー（1P）</button>
                     <button id="export-fumen-p2-btn" class="button" style="display: none;" title="本家テト譜リンクをコピー（HOLD/NEXTは含まれません）">本家テト譜をコピー（2P）</button>
                 </div>
@@ -218,17 +220,6 @@ gap: 10px; margin-top: 5px; flex-wrap: wrap;">
                     <a id="fumen-p2-open" class="share-open-link" target="_blank" rel="noopener noreferrer" hidden>Open official Fumen (2P)</a>
                 </div>
             </div>
-        </div>
-
-        
-        <hr style="border-color: var(--primary-color); margin: 20px 0;">
-        
-        <div class="share-section">
-            <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">インポート</h3>
-            <p></p>
-            <button id="import-from-data-btn" class="button">クリップボードからインポート</button>
-            <button id="import-event-file-btn" class="button">以前のリプレイファイルを読み込む</button>
-            <input id="import-event-file" type="file" accept=".json,.tetrisevent,application/json" hidden>
         </div>
 
         <div class="modal-controls" style="text-align: center;

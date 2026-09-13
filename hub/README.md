@@ -1,5 +1,36 @@
 # Simulator / Viewer workspace
 
+## Local divider trial (2026-09-14)
+
+This branch is a local trial; production remains at `282026f`. Its starting point
+is preserved on GitHub as `hub-before-divider-20260914`.
+
+Ordinary entry stays full simulator. Entering practice from a replay starts in
+split view. Drag the divider toward either edge and release to stow that pane.
+Inside the outer 15%, only the pane about to disappear becomes blurred and dim;
+moving back clears the cue, and pointer cancellation restores the previous view.
+Pull the remaining edge grip inward at least 40px to restore the split width.
+Narrow screens use the same edge pull to exchange the visible pane. Keyboard
+arrows adjust the divider, Ctrl+arrows focus one pane, and Enter on the edge
+restores the hidden pane. Folding never changes the practice origin.
+
+There is no divider popup or new Back button. When viewing a play recording,
+pulling from the left returns to the preceding preparation and its reference.
+Interrupted recordings are accessible from a contextual recovery notice.
+
+Share now contains links, Copy, Save link, and the existing link options shown
+inline. Navigation and import sections are removed. Save link creates an escaped
+HTML launcher containing exactly the generated share URL. Opening its link or
+dropping the saved HTML into either pane loads the associated simulator/replay.
+Old JSON and .url drops remain readable; paste outside a text input also loads
+a link. The launcher uses the online application rather than bundling the engine.
+
+For this trial run `tools/test-hub-divider.cjs`, `tools/test-hub-tabs.cjs`, and
+`tools/test-web-build.py`. The older menu-based workflow/control suites below
+describe production and are superseded by the divider suite for this branch.
+
+The following sections document the production version preceding this trial.
+
 Hub controls the existing simulator and viewer without replacing their designs.
 The public build applies the approved appearance from `tools/tetris-lab/preview-*`
 at build time; it does not require the personal Lab server.

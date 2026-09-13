@@ -353,7 +353,7 @@ document.getElementById('copy-link-btn').addEventListener('click', () => {
     
 
 
-        document.getElementById('import-from-data-btn').addEventListener('click', async () => {
+        document.getElementById('import-from-data-btn')?.addEventListener('click', async () => {
         try {
             const text = await navigator.clipboard.readText();
             if (!text) {
@@ -399,9 +399,7 @@ document.getElementById('mode-2p').addEventListener('click', () => {
         document.getElementById('swapBtn').style.display = 'inline-block';
         setTimeout(updateScale, 0);
     });
-document.getElementById('advanced-link-btn').addEventListener('click', () => {
-        document.getElementById('advanced-link-options').style.display = 'block';
-    });
+
     
     const startSimCheckbox = document.getElementById('start-sim-checkbox');
     const hideBackCheckbox = document.getElementById('hide-back-btn-checkbox');

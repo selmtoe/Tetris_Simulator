@@ -69,7 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
         input.select();
         copyToClipboard(input.value);
     });
-    document.getElementById('import-from-data-btn').addEventListener('click', async () => {
+    document.getElementById('import-from-data-btn')?.addEventListener('click', async () => {
         try {
             const text = await navigator.clipboard.readText();
             if (!text) {

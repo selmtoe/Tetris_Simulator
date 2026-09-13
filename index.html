@@ -1,6 +1,7 @@
 <!DOCTYPE html> 
 <html lang="ja">
 <head>
+<script defer src="./shared/link-file.js" data-app="simulator"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -272,10 +273,10 @@ justify-content: center; gap: 10px; flex-wrap: wrap;">
                 <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box;">
                 <div style="display: flex; gap: 10px; margin-top: 5px;">
                     <button id="copy-link-btn" class="button">リンクをコピー</button>
-                    <button id="advanced-link-btn" class="button">リンクの設定</button>
+                    <button id="save-link-btn" class="button">リンクを保存</button>
                 </div>
             </div>
-            <div id="advanced-link-options" style="display: none; margin-top: 15px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px;">
+            <div id="advanced-link-options" style="display: block; margin-top: 15px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px;">
                 <div class="setting-item">
                     <label>
                         <input type="checkbox" id="start-sim-checkbox">
@@ -295,15 +296,6 @@ justify-content: center; gap: 10px; flex-wrap: wrap;">
                     </label>
                 </div>
             </div>
-        </div>
-        
-        <hr style="border-color: var(--primary-color); margin: 20px 0;">
-        
-
-        <div class="share-section">
-            <h3>インポート</h3>
-            <p></p>
-            <button id="import-from-data-btn" class="button">クリップボードからインポート</button>
         </div>
 
 

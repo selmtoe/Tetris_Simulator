@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
+    <script defer src="../shared/link-file.js" data-app="workspace"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#e9e9e9">
@@ -15,21 +16,16 @@
         <section id="simulator-pane" class="workspace-pane" aria-label="シミュレータ">
             <iframe id="iframe-sim" title="シミュレータ" allow="gamepad; clipboard-read; clipboard-write; fullscreen"></iframe>
         </section>
-        <div id="workspace-divider" role="separator" aria-label="左右の幅を調整" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" tabindex="0" hidden></div>
+        <div id="workspace-divider" role="separator" aria-label="左右の幅を調整" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" tabindex="0" hidden>
+            <span id="divider-grip" aria-hidden="true">⋮</span>
+        </div>
         <section id="viewer-pane" class="workspace-pane" aria-label="リプレイビューワー" hidden>
             <iframe id="iframe-editor-custom" title="リプレイビューワー" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
         </section>
     </main>
-    <dialog id="records-dialog" aria-labelledby="records-heading">
-        <div class="dialog-heading"><h2 id="records-heading">リプレイを開く</h2><button id="close-records">閉じる</button></div>
-        <form id="open-link-form" class="record-form">
-            <label for="replay-link">共有リンク・リプレイデータ</label>
-            <div><input id="replay-link" type="text" autocomplete="off" placeholder="リンクを貼り付け"><button type="submit">開く</button></div>
-        </form>
-        <button id="open-file-button">リプレイファイルを選ぶ</button>
-        <input id="replay-file" type="file" accept=".json,.txt,.url" hidden>
-        <p class="storage-note">リプレイの共有リンクは、ビューワーの「共有」からコピーできます。</p>
-    </dialog>
+    <div id="pane-edge" role="separator" aria-orientation="vertical" tabindex="0" hidden><span aria-hidden="true">⋮</span></div>
+    <p id="divider-hint" aria-live="polite"></p>
+    <aside id="interrupted-notice" hidden><span>中断前の記録が残っています</span><button id="open-interrupted">記録を見る</button><button id="dismiss-interrupted" aria-label="案内を閉じる">×</button></aside>
     <p id="workspace-status" role="status" aria-live="polite" hidden></p>
 </body>
 </html>
