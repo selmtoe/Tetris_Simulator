@@ -1860,7 +1860,7 @@ targetState.x += 1;
             }
 
                         const debugDisplay = document.getElementById('ai-tree-debug-display');
-if (debugDisplay) {
+if (debugDisplay && gameSettings.debugEnabled) {
                 debugDisplay.style.display = 'block';
 debugDisplay.innerHTML = `<span style="color:#88ffff">Draw Path: ${pieceForPathfinding} ${startState.x},${startState.y},${startState.r} -> ${targetState.x},${targetState.y},${targetState.r}</span>`;
             }

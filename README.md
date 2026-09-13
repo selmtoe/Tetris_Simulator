@@ -50,13 +50,13 @@ mapping, scope, licensing note, and test command.
 
 ## 探索・分析
 
-プレイ中の「探索」をホバーまたはタップすると、PC探索・AI探索・REN探索を縦に表示します。
+1P・2Pどちらも、プレイ中の「探索」をホバーまたはタップすると、PC探索・AI探索・REN探索を縦に表示します。シミュレータの探索対象は常に1Pです。
 NEXTは既定で10個（現在ミノと別）です。旧既定の8個は初回読み込みで10個へ移行します。
-PC/AI/RENのガイドどおりに設置すると次の手が表示され、異なる配置にした場合は解除されます。
+PC/AI/RENのガイドどおりに設置すると次の手が表示され、異なる配置にした場合は解除されます。探索の開始・進行・終了の説明メッセージは表示しません。Drawの経路表示はデバッグモードだけで有効です。
 
 - **PC探索**：既存のsfinder-cpp WASMを使用。現在ミノ＋NEXT10個＋HOLDから、PCになる手順を探します。`P`のショートカットも維持しています。
 - **AI探索**：対戦用と同じCold ClearのRust/WASMを独立した探索状態で使用し、既知のミノまでの予定手順を表示します。既定の思考時間は50msです。
-- **REN探索**：現在の局面から毎手ライン消去が続く手順を全探索します。HOLD、空HOLD、HOLD禁止とSRSの回転入れに対応。指定済みのミノ列は画面外の続きも読み、未生成のランダムミノは仮定しません。最初の消去は0 RENです。途中結果は「暫定」、探索が完了した結果だけ「最大」と表示します。探索中に同じ項目を再選択すると中止できます。
+- **REN探索**：現在の局面から毎手ライン消去が続く手順を全探索します。HOLD、空HOLD、HOLD禁止とSRSの回転入れに対応。指定済みのミノ列は画面外の続きも読み、未生成のランダムミノは仮定しません。最初の消去は0 RENです。探索中に同じ項目を再選択すると中止でき、見つかった途中結果があればその手順を表示します。ビューワーでは途中結果を「暫定」、完了した結果だけ「最大」と表示します。
 
 ビューワーでは「分析」からPC探索・REN探索・既存のAI分析を開けます。
 PC/RENの手順は元のリプレイを変更せず、スライダーや矢印で確認できます。
@@ -72,7 +72,7 @@ solution-finder本家にも[renコマンド](https://github.com/knewjade/solutio
 
 ### PC guide details
 
-During a 1P game, press `P` (or select **PC探索**) to check the live board,
+During a 1P or 2P game, press `P` (or select **PC探索**) to check P1's live board,
 the current mino, the visible NEXT queue, and HOLD for a perfect-clear route.
 When one is found, the next placement is shown with a translucent dashed
 outline on the board. If the indicated mino is placed in exactly that

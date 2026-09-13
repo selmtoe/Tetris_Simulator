@@ -11,8 +11,6 @@
 }
 .search-menu.is-open { opacity: 1; visibility: visible; pointer-events: auto; clip-path: inset(0 round 16px); transform: none; }
 .search-menu .button { width: 100%; margin: 0; font-size: 13px; padding: 10px 12px; text-align: left; }
-#search-result { position: absolute; top: calc(100% + 8px); right: 0; max-width: min(360px, 90vw); font: 12px/1.5 var(--font-ui, sans-serif); padding: 6px 10px; border-radius: 10px; background: var(--lab-surface, var(--bg-color)); color: var(--font-color); }
-#search-result:empty { display: none; }
 .route-dialog { padding: 22px; width: min(560px, calc(100vw - 36px)); max-height: calc(100dvh - 32px); box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 18px; background: var(--lab-surface, var(--bg-color)); color: var(--font-color); }
 .route-dialog::backdrop { background: rgb(0 0 0 / .28); }
 .route-dialog h2 { margin: 0 0 12px; font-size: 18px; }

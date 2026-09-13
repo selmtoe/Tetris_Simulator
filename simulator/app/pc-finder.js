@@ -17,16 +17,10 @@
         return document.getElementById('pcSearchBtn');
     }
 
-    function setStatus(message = '') {
-        const output = document.getElementById('search-result');
-        if (output) output.textContent = message;
-    }
-
     function setSearching(searching) {
         const element = document.getElementById('searchMenuBtn');
         if (!element) return;
         element.setAttribute('aria-busy', String(searching));
-        element.textContent = searching ? '探索中…' : '探索';
     }
 
     function snapshotFor(player, kind = 'pc') {
@@ -60,7 +54,6 @@
 
     function getPlayableP1() {
         if (gameState !== 'PLAYING') return null;
-        if (gameMode !== '1P') return null;
         const player = players[0];
         if (!player || player.gameOver || player.gameClear || player.isClearingLine || player.isSpawning ||
             player.isExecutingSequence || !PIECES.has(player.player.pieceType)) {
@@ -206,37 +199,27 @@
         }
     }
 
-    function discardGuidePlan(player, message = '', tone = 'muted') {
-        clearGuidePlan(player);
-        if (message) setStatus(message, tone);
-    }
-
-    function showCurrentStep(player, continuing) {
+    function showCurrentStep(player) {
         const chain = guidePlan;
         if (!chain || chain.player !== player || chain.phase !== 'guiding') return false;
         if (!boardsEqual(toOccupancy(player.board), chain.expectedBoard)) {
-            discardGuidePlan(player, '盤面が変わったため、PCガイドを解除しました。');
+            clearGuidePlan(player);
             return false;
         }
 
         const step = chain.plan[chain.index];
         const availability = stepAvailability(player, step);
         if (!step || !availability.available) {
-            discardGuidePlan(player, 'HOLDまたはNEXTが変わったため、PCガイドを解除しました。');
+            clearGuidePlan(player);
             return false;
         }
 
         player.setPcGuide(step.cells, step.piece);
         if (!player.pcGuide) {
-            discardGuidePlan(player, 'PCガイドを表示できませんでした。', 'error');
+            clearGuidePlan(player);
             return false;
         }
 
-        const holdHint = availability.needsHold ? `（先にHOLDして ${step.piece} を出します）` : '';
-        const remaining = chain.plan.length - chain.index;
-        const prefix = chain.kind === 'ren' ? `${chain.complete ? '最大' : '暫定'} ${chain.ren} REN（${chain.depth}回連続消去）`
-            : chain.kind === 'ai' ? 'Cold Clear' : `${chain.lines}ラインPC`;
-        setStatus(`${prefix} · 残り${remaining}手${holdHint}`);
         return true;
     }
 
@@ -244,7 +227,7 @@
         const plan = normalizePlan(data.plan);
         const expectedBoard = toOccupancy(player.board);
         if (!plan || !expectedBoard) {
-            discardGuidePlan(player, 'PC探索の結果を解釈できませんでした。', 'error');
+            clearGuidePlan(player);
             return false;
         }
 
@@ -255,11 +238,9 @@
             expectedBoard,
             pendingBoard: null,
             phase: 'guiding',
-            lines: Number.isInteger(data.lines) ? data.lines : 0,
-            depth: Number.isInteger(data.depth) ? data.depth : plan.length,
-            kind: data.kind || 'pc', ren: data.ren, complete: data.complete !== false
+            kind: data.kind || 'pc'
         };
-        return showCurrentStep(player, false);
+        return showCurrentStep(player);
     }
 
     function ensureWorker() {
@@ -277,19 +258,16 @@
                 fingerprint(snapshotFor(currentPlayer, request.kind)) !== request.fingerprint) {
                 resetActiveRequest();
                 disposeWorker();
-                setStatus('局面が変わったため、探索を中止しました。');
                 return;
             }
             if (data.type === 'progress') {
                 if (data.plan?.length) request.partial = data;
-                setStatus(data.plan?.length ? `REN探索中 · 暫定 ${data.ren} REN（再選択で中止）` : 'REN探索中…（再選択で中止）');
                 return;
             }
             resetActiveRequest();
 
             if (data.type === 'error') {
                 console.error('PC finder worker error:', data.message);
-                setStatus(data.message || '探索でエラーが発生しました。', 'error');
                 return;
             }
 
@@ -300,39 +278,22 @@
 
             if (data.status === 'not_found') {
                 currentPlayer.clearPcGuide();
-                setStatus(request.kind === 'ren' ? 'この局面から連続消去できる手順はありません。'
-                    : request.kind === 'ai' ? 'Cold Clearの手が見つかりませんでした。' : '既知のNEXTではPCが見つかりませんでした。', 'muted');
                 return;
             }
 
             if (data.status === 'unsupported') {
                 currentPlayer.clearPcGuide();
-                setStatus(unsupportedMessage(data.reason), 'muted');
                 return;
             }
 
-            setStatus('PC探索の結果を解釈できませんでした。', 'error');
         };
         worker.onerror = error => {
             if (worker !== ownedWorker) { error.preventDefault(); return; }
             console.error('PC finder worker failed:', error);
             resetActiveRequest();
             disposeWorker();
-            setStatus('PC探索Workerを開始できませんでした。', 'error');
         };
         return worker;
-    }
-
-    function unsupportedMessage(reason) {
-        const messages = {
-            board_too_high: '24段より上にブロックがあるため、PC探索の対象外です。',
-            hold_unavailable: 'HOLD直後は探索できません。次のミノ出現後にPを押してください。',
-            invalid_board: '盤面をPC探索用に読み取れませんでした。',
-            invalid_current_piece: '現在ミノを読み取れませんでした。',
-            invalid_next_piece: 'NEXTに未対応のミノがあります。',
-            invalid_hold_piece: 'HOLDを読み取れませんでした。'
-        };
-        return messages[reason] || 'この局面はPC探索の対象外です。';
     }
 
     function isBoundKeyboardKey(key) {
@@ -356,14 +317,12 @@
             resetActiveRequest(); disposeWorker();
             if (previous === kind) {
                 if (request.partial && getPlayableP1() === request.player && fingerprint(snapshotFor(request.player, kind)) === request.fingerprint) startGuidePlan(request.player, request.partial);
-                else setStatus('探索を中止しました。');
                 return;
             }
         }
 
         const player = getPlayableP1();
         if (!player) {
-            setStatus('探索は1Pのプレイ中に利用できます。', 'muted');
             return;
         }
 
@@ -372,7 +331,6 @@
         const id = ++requestId;
         activeRequest = { id, player, kind, fingerprint: fingerprint(snapshot) };
         setSearching(true);
-        setStatus(`${kind === 'pc' ? 'PC' : kind === 'ren' ? 'REN' : 'AI'}探索中…（再選択で中止）`);
 
         try {
             ensureWorker().postMessage({ type: 'search', kind, requestId: id, ...snapshot });
@@ -380,7 +338,6 @@
             console.error('Unable to request PC search:', error);
             resetActiveRequest();
             disposeWorker();
-            setStatus('PC探索を開始できませんでした。', 'error');
             return;
         }
 
@@ -389,14 +346,13 @@
             if (!activeRequest || activeRequest.id !== id) return;
             resetActiveRequest();
             disposeWorker();
-            setStatus('探索は時間切れです。もう一度実行してください。', 'muted');
         }, kind === 'ai' ? 15000 : SEARCH_TIMEOUT_MS);
     }
 
     // Called by Player immediately before it writes the locked mino to board.
     function onBeforeLock(player) {
         if (cancelActiveSearchFor(player)) {
-            discardGuidePlan(player, '局面が変わったため、PC探索を中止しました。');
+            clearGuidePlan(player);
             return false;
         }
 
@@ -406,26 +362,25 @@
             return false;
         }
         if (chain.phase !== 'guiding' || !boardsEqual(toOccupancy(player.board), chain.expectedBoard)) {
-            discardGuidePlan(player, '盤面が変わったため、PCガイドを解除しました。');
+            clearGuidePlan(player);
             return false;
         }
 
         const step = chain.plan[chain.index];
         if (!step || player.player.pieceType !== step.piece || !cellsMatch(lockedCellsFor(player), step.cells)) {
-            discardGuidePlan(player, 'ガイドと異なる配置のため、PCガイドを解除しました。');
+            clearGuidePlan(player);
             return false;
         }
 
         const pendingBoard = boardAfterPlacement(chain.expectedBoard, step.cells);
         if (!pendingBoard) {
-            discardGuidePlan(player, '盤面が変わったため、PCガイドを解除しました。');
+            clearGuidePlan(player);
             return false;
         }
 
         chain.pendingBoard = pendingBoard;
         chain.phase = 'locking';
         player.clearPcGuide();
-        setStatus('PCガイドを確認中…', 'pending', 0);
         return true;
     }
 
@@ -435,7 +390,7 @@
         const chain = guidePlan;
         if (!chain || chain.player !== player || chain.phase !== 'locking') return;
         if (!boardsEqual(toOccupancy(player.board), chain.pendingBoard)) {
-            discardGuidePlan(player, '盤面が変わったため、PCガイドを解除しました。');
+            clearGuidePlan(player);
             return;
         }
 
@@ -444,11 +399,10 @@
         chain.index++;
         if (chain.index >= chain.plan.length) {
             if (chain.kind === 'pc' && !isEmptyBoard(chain.expectedBoard)) {
-                discardGuidePlan(player, 'PC手順の検証に失敗したため、ガイドを解除しました。', 'error');
+                clearGuidePlan(player);
                 return;
             }
             clearGuidePlan(player);
-            setStatus('手順を完了しました。', 'success');
             return;
         }
 
@@ -461,16 +415,16 @@
         const chain = guidePlan;
         if (!chain || chain.player !== player || chain.phase !== 'waitingForSpawn') return;
         if (player.gameOver || player.gameClear || gameState !== 'PLAYING') {
-            discardGuidePlan(player, 'PCガイドを終了しました。');
+            clearGuidePlan(player);
             return;
         }
         if (!boardsEqual(toOccupancy(player.board), chain.expectedBoard)) {
-            discardGuidePlan(player, '盤面が変わったため、PCガイドを解除しました。');
+            clearGuidePlan(player);
             return;
         }
 
         chain.phase = 'guiding';
-        showCurrentStep(player, true);
+        showCurrentStep(player);
     }
 
     // A HOLD is valid only when it makes the guided mino the active mino.
@@ -480,19 +434,13 @@
         const step = chain.plan[chain.index];
         if (!boardsEqual(toOccupancy(player.board), chain.expectedBoard) || !step ||
             player.player.pieceType !== step.piece) {
-            discardGuidePlan(player, 'HOLDで局面が変わったため、PCガイドを解除しました。');
+            clearGuidePlan(player);
         }
     }
 
     function clearForPlayer(player) {
-        const hadPendingSearch = cancelActiveSearchFor(player);
-        const hadGuidePlan = Boolean(guidePlan && guidePlan.player === player);
+        cancelActiveSearchFor(player);
         clearGuidePlan(player);
-        if (hadPendingSearch) {
-            setStatus('局面が変わったため、PC探索を中止しました。');
-        } else if (hadGuidePlan) {
-            setStatus('PCガイドを解除しました。');
-        }
     }
 
     document.addEventListener('keydown', event => {
@@ -516,6 +464,5 @@
         if (element) element.addEventListener('click', () => search('pc'));
         document.getElementById('aiSearchBtn')?.addEventListener('click', () => search('ai'));
         document.getElementById('renSearchBtn')?.addEventListener('click', () => search('ren'));
-        document.getElementById('backToEditorBtn')?.addEventListener('click', () => setStatus(''));
     });
 })();

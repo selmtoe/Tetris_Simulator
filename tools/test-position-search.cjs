@@ -66,6 +66,18 @@ function replay(initial, result) {
         const ai = snapshot(empty(), [...'TILJSZOTIOJ']);
         const aiResult = await query('ai', ai);
         equal(aiResult.status, 'found', 'real Cold Clear WASM route'); replay(ai, aiResult);
+        await sim.evaluate(() => {
+            window.searchReplies = [];
+            const NativeWorker = window.Worker;
+            window.Worker = class extends NativeWorker {
+                constructor(...args) {
+                    super(...args);
+                    if (String(args[0]).includes('route-search-worker')) this.addEventListener('message', event => {
+                        if (event.data.type !== 'progress') window.searchReplies.push(event.data);
+                    });
+                }
+            };
+        });
         await sim.locator('#startGameBtn').click();
         await sim.waitForFunction(() => gameState === 'PLAYING');
         equal(await sim.evaluate(() => players[0].nextQueue.length), 10, 'ten NEXT supplied in play');
@@ -73,11 +85,13 @@ function replay(initial, result) {
         equal(await sim.locator('#sim-search-menu').getAttribute('class'), 'search-menu is-open', 'hover expands search');
         await sim.locator('#aiSearchBtn').click();
         await sim.waitForFunction(() => Boolean(players[0].pcGuide), {timeout:15000});
-        equal(await sim.locator('#search-result').textContent().then(text => text.includes('Cold Clear')), true, 'AI guide is shown');
+        equal(await sim.locator('#search-result').count(), 0, 'search has no text notification');
+        equal(await sim.locator('#searchMenuBtn').textContent(), '探索', 'search button keeps its label');
         // Execute the guide through the real Player lock/spawn hooks. AI ends
         // on a non-empty field; completion must not use the old PC-only check.
         await sim.evaluate(() => { gameSettings.lineClearDelay=0; gameSettings.spawnDelay=0; });
-        for (let index=0; index<11; index++) {
+        const guideDepth = await sim.evaluate(() => searchReplies.at(-1).plan.length);
+        for (let index=0; index<guideDepth; index++) {
             const hasGuide = await sim.evaluate(() => {
                 const player=players[0], guide=player.pcGuide;
                 if (!guide) return false;
@@ -94,10 +108,11 @@ function replay(initial, result) {
                 }
                 throw new Error('Guide geometry cannot be played');
             });
-            if (!hasGuide) break;
-            await sim.waitForFunction(() => Boolean(players[0].pcGuide) || document.getElementById('search-result').textContent.includes('完了'));
+            equal(hasGuide, true, 'AI guide continues to every planned placement');
+            await sim.waitForFunction(() => !players[0].isSpawning && !players[0].isClearingLine);
         }
-        equal(await sim.locator('#search-result').textContent(), '手順を完了しました。', 'AI plan follows locks through completion');
+        equal(await sim.evaluate(() => players[0].pcGuide), null, 'AI guide finishes after the last placement');
+        equal(await sim.locator('#search-result').count(), 0, 'completion adds no notification');
         await sim.locator('#backToEditorBtn').click();
         await sim.evaluate(() => {
             editorData.p1.board=Array.from({length:40},(_,y)=>Array.from({length:10},(_,x)=>y>=20&&x<6?'G':null));
@@ -107,9 +122,60 @@ function replay(initial, result) {
         await sim.locator('#startGameBtn').click();
         await sim.locator('#searchMenuBtn').click();
         await sim.locator('#renSearchBtn').click();
-        await sim.waitForFunction(() => document.getElementById('search-result').textContent.includes('最大 19 REN'));
+        await sim.waitForFunction(() => players[0].pcGuide && document.getElementById('searchMenuBtn').getAttribute('aria-busy') === 'false');
         equal(await sim.evaluate(() => players[0].nextQueue.length),10,'long-queue REN retains ten visible NEXT');
-        equal(await sim.locator('#search-result').textContent().then(text=>text.includes('20回連続消去')),true,'REN reads beyond ten visible previews without generating random pieces');
+        equal(await sim.evaluate(() => [searchReplies.at(-1).ren, searchReplies.at(-1).depth]),[19,20],'REN reads beyond ten visible previews without generating random pieces');
+
+        // Two-player games still search P1, independently of P2's moves.
+        await sim.locator('#backToEditorBtn').click();
+        await sim.locator('#mode-2p').click();
+        await sim.locator('#p2-ai-toggle').uncheck();
+        await sim.evaluate(() => {
+            editorData.p1.board = Array.from({length:40},()=>Array(10).fill(null));
+            editorData.p1.nextQueue = [...'TILJSZOTIOJ'];
+            gameSettings.drawMoveDelay = 0;
+        });
+        await sim.locator('#startGameBtn').click();
+        equal(await sim.evaluate(() => gameMode), '2P', 'real two-player game is running');
+        await sim.locator('#searchMenuBtn').click();
+        await sim.locator('#pcSearchBtn').click();
+        await sim.waitForFunction(() => Boolean(players[0].pcGuide));
+        equal(await sim.evaluate(() => searchReplies.at(-1).kind), 'pc', 'PC search works in 2P');
+        equal(await sim.evaluate(() => players[1].pcGuide), null, 'P2 gets no guide');
+        const p1Guide = await sim.evaluate(() => JSON.stringify(players[0].pcGuide));
+        await sim.evaluate(() => players[1].hardDrop());
+        equal(await sim.evaluate(() => JSON.stringify(players[0].pcGuide)), p1Guide, 'P2 lock leaves P1 guide intact');
+        await sim.locator('#searchMenuBtn').click();
+        await sim.locator('#aiSearchBtn').click();
+        await sim.waitForFunction(() => players[0].pcGuide && searchReplies.at(-1).kind === 'ai');
+        for (const debug of [false, true]) {
+            const draw = await sim.evaluate(async debug => {
+                gameSettings.debugEnabled = debug;
+                const player = players[0], guide = player.pcGuide;
+                const before = JSON.stringify(player.board);
+                const overlay = document.getElementById('ai-tree-debug-display');
+                overlay.style.display = 'none'; overlay.textContent = '';
+                player.drawnBlocks = new Map(guide.cells.map(({x,y}) => [`${x},${y}`, true]));
+                await player.processDrawing();
+                return {moved: before !== JSON.stringify(player.board), visible: getComputedStyle(overlay).display !== 'none', text: overlay.textContent};
+            }, debug);
+            equal(draw.moved, true, 'Draw executes the AI suggestion during 2P');
+            equal(draw.visible, debug, 'Draw path is visible only in debug mode');
+            equal(draw.text.includes('Draw Path:'), debug, 'normal Draw never writes diagnostic text');
+        }
+        await sim.locator('#backToEditorBtn').click();
+        await sim.evaluate(board => {
+            gameSettings.debugEnabled = false;
+            editorData.p1.board = board;
+            editorData.p1.nextQueue = [...'OOOOOOOOOOO'];
+        }, well);
+        await sim.locator('#startGameBtn').click();
+        await sim.locator('#searchMenuBtn').click();
+        await sim.locator('#renSearchBtn').click();
+        await sim.waitForFunction(() => players[0].pcGuide && searchReplies.at(-1).kind === 'ren');
+        equal(await sim.evaluate(() => searchReplies.at(-1).ren), 2, 'REN search works in 2P');
+        equal(await sim.evaluate(() => players[1].pcGuide), null, 'REN only guides P1');
+        equal(await sim.locator('#search-result').count(), 0, '2P search adds no notification');
         for (const width of [1280,390]) {
             const context=await browser.newContext({viewport:{width,height:844},hasTouch:true,serviceWorkers:'block'});
             const viewerPage=await context.newPage(); viewerPage.on('pageerror', error=>errors.push(error.message));
