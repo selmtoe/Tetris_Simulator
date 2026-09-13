@@ -1,0 +1,20 @@
+/* Optional motion preview. No dimensions, palette or board rendering changes. */
+@media (prefers-reduced-motion: no-preference) {
+    :root[data-ui-motion="on"] { --ui-motion-ease: cubic-bezier(.2, .7, .3, 1); }
+    :root[data-ui-motion="on"] :is(button, .button, .mino-icon, .color-swatch) {
+        transition-property: background-color, border-color, color, box-shadow, translate;
+        transition-duration: 160ms;
+        transition-timing-function: var(--ui-motion-ease);
+    }
+    :root[data-ui-motion="on"] :is(button, .button):active:not(:disabled) { translate: 0 1px; }
+    :root[data-ui-motion="on"] #workspace-divider {
+        transition: background-color 160ms var(--ui-motion-ease);
+    }
+    :root[data-ui-motion="on"] .tab-content.active {
+        animation: ui-tab-arrive 160ms var(--ui-motion-ease);
+    }
+    @keyframes ui-tab-arrive {
+        from { opacity: .65; translate: 0 3px; }
+        to { opacity: 1; translate: 0 0; }
+    }
+}

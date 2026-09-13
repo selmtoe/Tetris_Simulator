@@ -23,6 +23,7 @@ FILES = (
     'hub/index.html', 'hub/workspace.css', 'hub/js/workspace.js', 'hub/js/workflow.js', 'hub/js/recovery.js',
     'hub/manifest.json', 'hub/sw.js', 'hub/icon-192.png', 'hub/icon-512.png',
     'shared/workspace-entry.js', 'shared/tetris-event-codec.js', 'shared/cell-cnn-inference.js',
+    'shared/motion.css', 'shared/motion.js',
     'simulator/pc-solver/sfinder-pc.js', 'simulator/pc-solver/sfinder-pc.wasm',
     'simulator/candidate/kasane-stack-ren-candidate-harness.js',
     'simulator/candidate/kasane-stack-ren-telemetry.js',
@@ -121,9 +122,11 @@ def build(output):
             entry = f'<script src="{prefix}shared/workspace-entry.js" data-app="{role}"></script>'
             html = html.replace('<head>', '<head>\n' + entry, 1)
             html = html.replace('</head>', f'<link rel="stylesheet" href="{prefix}shared/appearance.css"><script src="{prefix}shared/appearance.js"></script></head>', 1)
+            html = html.replace('</head>', f'<link rel="stylesheet" href="{prefix}shared/motion.css"><script src="{prefix}shared/motion.js"></script></head>', 1)
             destination.write_text(html, encoding='utf-8')
         elif relative == 'hub/index.html':
             html = source.read_text(encoding='utf-8-sig').replace('../tools/tetris-lab/preview-theme.css', '../shared/appearance.css')
+            html = html.replace('</head>', '<link rel="stylesheet" href="../shared/motion.css"><script src="../shared/motion.js"></script></head>', 1)
             destination.write_text(html, encoding='utf-8')
         else:
             shutil.copyfile(source, destination)

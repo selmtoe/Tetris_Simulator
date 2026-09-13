@@ -28,6 +28,18 @@ Hub has no user save button, replay library or named autosave entries. Files and
 links are opened through the small Open dialog. Sharing and file export remain
 in the viewer. The old Hub's browser storage keys are not read, changed or deleted.
 
+## Optional motion preview
+
+Append `?motion=1` to the workspace URL to try short control transitions, modal
+entrances and preparation/viewer fades. Ordinary URLs retain the existing motion.
+The preview never animates canvas drawing, delays gameplay, transitions pane
+widths or saves a motion preference. OS reduced-motion suppresses the preview.
+`shared/motion.css` and `shared/motion.js` contain the experiment independently.
+
+Restore points on GitHub: `hub-before-motion-20260913` is the full original state;
+`hub-no-motion-20260913` keeps the requested button removals without the experiment.
+Removing `motion=1` is enough to return to ordinary behavior without a code revert.
+
 ## Recovery
 
 IndexedDB database `tetris-workspace-recovery` retains the current workspace per

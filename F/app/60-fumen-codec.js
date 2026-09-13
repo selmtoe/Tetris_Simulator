@@ -700,7 +700,7 @@ async function generateAndDisplayLink() {
     const jsonString = JSON.stringify(stateData);
     const base64Data = await encodeSharedStateHash(jsonString);
     const url = new URL(window.location);
-    for (const parameter of ['workspace', 'entry', 'practice']) url.searchParams.delete(parameter);
+    for (const parameter of ['workspace', 'entry', 'practice', 'motion']) url.searchParams.delete(parameter);
     url.hash = base64Data;
     document.getElementById('share-link-input').value = url.href;
 }

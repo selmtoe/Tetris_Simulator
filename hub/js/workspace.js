@@ -251,6 +251,8 @@ const viewerUrl = new URL('../F/index.html', location.href);
 simUrl.search = parameters.toString();
 simUrl.searchParams.set('workspace', '1');
 viewerUrl.searchParams.set('workspace', '1');
+if (parameters.get('motion') === '1') viewerUrl.searchParams.set('motion', '1');
+const cleanWorkspaceLocation = location.pathname + (parameters.get('motion') === '1' ? '?motion=1' : '');
 const isViewerEntry = entry === 'viewer' || location.hash.startsWith('#data=');
 if (isViewerEntry) flow = transition(flow, 'replay');
 if (!isViewerEntry && location.hash) simUrl.hash = location.hash;
@@ -269,7 +271,7 @@ enqueue(async () => {
         await openReplay(transfer.source.data, { title: transfer.source.title, context: transfer.source.context });
         await beginPractice(transfer.state, transfer.source);
         sessionStorage.removeItem(key);
-        history.replaceState(null, '', location.pathname);
+        history.replaceState(null, '', cleanWorkspaceLocation);
     } else if (isViewerEntry) {
         if (location.hash) {
             const page = Number.parseInt(parameters.get('page'), 10);
@@ -301,7 +303,7 @@ enqueue(async () => {
     }
     // Consume incoming links once, so a reload restores subsequent work instead
     // of importing the original link over the current practice draft.
-    if (location.hash || isViewerEntry) history.replaceState(null, '', location.pathname);
+    if (location.hash || isViewerEntry) history.replaceState(null, '', cleanWorkspaceLocation);
     recoveryEnabled = true;
     queueRecovery();
 });

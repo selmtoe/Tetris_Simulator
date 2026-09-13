@@ -36,7 +36,7 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
  }
  async function screenshot(name) { if(output) {fs.mkdirSync(output,{recursive:true}); await page.screenshot({path:path.join(output,name+'.png')});} }
  try {
-  await page.goto(base,{waitUntil:'networkidle'});
+  await page.goto(process.env.HUB_TEST_MOTION==='1'?new URL('?motion=1',base).href:base,{waitUntil:'networkidle'});
   const sim = page.frame({url:/index\.html\?.*workspace=1/});
   const viewer = page.frame({url:/\/F\/index\.html\?workspace=1/});
   check(sim && viewer, 'both native apps loaded');
@@ -117,7 +117,7 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile has no horizontal overflow');
 
   // Viewer links, page selection and repository-prefix hosting.
-  const share = new URL('F/index.html',base); share.search='?page=3'; share.hash=Buffer.from(JSON.stringify(fixture)).toString('base64');
+  const share = new URL('F/index.html',base); share.search=process.env.HUB_TEST_MOTION==='1'?'?page=3&motion=1':'?page=3'; share.hash=Buffer.from(JSON.stringify(fixture)).toString('base64');
   await page.goto(share.href,{waitUntil:'networkidle'}); await mode('viewer');
   const linkedViewer=page.frame({url:/\/F\/index\.html\?workspace=1/});
   check(await linkedViewer.evaluate(()=>currentPageIndex)===2,'direct viewer link opens requested page');
