@@ -48,7 +48,29 @@ Standard evaluation, and state-reuse design. See
 [simulator/COLD_CLEAR_PORT.md](simulator/COLD_CLEAR_PORT.md) for the source
 mapping, scope, licensing note, and test command.
 
-## PC guide
+## 探索・分析
+
+プレイ中の「探索」をホバーまたはタップすると、PC探索・AI探索・REN探索を縦に表示します。
+NEXTは既定で10個（現在ミノと別）です。旧既定の8個は初回読み込みで10個へ移行します。
+PC/AI/RENのガイドどおりに設置すると次の手が表示され、異なる配置にした場合は解除されます。
+
+- **PC探索**：既存のsfinder-cpp WASMを使用。現在ミノ＋NEXT10個＋HOLDから、PCになる手順を探します。`P`のショートカットも維持しています。
+- **AI探索**：対戦用と同じCold ClearのRust/WASMを独立した探索状態で使用し、既知のミノまでの予定手順を表示します。既定の思考時間は50msです。
+- **REN探索**：現在の局面から毎手ライン消去が続く手順を全探索します。HOLD、空HOLD、HOLD禁止とSRSの回転入れに対応。指定済みのミノ列は画面外の続きも読み、未生成のランダムミノは仮定しません。最初の消去は0 RENです。途中結果は「暫定」、探索が完了した結果だけ「最大」と表示します。探索中に同じ項目を再選択すると中止できます。
+
+ビューワーでは「分析」からPC探索・REN探索・既存のAI分析を開けます。
+PC/RENの手順は元のリプレイを変更せず、スライダーや矢印で確認できます。
+途中の「シミュレータ」は、その手を置く前の盤面・HOLD・ミノ列を練習へ渡します。
+2PのリプレイではPC/RENの対象プレイヤーを切り替えられます。既存のAI分析はP1を対象とします。
+
+solution-finder本家にも[renコマンド](https://github.com/knewjade/solution-finder/blob/main/docs/source/contents/ren/main.rst)があります。
+本ブラウザ版では、既存Cold Clear JSポートの合法手生成と盤面処理を使い、同じ目的の探索をWorkerで実行します。
+同一状態の記憶と残りブロック数による上界で探索を減らしますが、評価値やビーム幅による候補の切り捨てはしません。
+長い探索も分割実行し、中止や元の盤面の操作を妨げません。
+
+検証: `node tools/test-ren-search.cjs`（全列挙との照合）、`node tools/test-position-search.cjs <preview-url>`（実Worker、10手PC、19 REN、ガイド、PC/スマホUI、練習への引き継ぎ）。
+
+### PC guide details
 
 During a 1P game, press `P` (or select **PC探索**) to check the live board,
 the current mino, the visible NEXT queue, and HOLD for a perfect-clear route.

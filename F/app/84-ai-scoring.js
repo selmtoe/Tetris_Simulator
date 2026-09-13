@@ -383,6 +383,9 @@
         for (const controller of planAnimations) planAnimationObserver.observe(controller.element);
     }
 
+    // Reuse the approved board/HOLD/NEXT rendering in PC and REN route previews.
+    window.TetrisAnalysisCanvas = { draw: drawComparisonCanvas };
+
     function createAiPlanPanel(before, result, detailLabel) {
         const plan = (Array.isArray(result.aiPlan) ? result.aiPlan : [])
             .filter(move => move && move.piece);

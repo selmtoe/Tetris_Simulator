@@ -1587,12 +1587,12 @@ let nextPieces;
         if (isInitialCall) {
             nextPieces = [
                 player.player.pieceType, 
-                ...player.nextQueue.slice(0, Math.max(0, gameSettings.maxNext - 1))
+                ...player.nextQueue.slice(0, Math.max(0, gameSettings.maxNext))
             ];
 } else if (lockingPlayer && isOpponentOfLocking) {
             nextPieces = [
                 player.player.pieceType,
-                ...player.nextQueue.slice(0, Math.max(0, gameSettings.maxNext - 1))
+                ...player.nextQueue.slice(0, Math.max(0, gameSettings.maxNext))
             ];
         } else {
             nextPieces = [

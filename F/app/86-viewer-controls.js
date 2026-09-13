@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     controls.addEventListener('pointerleave', () => {
         leaveTimer = setTimeout(() => {
-            if (!pinned && !panel.contains(document.activeElement)) close();
+            if (!pinned && !panel.contains(document.activeElement) && !document.querySelector('#viewer-analysis-menu.is-open')) close();
         }, 150);
     });
     trigger.addEventListener('click', () => {
@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     controls.addEventListener('focusout', () => {
         queueMicrotask(() => {
-            if (!controls.contains(document.activeElement) && !controls.matches(':hover')) close();
+            if (!controls.contains(document.activeElement) && !controls.matches(':hover') && !document.querySelector('#viewer-analysis-menu.is-open')) close();
         });
     });
     controls.addEventListener('keydown', event => {
@@ -63,10 +63,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     panel.addEventListener('click', event => {
-        if (event.target.closest('button')) close();
+        if (event.target.closest('button') && !event.target.closest('[data-search-menu]')) close();
     });
     document.addEventListener('pointerdown', event => {
-        if (!controls.contains(event.target)) close();
+        if (!controls.contains(event.target) && !event.target.closest('#viewer-analysis-menu')) close();
     });
     function updatePresentation() {
         layoutFrame = 0;

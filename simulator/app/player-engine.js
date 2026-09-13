@@ -79,7 +79,8 @@ class Player {
 
         this.initialHold = pData.hold;
         this.board = pData.board.map(row => [...row]);
-        this.minoGenerator = createMinoGenerator(pData.nextQueue);
+        this.knownCustomSequence = [...pData.nextQueue];
+        this.minoGenerator = createMinoGenerator(this.knownCustomSequence);
         this.opponent = null;
         this.holdDisabled = false;
         this.ruleWorker = null;
@@ -1056,10 +1057,15 @@ if (this.linesClearedLastLock > 0) { this.startPostLockDelay('lineClear', gameSe
             if (pT === 'E') break;
             const s = this.getShape(pT, 0);
             const pos = layout.next[i];
+            const nextSize = !useCustomBG && gameSettings.maxNext > 8 ? bSize * 0.88 : bSize;
+            const center = nextSize === bSize ? TETROMINOS[pT].center : [
+                (Math.min(...s.map(cell => cell[0])) + Math.max(...s.map(cell => cell[0]))) / 2,
+                (Math.min(...s.map(cell => cell[1])) + Math.max(...s.map(cell => cell[1]))) / 2
+            ];
             s.forEach(b => {
-                const px = pos.x - (TETROMINOS[pT].center[0] * bSize) + (b[0] * bSize);
-                const py = pos.y - (TETROMINOS[pT].center[1] * bSize) + (b[1] * bSize);
-                this.drawBlock(pT, px, py, 1.0, bSize);
+                const px = pos.x - (center[0] * nextSize) + (b[0] * nextSize);
+                const py = pos.y - (center[1] * nextSize) + (b[1] * nextSize);
+                this.drawBlock(pT, px, py, 1.0, nextSize);
             });
         }
     }

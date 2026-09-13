@@ -1,4 +1,4 @@
-/* On-demand PC guide UI. Use the configured 1P shortcut to search the live state. */
+/* PC, Cold Clear and REN guides. The existing P shortcut remains PC search. */
 
 (function () {
     'use strict';
@@ -17,26 +17,33 @@
         return document.getElementById('pcSearchBtn');
     }
 
-    // PC search feedback is the board guide itself. Keep this no-op so no
-    // visible or screen-reader status log is produced, even with stale markup.
-    function setStatus() {
+    function setStatus(message = '') {
+        const output = document.getElementById('search-result');
+        if (output) output.textContent = message;
     }
 
     function setSearching(searching) {
-        const element = button();
+        const element = document.getElementById('searchMenuBtn');
         if (!element) return;
-        element.disabled = searching;
-        element.textContent = 'PC探索';
+        element.setAttribute('aria-busy', String(searching));
+        element.textContent = searching ? '探索中…' : '探索';
     }
 
-    function snapshotFor(player) {
+    function snapshotFor(player, kind = 'pc') {
+        const nextQueue = [...player.nextQueue];
+        if (kind === 'ren') nextQueue.push(...(player.knownCustomSequence || []).slice(player.fullMinoSequence.length));
         return {
             board: player.board.map(row => row.map(cell => cell == null ? null : 'X')),
             currentPiece: player.player.pieceType,
-            nextQueue: [...player.nextQueue],
+            nextQueue,
             holdPiece: player.holdPiece || null,
             canHold: player.canHold,
-            holdDisabled: player.holdDisabled
+            holdDisabled: player.holdDisabled,
+            ren: player.ren,
+            isB2B: player.isB2B,
+            thinkTimeMs: gameSettings.aiThinkTime || 50,
+            nodeLimit: gameSettings.aiNodeLimit || 120000,
+            weights: gameSettings.aiWeights
         };
     }
 
@@ -227,10 +234,9 @@
 
         const holdHint = availability.needsHold ? `（先にHOLDして ${step.piece} を出します）` : '';
         const remaining = chain.plan.length - chain.index;
-        const prefix = continuing
-            ? `PCガイド継続: 残り${remaining}手。`
-            : `PCあり: ${chain.lines}ライン・${chain.depth}手。`;
-        setStatus(`${prefix} 次は ${step.piece} を枠に置く ${holdHint}`, 'success');
+        const prefix = chain.kind === 'ren' ? `${chain.complete ? '最大' : '暫定'} ${chain.ren} REN（${chain.depth}回連続消去）`
+            : chain.kind === 'ai' ? 'Cold Clear' : `${chain.lines}ラインPC`;
+        setStatus(`${prefix} · 残り${remaining}手${holdHint}`);
         return true;
     }
 
@@ -250,7 +256,8 @@
             pendingBoard: null,
             phase: 'guiding',
             lines: Number.isInteger(data.lines) ? data.lines : 0,
-            depth: Number.isInteger(data.depth) ? data.depth : plan.length
+            depth: Number.isInteger(data.depth) ? data.depth : plan.length,
+            kind: data.kind || 'pc', ren: data.ren, complete: data.complete !== false
         };
         return showCurrentStep(player, false);
     }
@@ -258,24 +265,31 @@
     function ensureWorker() {
         if (worker) return worker;
 
-        worker = new Worker('./simulator/workers/pc-finder-worker.js?v=app-v5');
+        worker = new Worker('./simulator/workers/route-search-worker.js?v=search-v1');
+        const ownedWorker = worker;
         worker.onmessage = event => {
             const data = event.data || {};
             if (!activeRequest || data.requestId !== activeRequest.id) return;
 
             const request = activeRequest;
-            resetActiveRequest();
-
             const currentPlayer = getPlayableP1();
             if (!currentPlayer || currentPlayer !== request.player ||
-                fingerprint(snapshotFor(currentPlayer)) !== request.fingerprint) {
-                setStatus('局面が変わったため、PCガイドは表示しません。', 'muted');
+                fingerprint(snapshotFor(currentPlayer, request.kind)) !== request.fingerprint) {
+                resetActiveRequest();
+                disposeWorker();
+                setStatus('局面が変わったため、探索を中止しました。');
                 return;
             }
+            if (data.type === 'progress') {
+                if (data.plan?.length) request.partial = data;
+                setStatus(data.plan?.length ? `REN探索中 · 暫定 ${data.ren} REN（再選択で中止）` : 'REN探索中…（再選択で中止）');
+                return;
+            }
+            resetActiveRequest();
 
             if (data.type === 'error') {
                 console.error('PC finder worker error:', data.message);
-                setStatus('PC探索でエラーが発生しました。', 'error');
+                setStatus(data.message || '探索でエラーが発生しました。', 'error');
                 return;
             }
 
@@ -286,7 +300,8 @@
 
             if (data.status === 'not_found') {
                 currentPlayer.clearPcGuide();
-                setStatus('見えているNEXTの範囲ではPCは見つかりませんでした。', 'muted');
+                setStatus(request.kind === 'ren' ? 'この局面から連続消去できる手順はありません。'
+                    : request.kind === 'ai' ? 'Cold Clearの手が見つかりませんでした。' : '既知のNEXTではPCが見つかりませんでした。', 'muted');
                 return;
             }
 
@@ -299,6 +314,7 @@
             setStatus('PC探索の結果を解釈できませんでした。', 'error');
         };
         worker.onerror = error => {
+            if (worker !== ownedWorker) { error.preventDefault(); return; }
             console.error('PC finder worker failed:', error);
             resetActiveRequest();
             disposeWorker();
@@ -332,24 +348,34 @@
         return true;
     }
 
-    function search() {
-        if (activeRequest) return;
+    function search(kind = 'pc') {
+        if (typeof kind !== 'string') kind = 'pc';
+        if (activeRequest) {
+            const previous = activeRequest.kind;
+            const request = activeRequest;
+            resetActiveRequest(); disposeWorker();
+            if (previous === kind) {
+                if (request.partial && getPlayableP1() === request.player && fingerprint(snapshotFor(request.player, kind)) === request.fingerprint) startGuidePlan(request.player, request.partial);
+                else setStatus('探索を中止しました。');
+                return;
+            }
+        }
 
         const player = getPlayableP1();
         if (!player) {
-            setStatus(gameMode === '2P' ? 'PC探索は現在1Pで利用できます。' : 'プレイ中のP1局面でPC探索できます。', 'muted');
+            setStatus('探索は1Pのプレイ中に利用できます。', 'muted');
             return;
         }
 
         clearGuidePlan(player);
-        const snapshot = snapshotFor(player);
+        const snapshot = snapshotFor(player, kind);
         const id = ++requestId;
-        activeRequest = { id, player, fingerprint: fingerprint(snapshot) };
+        activeRequest = { id, player, kind, fingerprint: fingerprint(snapshot) };
         setSearching(true);
-        setStatus('見えているNEXTでPCを探索中…', 'pending', 0);
+        setStatus(`${kind === 'pc' ? 'PC' : kind === 'ren' ? 'REN' : 'AI'}探索中…（再選択で中止）`);
 
         try {
-            ensureWorker().postMessage({ type: 'search', requestId: id, ...snapshot });
+            ensureWorker().postMessage({ type: 'search', kind, requestId: id, ...snapshot });
         } catch (error) {
             console.error('Unable to request PC search:', error);
             resetActiveRequest();
@@ -358,12 +384,13 @@
             return;
         }
 
+        if (kind === 'ren') return;
         timeoutId = window.setTimeout(() => {
             if (!activeRequest || activeRequest.id !== id) return;
             resetActiveRequest();
             disposeWorker();
-            setStatus('PC探索は時間切れです。局面を変えるか、もう一度Pを押してください。', 'muted');
-        }, SEARCH_TIMEOUT_MS);
+            setStatus('探索は時間切れです。もう一度実行してください。', 'muted');
+        }, kind === 'ai' ? 15000 : SEARCH_TIMEOUT_MS);
     }
 
     // Called by Player immediately before it writes the locked mino to board.
@@ -416,12 +443,12 @@
         chain.pendingBoard = null;
         chain.index++;
         if (chain.index >= chain.plan.length) {
-            if (!isEmptyBoard(chain.expectedBoard)) {
+            if (chain.kind === 'pc' && !isEmptyBoard(chain.expectedBoard)) {
                 discardGuidePlan(player, 'PC手順の検証に失敗したため、ガイドを解除しました。', 'error');
                 return;
             }
             clearGuidePlan(player);
-            setStatus('PC手順を完了しました！', 'success');
+            setStatus('手順を完了しました。', 'success');
             return;
         }
 
@@ -486,6 +513,9 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         const element = button();
-        if (element) element.addEventListener('click', search);
+        if (element) element.addEventListener('click', () => search('pc'));
+        document.getElementById('aiSearchBtn')?.addEventListener('click', () => search('ai'));
+        document.getElementById('renSearchBtn')?.addEventListener('click', () => search('ren'));
+        document.getElementById('backToEditorBtn')?.addEventListener('click', () => setStatus(''));
     });
 })();

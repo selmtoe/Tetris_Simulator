@@ -60,14 +60,21 @@ ctx.fillText('NEXT', rX, 40);
         : (typeof displayNextForPage === 'function'
             ? displayNextForPage(offsetX === 0 ? 'p1' : 'p2')
             : String(playerPageData.next || ''))).split('');
-    for (let i = 0; i < nextQueue.length; i++) {
+    const nextSpacing = Math.min(2.5, (CANVAS_HEIGHT - 90) / (BLOCK_SIZE * Math.max(1, Math.min(nextQueue.length, 10) - 1)));
+    const nextSize = nextQueue.length > 8 ? BLOCK_SIZE * 0.85 : BLOCK_SIZE;
+    for (let i = 0; i < Math.min(nextQueue.length, 10); i++) {
         const pT = nextQueue[i];
         if (!pT) continue;
         const s = getShape(pT, 0);
+        const center = nextSize === BLOCK_SIZE ? TETROMINOS[pT].center : [
+            (Math.min(...s.map(cell => cell[0])) + Math.max(...s.map(cell => cell[0]))) / 2,
+            (Math.min(...s.map(cell => cell[1])) + Math.max(...s.map(cell => cell[1]))) / 2
+        ];
         s.forEach(b => {
-            const px = rX - (TETROMINOS[pT].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE);
-            const py = 70 + (i * BLOCK_SIZE * 2.5) - (TETROMINOS[pT].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE);
-            drawViewerBlock(ctx, pT, px, py);
+            const px = rX - (center[0] * nextSize) + (b[0] * nextSize);
+            const py = 70 + (i * BLOCK_SIZE * nextSpacing) - (center[1] * nextSize) + (b[1] * nextSize);
+            ctx.save(); ctx.translate(px, py); ctx.scale(nextSize / BLOCK_SIZE, nextSize / BLOCK_SIZE);
+            drawViewerBlock(ctx, pT, 0, 0); ctx.restore();
         });
     }
     

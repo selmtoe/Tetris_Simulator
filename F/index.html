@@ -133,7 +133,12 @@
             <button id="back-to-editor-btn" class="button">Editor</button>
             <button id="viewer-share-btn" class="button">共有</button>
             <button id="viewer-export-btn" class="button">出力</button>
-            <button id="viewer-ai-score-btn" class="button">AI採点</button>
+            <button id="viewer-analysis-btn" class="button" data-search-menu="viewer-analysis-menu">分析</button>
+            <div id="viewer-analysis-menu" class="search-menu" inert>
+                <button id="viewer-pc-search-btn" class="button">PC探索</button>
+                <button id="viewer-ren-search-btn" class="button">REN探索</button>
+                <button id="viewer-ai-score-btn" class="button">AI分析</button>
+            </div>
         </div>
         <div class="viewer-slider-container">
             <input type="range" id="viewer-page-slider" min="0" max="0" value="0" aria-label="リプレイのページ">
@@ -231,7 +236,7 @@ margin-top: 15px;">
 
 <div id="ai-score-modal" class="ai-score-modal" aria-hidden="true">
     <div class="ai-score-content" role="dialog" aria-modal="true" aria-labelledby="ai-score-title">
-        <h2 id="ai-score-title">AI採点 <span>（P1のみ）</span></h2>
+        <h2 id="ai-score-title">AI分析 <span>（P1のみ）</span></h2>
         <section class="ai-score-setting">
             <div class="ai-score-setting-head">
                 <label>採点範囲</label>
@@ -342,6 +347,8 @@ margin-top: 15px;">
     </div>
 </div>
 
+<link rel="stylesheet" href="../shared/search.css">
+<script defer src="../shared/search-menu.js"></script>
 <script defer src="./app/00-debug-console.js?v=app-v18"></script>
 <script defer src="./app/10-state.js?v=app-v20"></script>
 <script defer src="./app/15-sequence.js?v=app-v25"></script>
@@ -360,5 +367,6 @@ margin-top: 15px;">
 <script defer src="./app/84-ai-scoring.js?v=app-v21"></script>
 <script defer src="./app/85-workspace.js?v=workflow-v2"></script>
 <script defer src="./app/86-viewer-controls.js"></script>
+<script defer src="./app/87-analysis.js"></script>
 </body>
 </html>

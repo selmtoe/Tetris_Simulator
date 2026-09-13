@@ -28,6 +28,7 @@ FILES = (
     'simulator/workers/cold-clear-wasm-worker.js', 'simulator/workers/cold-clear-wasm.js',
     'simulator/workers/cold-clear.wasm', 'simulator/workers/cold-clear-core.js',
     'simulator/workers/pc-finder-worker.js',
+    'simulator/workers/route-search-worker.js', 'shared/search-menu.js', 'shared/search.css',
     'Load PPT/tetris.onnx', 'Load PPT/tetris.model.json',
 )
 EXTENSIONS = {'.html', '.css', '.js', '.wasm', '.png', '.jpg', '.svg', '.webp', '.ico'}

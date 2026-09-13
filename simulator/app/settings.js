@@ -58,6 +58,20 @@ if (saved) {
                 compatibleSettings.aiWeights = JSON.parse(JSON.stringify(DEFAULT_AI_WEIGHTS));
             }
             Object.assign(gameSettings, compatibleSettings);
+            // Upgrade the former default; retain an intentionally shorter preview.
+            if (gameSettings.maxNext === 8 || gameSettings.maxNext === 9) gameSettings.maxNext = 10;
+            for (const pid of ['p1', 'p2']) {
+                const next = gameSettings.layout?.[pid]?.next;
+                if (next?.length === 8 || next?.length === 9) {
+                    const size = gameSettings.layout.blockSize || BLOCK_SIZE;
+                    if (gameSettings.layout.backgroundImage) {
+                        const step = next[1].y - next[0].y;
+                        while (next.length < 10) next.push({ x: next[next.length - 1].x, y: next[next.length - 1].y + step });
+                    } else {
+                        gameSettings.layout[pid].next = Array.from({ length: 10 }, (_, i) => ({ x: next[0].x, y: next[0].y + i * size * 2 }));
+                    }
+                }
+            }
             if (migrateFirstPortBudget) gameSettings.aiThinkTime = 50;
             if (!Number.isFinite(gameSettings.aiNodeLimit)) gameSettings.aiNodeLimit = 120000;
             gameSettings.aiType = 'cold-clear';
@@ -143,7 +157,7 @@ function populateGeneralSettingsTab() {
         spawnDelay: { label: '設置時硬直時間 (ms)', min: 0, max: 2000, step: 50 },
         gravity: { label: '落下間隔時間 (ms)', min: 0, max: 9999999, step: 50 },
         lockDelay: { label: '設置猶予時間 (ms)', min: 0, max: 9999999, step: 50 },
-        maxNext: { label: 'ネクスト表示数', min: 1, max: 8, step: 1 },
+        maxNext: { label: 'ネクスト表示数', min: 1, max: 10, step: 1 },
         garbageGrace: { label: 'おじゃま猶予時間 (ms)', min: 0, max: 5000, step: 100 },
         garbageRandomness: { label: '穴バラ率 (%)', min: 0, max: 100, step: 1 }
     };
@@ -564,7 +578,7 @@ const updateNextArray = () => {
             const startX = parseInt(nxInput.value, 10);
 const startY = parseInt(nyInput.value, 10);
             const step = parseInt(offsetYInput.value, 10);
-pLayout.next = Array.from({ length: 8 }).map((_, i) => ({
+pLayout.next = Array.from({ length: 10 }).map((_, i) => ({
                 x: startX,
                 y: startY + (i * step)
             }));

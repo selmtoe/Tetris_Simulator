@@ -1,0 +1,24 @@
+.search-menu {
+    position: fixed; z-index: 12000; width: 144px; padding: 6px;
+    box-sizing: border-box; display: flex; flex-direction: column; gap: 4px;
+    background: var(--lab-surface, var(--bg-color, #fafafa));
+    border: 1px solid var(--border-color, #ddd); border-radius: 16px;
+    box-shadow: 0 12px 30px rgb(0 0 0 / .12);
+    opacity: 0; visibility: hidden; pointer-events: none;
+    clip-path: inset(0 0 100% 0 round 16px); transform: translateY(-4px);
+    transition: clip-path 280ms cubic-bezier(.22,1,.36,1), transform 280ms cubic-bezier(.22,1,.36,1), opacity 160ms ease, visibility 280ms;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+.search-menu.is-open { opacity: 1; visibility: visible; pointer-events: auto; clip-path: inset(0 round 16px); transform: none; }
+.search-menu .button { width: 100%; margin: 0; font-size: 13px; padding: 10px 12px; text-align: left; }
+#search-result { position: absolute; top: calc(100% + 8px); right: 0; max-width: min(360px, 90vw); font: 12px/1.5 var(--font-ui, sans-serif); padding: 6px 10px; border-radius: 10px; background: var(--lab-surface, var(--bg-color)); color: var(--font-color); }
+#search-result:empty { display: none; }
+.route-dialog { padding: 22px; width: min(560px, calc(100vw - 36px)); max-height: calc(100dvh - 32px); box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 18px; background: var(--lab-surface, var(--bg-color)); color: var(--font-color); }
+.route-dialog::backdrop { background: rgb(0 0 0 / .28); }
+.route-dialog h2 { margin: 0 0 12px; font-size: 18px; }
+.route-dialog canvas { display: block; width: 100%; max-height: 56dvh; object-fit: contain; }
+.route-dialog .route-actions { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.route-dialog input[type=range] { width: 100%; }
+.route-dialog p { font-size: 13px; line-height: 1.6; }
+.route-dialog [hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { .search-menu { transition: none; } }

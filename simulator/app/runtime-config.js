@@ -86,10 +86,10 @@ function generateDefaultLayout() {
     const createPlayerLayout = (offsetX) => ({
         board: { x: offsetX + (5 * blockSize + 20), y: 0.5 * blockSize },
         hold: { x: offsetX + (5 * blockSize / 2), y: 70 },
-        next: Array.from({ length: 8 }).map((_, i) => ({
+        next: Array.from({ length: 10 }).map((_, i) => ({
                     x: offsetX + 
 (5 * blockSize + 20 + 10 * blockSize + 20 + 5 * blockSize / 2),
-            y: 70 + (i * blockSize * 2.5)
+            y: 70 + (i * blockSize * 2)
         }))
     });
     return {
@@ -113,7 +113,7 @@ let gameSettings = {
     lockDelay: 9999999,
     garbageGrace: 1000,
     garbageRandomness: 0.3,
-    maxNext: 8,
+    maxNext: 10,
     showEffects: true,
     showTimer: false,
     touchControlsEnabled: 'ontouchstart' in window,

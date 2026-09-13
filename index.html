@@ -156,7 +156,13 @@ left: 10px; top: 150px;">
 <div id="game-controls" style="display: none;
 position: fixed; top: 10px; right: 10px; z-index: 160; gap: 10px;">
      <button id="analyzeBtn" class="button" hidden aria-hidden="true">分析</button>
-     <button id="pcSearchBtn" class="button" type="button">PC探索</button>
+     <button id="searchMenuBtn" class="button" type="button" data-search-menu="sim-search-menu">探索</button>
+     <div id="sim-search-menu" class="search-menu" inert>
+         <button id="pcSearchBtn" class="button" type="button">PC探索</button>
+         <button id="aiSearchBtn" class="button" type="button">AI探索</button>
+         <button id="renSearchBtn" class="button" type="button">REN探索</button>
+     </div>
+     <output id="search-result" aria-live="polite"></output>
      <button id="exportFumenBtn" class="button">記録</button>
      <button id="retryBtn" class="button">リトライ</button>
      <button id="gameSettingsBtn" class="button">設定</button>
@@ -328,6 +334,8 @@ justify-content: center; gap: 10px; flex-wrap: wrap;">
     </div>
 </div>
 
+<link rel="stylesheet" href="./shared/search.css">
+<script defer src="./shared/search-menu.js"></script>
 <script defer src="./simulator/app/virtual-controller.js"></script>
 <script defer src="./simulator/app/runtime-config.js?v=app-v21"></script>
 <script defer src="./simulator/app/player-engine.js?v=app-v27"></script>
