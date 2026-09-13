@@ -62,11 +62,17 @@ Removing `motion=1` is enough to return to ordinary behavior without a code reve
 
 ## Recovery
 
-IndexedDB database `tetris-workspace-recovery` retains the current workspace per
-recent tab (at most eight), with no library UI. The tab identity is stored in
-sessionStorage. A normal launch restores the current tab's state, or the most
-recent workspace when starting a new tab. An explicit incoming replay link takes
-precedence. `?fresh=1` starts with ordinary preparation.
+IndexedDB database `tetris-workspace-recovery` retains a separate workspace for
+each tab/history entry, with no library UI. Opening an ordinary link starts an
+empty simulator; opening a replay link displays that replay. Reloading resumes
+only that tab's state. Missing recovery data never falls back to another tab.
+
+The identity lives in history.state with sessionStorage as a legacy reload
+fallback. Web Locks prevent a copied tab identity from sharing a live writer.
+New launches ignore sessionStorage copied by an opener. More than eight tabs no
+longer evict each other's recovery data. `?fresh=1` is a one-time fresh launch:
+the flag is consumed, so subsequent reloads can recover the new work normally.
+No new navigation buttons or Share menu entries are introduced.
 
 Snapshots run about every two seconds and at navigation/visibility changes.
 They include the simulator preparation, current viewer document and cursor,
@@ -118,6 +124,8 @@ seeking, mobile layout, direct links, reload recovery and interrupted recordings
 link updates, legacy imports, model defaults and a browser AI scoring run.
 `tools/test-simulator-viewport.cjs` checks the new top row in edit/play input,
 transport and 20-row image recognition.
+`tools/test-hub-tabs.cjs` covers independent tabs, copied browser identities,
+ordinary/replay links, reload recovery and retention beyond eight workspaces.
 `tools/test-web-cache-upgrade.cjs` installs a legacy native cache in an isolated
 browser, upgrades to the static build and verifies the soft palette without
 clearing old caches or the saved appearance preference.

@@ -10,22 +10,39 @@ function openDatabase() {
     });
     return database;
 }
-export function workspaceIdentity() {
+export async function workspaceIdentity({ fresh = false } = {}) {
+    const navigation = performance.getEntriesByType('navigation')[0]?.type;
+    const resuming = !fresh && ['reload', 'back_forward'].includes(navigation);
+    let id = resuming ? history.state?.tetrisWorkspaceId : null;
     try {
-        let id = sessionStorage.getItem('tetrisWorkspaceTab');
-        if (!id) { id = crypto.randomUUID(); sessionStorage.setItem('tetrisWorkspaceTab', id); }
-        return id;
-    } catch { return crypto.randomUUID(); }
+        // sessionStorage may be copied by window.open or Duplicate Tab. Only
+        // use it to resume this history entry, never for an ordinary new launch.
+        if (resuming && !id) {
+            id = sessionStorage.getItem('tetrisWorkspaceTab');
+        }
+    } catch { /* A storage-restricted tab can still run a new workspace. */ }
+    if (typeof id !== 'string' || !id) id = crypto.randomUUID();
+    if (navigator.locks?.request) {
+        const claim = key => new Promise(resolve => {
+            navigator.locks.request(`tetris-workspace:${key}`, { ifAvailable: true }, lock => {
+                resolve(Boolean(lock));
+                // The browser releases this lease when the document is gone.
+                // A copied history/session identity cannot share its writer.
+                if (lock) return new Promise(() => {});
+            }).catch(() => resolve(null));
+        });
+        while (await claim(id) === false) id = crypto.randomUUID();
+    }
+    try { sessionStorage.setItem('tetrisWorkspaceTab', id); } catch { /* Optional legacy fallback. */ }
+    history.replaceState({ ...history.state, tetrisWorkspaceId: id }, '');
+    return id;
 }
 export async function readRecovery(id) {
     const db = await openDatabase();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction('workspaces', 'readonly');
-        const request = transaction.objectStore('workspaces').getAll();
-        request.onsuccess = () => {
-            const records = request.result;
-            resolve(records.find(record => record.id === id) || records.sort((a,b) => b.updatedAt - a.updatedAt)[0] || null);
-        };
+        const request = transaction.objectStore('workspaces').get(id);
+        request.onsuccess = () => resolve(request.result || null);
         request.onerror = () => reject(request.error);
     });
 }
@@ -40,11 +57,7 @@ export async function writeRecovery(id, state, capturedAt = Date.now()) {
             // snapshot written by its restored replacement.
             if (previous.result?.updatedAt > capturedAt) return;
             store.put({ id, updatedAt: capturedAt, state });
-            const request = store.getAll();
-            request.onsuccess = () => {
-                const records = request.result.sort((a,b) => b.updatedAt - a.updatedAt);
-                for (const record of records.slice(8)) store.delete(record.id);
-            };
+            // Opening more tabs must not evict an older tab's recovery state.
         };
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error);

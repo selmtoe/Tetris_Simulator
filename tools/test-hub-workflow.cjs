@@ -23,6 +23,7 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
  const check = (condition,message)=>{assert.ok(condition,message);checks++;};
  async function mode(expected) { await page.waitForFunction(value=>document.body.dataset.mode===value,expected); checks++; }
  async function expandViewer(frame) {
+   await frame.locator('#viewer-page-indicator').hover();
    if (await frame.locator('#viewer-page-indicator').getAttribute('aria-expanded') !== 'true') {
      await frame.locator('#viewer-page-indicator').click();
    }

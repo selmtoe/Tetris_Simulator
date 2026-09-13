@@ -14,7 +14,10 @@ let practice = null;
 let normalDraft = null;
 let serial = Promise.resolve();
 let noticeTimer;
-const recoveryId = workspaceIdentity();
+const parameters = new URLSearchParams(location.search);
+const recoveryId = await workspaceIdentity({
+    fresh: parameters.has('fresh') || parameters.has('entry') || parameters.has('practice') || Boolean(location.hash)
+});
 let recoveryEnabled = false;
 let recoveryQueued = false;
 let recoveryErrorShown = false;
@@ -244,12 +247,12 @@ document.addEventListener('keydown', event => {
     if (frames.sim.contentWindow?.PCFinder?.searchIfBoundKey?.(event.key)) event.preventDefault();
 });
 
-const parameters = new URLSearchParams(location.search);
 const entry = parameters.get('entry') || parameters.get('view') || 'simulator';
 const simUrl = new URL('../index.html', location.href);
 const viewerUrl = new URL('../F/index.html', location.href);
 simUrl.search = parameters.toString();
 simUrl.searchParams.set('workspace', '1');
+simUrl.searchParams.delete('fresh');
 viewerUrl.searchParams.set('workspace', '1');
 if (parameters.get('motion') === '1') viewerUrl.searchParams.set('motion', '1');
 const cleanWorkspaceLocation = location.pathname + (parameters.get('motion') === '1' ? '?motion=1' : '');
@@ -271,7 +274,7 @@ enqueue(async () => {
         await openReplay(transfer.source.data, { title: transfer.source.title, context: transfer.source.context });
         await beginPractice(transfer.state, transfer.source);
         sessionStorage.removeItem(key);
-        history.replaceState(null, '', cleanWorkspaceLocation);
+        history.replaceState(history.state, '', cleanWorkspaceLocation);
     } else if (isViewerEntry) {
         if (location.hash) {
             const page = Number.parseInt(parameters.get('page'), 10);
@@ -294,17 +297,20 @@ enqueue(async () => {
                 if (flow.mode === 'split' && !practice) flow = initialWorkflow();
                 if (Number.isFinite(saved.splitWidth)) setSplit(saved.splitWidth);
                 render();
-                notice(saved.flow.mode === 'playing' ? '前回の作業を復元しました。試合は停止した準備画面に戻しています。' : '前回の作業状態を復元しました。');
+                notice(saved.flow.mode === 'playing' ? 'このタブの作業を復元しました。試合は停止した準備画面に戻しています。' : 'このタブの作業を復元しました。');
             }
         } catch (error) {
             console.warn('Workspace recovery could not be read:', error);
-            notice('前回の状態を読み込めませんでした。リプレイファイルから開き直せます。');
+            notice('このタブの状態を読み込めませんでした。共有リンクから開き直せます。');
         }
     }
     // Consume incoming links once, so a reload restores subsequent work instead
     // of importing the original link over the current practice draft.
-    if (location.hash || isViewerEntry) history.replaceState(null, '', cleanWorkspaceLocation);
+    if (location.hash || isViewerEntry || parameters.has('fresh') || parameters.has('entry')) {
+        history.replaceState(history.state, '', cleanWorkspaceLocation);
+    }
     recoveryEnabled = true;
+    document.body.dataset.workspaceReady = 'true';
     queueRecovery();
 });
 setInterval(queueRecovery, 2000);
