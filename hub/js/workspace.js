@@ -87,13 +87,21 @@ function render() {
     $('narrow-viewer').setAttribute('aria-pressed', String(flow.narrowPane === 'viewer'));
     document.title = flow.mode === 'viewer' ? `${currentDocument?.title || 'リプレイ'} — Viewer` : 'Simulator';
     inform('editor', 'layout', flow.mode);
+    inform('sim', 'layout', { mode: flow.mode, interrupted: Boolean(interruptedRecord) });
     requestAnimationFrame(() => {
         inform('sim', 'resize');
         inform('editor', 'resize');
         if (flow.mode === 'playing') frames.sim.contentWindow.focus();
     });
 }
-function move(event) { flow = transition(flow, event); render(); queueRecovery(); }
+function move(event) { $('navigation-dialog').close(); flow = transition(flow, event); render(); queueRecovery(); }
+function showRecords() {
+    $('navigation-dialog').close();
+    $('records-dialog').showModal();
+}
+function showInterrupted() {
+    if (interruptedRecord) return openReplay(interruptedRecord.data, { title: '中断前のプレイ記録', source: interruptedRecord.source });
+}
 function newDocument(value, title) {
     return { id: crypto.randomUUID(), ...clone(value), title: title || value.title || 'リプレイ' };
 }
@@ -166,6 +174,11 @@ window.addEventListener('message', event => {
         move('start');
     } else if (role === 'sim' && message.type === 'workspaceReturned') {
         move('return');
+    } else if (message.type === 'workspaceAction') {
+        if (message.action === 'navigation') $('navigation-dialog').showModal();
+        else if (message.action === 'records') showRecords();
+        else if (message.action === 'interrupted') enqueue(showInterrupted);
+        else if (message.action === 'reference' && flow.mode === 'split') move(matchMedia('(max-width: 800px)').matches ? 'narrow-viewer' : 'wide');
     } else if (role === 'sim' && message.target === 'editor' && message.type === 'loadFumen') {
         const source = flow.playOrigin === 'practice' ? practice?.source : null;
         enqueue(() => openReplay(message.data, { title: '今回のプレイ記録', source }));
@@ -178,10 +191,11 @@ $('home-button').addEventListener('click', () => enqueue(goHome));
 $('wide-button').addEventListener('click', () => move('wide'));
 $('resume-button').addEventListener('click', () => enqueue(resumePractice));
 $('source-button').addEventListener('click', () => enqueue(showSource));
-$('interrupted-button').addEventListener('click', () => enqueue(() => openReplay(interruptedRecord.data, { title: '中断前のプレイ記録', source: interruptedRecord.source })));
+$('interrupted-button').addEventListener('click', () => enqueue(showInterrupted));
 $('narrow-simulator').addEventListener('click', () => move('narrow-simulator'));
 $('narrow-viewer').addEventListener('click', () => move('narrow-viewer'));
-$('records-button').addEventListener('click', () => $('records-dialog').showModal());
+$('records-button').addEventListener('click', showRecords);
+$('close-navigation').addEventListener('click', () => $('navigation-dialog').close());
 $('close-records').addEventListener('click', () => $('records-dialog').close());
 $('open-file-button').addEventListener('click', () => $('replay-file').click());
 $('open-link-form').addEventListener('submit', event => {
@@ -225,7 +239,7 @@ function applyTheme() {
 applyTheme();
 window.addEventListener('storage', event => { if (event.key === 'lab-appearance-mode') applyTheme(); });
 document.addEventListener('keydown', event => {
-    if (event.defaultPrevented || event.repeat || $('records-dialog').open || event.target.closest('input,textarea,select,button,[contenteditable]')) return;
+    if (event.defaultPrevented || event.repeat || $('records-dialog').open || $('navigation-dialog').open || event.target.closest('input,textarea,select,button,[contenteditable]')) return;
     if (flow.mode === 'viewer') return;
     if (frames.sim.contentWindow?.PCFinder?.searchIfBoundKey?.(event.key)) event.preventDefault();
 });

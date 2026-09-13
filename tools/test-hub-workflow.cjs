@@ -22,6 +22,17 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
  let checks=0;
  const check = (condition,message)=>{assert.ok(condition,message);checks++;};
  async function mode(expected) { await page.waitForFunction(value=>document.body.dataset.mode===value,expected); checks++; }
+ async function navigationAction(id) {
+  if (!await page.locator('#navigation-dialog').evaluate(dialog=>dialog.open)) {
+   if (await page.locator('#viewer-pane').isHidden()) {
+    const simulator=page.frame({url:/index\.html\?.*workspace=1/});
+    await simulator.locator('#shareBtn').click();
+    await simulator.locator('#workspace-reference').click();
+   }
+   await page.frame({url:/\/F\/index\.html\?workspace=1/}).locator('#back-to-editor-btn').click();
+  }
+  await page.locator(id).click();
+ }
  async function screenshot(name) { if(output) {fs.mkdirSync(output,{recursive:true}); await page.screenshot({path:path.join(output,name+'.png')});} }
  try {
   await page.goto(base,{waitUntil:'networkidle'});
@@ -29,6 +40,8 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   const viewer = page.frame({url:/\/F\/index\.html\?workspace=1/});
   check(sim && viewer, 'both native apps loaded');
   await mode('simulator');
+  assert.deepEqual(await sim.evaluate(()=>[innerWidth,innerHeight]), [1280,800]); checks++;
+  check(await page.locator('#workspace-bar').count()===0,'no surrounding toolbar reduces the native viewport');
   const normal = await sim.evaluate(()=>getGameStateForExport());
   const frameIdentity = await sim.evaluate(()=>{window.__workflowIdentity=crypto.randomUUID();return window.__workflowIdentity;});
   await screenshot('simulator');
@@ -40,7 +53,8 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   check(await page.locator('#viewer-pane').isHidden(),'normal return never opens viewer');
   check(await page.evaluate(()=>localStorage.getItem('tetrisHubAutoData'))===null,'Hub does not autosave recordings');
 
-  await page.locator('#records-button').click();
+  await sim.locator('#shareBtn').click();
+  await sim.locator('#workspace-open-replay').click();
   await page.locator('#replay-file').setInputFiles({name:'practice.tetrisevent.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(fixture))});
   await mode('viewer');
   await viewer.locator('#viewer-page-slider').fill('2');
@@ -58,8 +72,8 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   await viewer.locator('#viewer-page-slider').fill('3');
   await viewer.locator('#viewer-page-slider').dispatchEvent('input');
   assert.deepEqual(await sim.evaluate(()=>getGameStateForExport()),practiceState); checks++;
-  await page.locator('#wide-button').click(); await mode('viewer');
-  await page.locator('#resume-button').click(); await mode('split');
+  await navigationAction('#wide-button'); await mode('viewer');
+  await navigationAction('#resume-button'); await mode('split');
   check(await viewer.evaluate(()=>currentPageIndex)===3,'wide/resume retains independent viewer cursor');
   assert.deepEqual(await sim.evaluate(()=>getGameStateForExport()),practiceState); checks++;
   await sim.locator('#startGameBtn').click(); await mode('playing');
@@ -67,26 +81,26 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   await page.keyboard.press('Space');
   await sim.locator('#backToEditorBtn').click(); await mode('split');
   check(await sim.evaluate(()=>window.__workflowIdentity)===frameIdentity,'native simulator not reloaded during transitions');
-  await page.locator('#source-button').click(); await mode('viewer');
+  await navigationAction('#source-button'); await mode('viewer');
   check(await viewer.evaluate(()=>currentPageIndex)===2,'return to exact practice anchor');
-  await page.locator('#resume-button').click(); await mode('split');
+  await navigationAction('#resume-button'); await mode('split');
   await sim.locator('#startGameBtn').click(); await mode('playing');
   await page.keyboard.press('Space');
   await sim.locator('#exportFumenBtn').click(); await mode('viewer');
-  check(await page.locator('#source-button').isVisible(),'practice recording has source return');
+  check(await page.locator('#source-button').evaluate(button=>!button.hidden),'practice recording has source return');
   check(await viewer.evaluate(()=>fumenPages.length)>0,'practice recording is playable');
-  await page.locator('#source-button').click();
+  await navigationAction('#source-button');
   await viewer.waitForFunction(()=>currentPageIndex===2);
   check(await viewer.evaluate(()=>fumenPages.length)===4,'source remains immutable after practice recording');
 
-  await page.locator('#resume-button').click(); await mode('split');
+  await navigationAction('#resume-button'); await mode('split');
   await page.setViewportSize({width:390,height:844});
   check(await page.locator('#viewer-pane').isHidden(),'mobile initially shows preparation');
-  await page.locator('#narrow-viewer').click();
+  await navigationAction('#narrow-viewer');
   check(await page.locator('#simulator-pane').isHidden(),'mobile switches to reference');
   await screenshot('mobile-viewer');
-  await page.locator('#narrow-simulator').click();
-  await page.locator('#home-button').click(); await mode('simulator');
+  await navigationAction('#narrow-simulator');
+  await navigationAction('#home-button'); await mode('simulator');
   assert.deepEqual(await sim.evaluate(()=>getGameStateForExport()),normal); checks++;
   await sim.locator('#startGameBtn').click(); await mode('playing');
   await sim.locator('#backToEditorBtn').click(); await mode('simulator');
@@ -132,20 +146,20 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   assert.deepEqual(await recoveredSim.evaluate(()=>getGameStateForExport()),edited);checks++;
   check(await recoveredViewer.evaluate(()=>currentPageIndex)===3,'reload retains viewer cursor');
   check(await page.locator('#workspace-divider').getAttribute('aria-valuenow')==='55','reload retains split width');
-  await page.locator('#source-button').click();await mode('viewer');
+  await navigationAction('#source-button');await mode('viewer');
   check(await recoveredViewer.evaluate(()=>currentPageIndex)===2,'reload retains original practice anchor');
-  await page.locator('#resume-button').click();await mode('split');
+  await navigationAction('#resume-button');await mode('split');
   await recoveredSim.locator('#startGameBtn').click();await mode('playing');
   await page.keyboard.press('Space');
   await recoveryMatches('playing');
   await page.reload({waitUntil:'networkidle'});await mode('split');
   recoveredSim=page.frame({url:/index\.html\?.*workspace=1/});
   check(await recoveredSim.evaluate(()=>gameState)==='EDITING','recovered game is stopped');
-  await page.locator('#interrupted-button').click();await mode('viewer');
-  check(await page.locator('#source-button').isVisible(),'interrupted recording retains source');
+  await navigationAction('#interrupted-button');await mode('viewer');
+  check(await page.locator('#source-button').evaluate(button=>!button.hidden),'interrupted recording retains source');
   check(await page.locator('#save-replay-form').count()===0,'no user save form');
   check(await page.locator('#record-list').count()===0,'no replay library');
-  await page.locator('#home-button').click();await mode('simulator');
+  await navigationAction('#home-button');await mode('simulator');
   const aiSim=page.frame({url:/index\.html\?.*workspace=1/});
   await aiSim.locator('#p1-ai-toggle').check();
   await aiSim.locator('#startGameBtn').click();await mode('playing');

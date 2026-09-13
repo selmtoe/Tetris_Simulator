@@ -7,12 +7,15 @@
     <title>Simulator</title>
     <link rel="manifest" href="./manifest.json">
     <link rel="stylesheet" href="../tools/tetris-lab/preview-theme.css">
-    <link rel="stylesheet" href="./workspace.css?v=workflow-v1">
-    <script type="module" src="./js/workspace.js?v=workflow-v1"></script>
+    <link rel="stylesheet" href="./workspace.css?v=workflow-v2">
+    <script type="module" src="./js/workspace.js?v=workflow-v2"></script>
 </head>
 <body data-mode="simulator">
-    <header class="workspace-bar" id="workspace-bar">
-        <div class="workspace-caption"><span id="workspace-title">シミュレータ</span><span id="workspace-detail"></span></div>
+    <dialog id="navigation-dialog" aria-labelledby="workspace-title">
+        <div class="dialog-heading">
+            <div class="workspace-caption"><span id="workspace-title">シミュレータ</span><span id="workspace-detail"></span></div>
+            <button id="close-navigation">閉じる</button>
+        </div>
         <nav aria-label="画面の切り替え">
             <button id="home-button" hidden>通常の準備へ</button>
             <button id="source-button" hidden>元リプレイに戻る</button>
@@ -21,11 +24,11 @@
             <button id="interrupted-button" hidden>中断前の記録を見る</button>
             <button id="records-button">リプレイを開く</button>
         </nav>
-    </header>
-    <div class="narrow-switch" role="group" aria-label="表示する画面">
-        <button id="narrow-simulator" aria-pressed="true">練習準備</button>
-        <button id="narrow-viewer" aria-pressed="false">元リプレイ</button>
-    </div>
+        <div class="narrow-switch" role="group" aria-label="表示する画面">
+            <button id="narrow-simulator" aria-pressed="true">練習準備</button>
+            <button id="narrow-viewer" aria-pressed="false">元リプレイ</button>
+        </div>
+    </dialog>
     <main id="workspace-panes" aria-label="プレイと振り返り">
         <section id="simulator-pane" class="workspace-pane" aria-label="シミュレータ">
             <iframe id="iframe-sim" title="シミュレータ" allow="gamepad; clipboard-read; clipboard-write; fullscreen"></iframe>

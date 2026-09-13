@@ -83,7 +83,7 @@
                     break;
                 case 'context': restoreContext(message.data); value = context(); break;
                 case 'layout':
-                    document.getElementById('viewer-simulator-btn').textContent = message.data === 'split'
+                    document.getElementById('viewer-simulator-btn').title = message.data === 'split'
                         ? 'この局面を左に反映' : 'この局面から練習';
                     updateScale();
                     break;
@@ -98,8 +98,25 @@
     window.addEventListener('tetris:viewer-ready', () => {
         ready = true;
         if (embedded) {
-            document.getElementById('back-to-editor-btn').style.display = 'none';
-            document.getElementById('viewer-simulator-btn').textContent = 'この局面から練習';
+            // Reuse the former Editor slot, including its original width, so
+            // the native toolbar neither shifts nor wraps at new breakpoints.
+            const navigation = document.getElementById('back-to-editor-btn');
+            const sizing = document.createElement('span');
+            sizing.textContent = navigation.textContent;
+            sizing.style.visibility = 'hidden';
+            sizing.setAttribute('aria-hidden', 'true');
+            const label = document.createElement('span');
+            label.textContent = '画面';
+            label.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center';
+            navigation.style.position = 'relative';
+            navigation.replaceChildren(sizing, label);
+            navigation.title = '全画面・練習準備・元リプレイへの切り替え';
+            navigation.setAttribute('aria-haspopup', 'dialog');
+            navigation.addEventListener('click', event => {
+                event.stopImmediatePropagation();
+                notify('workspaceAction', { action: 'navigation' });
+            }, true);
+            document.getElementById('viewer-simulator-btn').title = 'この局面から練習';
             notify('workspaceReady');
         }
     });

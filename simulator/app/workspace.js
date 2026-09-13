@@ -5,6 +5,8 @@
     const notify = (type, data = {}) => window.parent.postMessage({ target: 'hub', source: 'sim', type, ...data }, location.origin);
     let ready = false;
     let stopping = false;
+    let referenceButton;
+    let recoveryButton;
     window.addEventListener('message', event => {
         if (event.source !== window.parent || event.origin !== location.origin) return;
         const message = event.data;
@@ -44,6 +46,10 @@
                     }
                     value = getGameStateForExport();
                     break;
+                case 'layout':
+                    referenceButton.style.display = message.data.mode === 'split' ? '' : 'none';
+                    recoveryButton.style.display = message.data.interrupted ? '' : 'none';
+                    break;
                 case 'resize': updateScale(); break;
                 default: return;
             }
@@ -54,7 +60,30 @@
         }
     });
     document.addEventListener('DOMContentLoaded', () => {
-        document.getElementById('exportFumenBtn').textContent = '記録を見る';
+        document.getElementById('exportFumenBtn').title = '今回のプレイ記録をビューワーで開く';
+        const actionButton = (id, text, action) => {
+            const button = document.createElement('button');
+            button.id = id;
+            button.type = 'button';
+            button.className = 'button';
+            button.textContent = text;
+            button.addEventListener('click', () => {
+                document.getElementById('share-close').click();
+                notify('workspaceAction', { action });
+            });
+            return button;
+        };
+        // Keep the native toolbar's geometry. Additional actions live in the
+        // existing Share dialog, including reference navigation in practice.
+        const importSection = document.getElementById('import-from-data-btn').parentElement;
+        importSection.append(actionButton('workspace-open-replay', 'リプレイを開く', 'records'));
+        recoveryButton = actionButton('workspace-interrupted', '中断前の記録を見る', 'interrupted');
+        recoveryButton.style.display = 'none';
+        importSection.append(recoveryButton);
+        referenceButton = actionButton('workspace-reference', 'ビューワー', 'reference');
+        referenceButton.title = '元リプレイを表示する';
+        referenceButton.style.display = 'none';
+        importSection.append(referenceButton);
         document.getElementById('startGameBtn').addEventListener('click', () => {
             if (gameState === 'PLAYING') notify('workspaceStarted');
         });

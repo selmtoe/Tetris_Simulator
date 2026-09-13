@@ -1,5 +1,5 @@
-const CACHE_NAME = 'tetris-hub-workflow-v1';
-const ASSETS = ['./', './index.html', './workspace.css?v=workflow-v1', './js/workspace.js?v=workflow-v1', './js/workflow.js', './js/recovery.js', './manifest.json', './icon-192.png', './icon-512.png'];
+const CACHE_NAME = 'tetris-hub-workflow-v2';
+const ASSETS = ['./', './index.html', './workspace.css?v=workflow-v2', './js/workspace.js?v=workflow-v2', './js/workflow.js', './js/recovery.js', './manifest.json', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', event => {
     event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
 });

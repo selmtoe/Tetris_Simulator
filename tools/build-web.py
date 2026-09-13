@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 import shutil
 
@@ -27,6 +28,26 @@ FILES = (
     'Load PPT/tetris.onnx', 'Load PPT/tetris.model.json',
 )
 EXTENSIONS = {'.html', '.css', '.js', '.wasm', '.png', '.jpg', '.svg', '.webp', '.ico'}
+
+# The approved tools preview supplies these labels through its Lab bridge.
+# Publish the presentation alone, without the personal Lab integration.
+TOOL_LABELS = {
+    'view-mode-btn': '再生で確認', 'back-to-editor-btn': '盤面を編集',
+    'send-to-simulator': 'ここから練習', 'viewer-simulator-btn': 'ここから練習',
+    'prev-page': '前の局面', 'next-page': '次の局面', 'new-page': '局面を追加',
+    'delete-page': 'この局面を削除', 'new-snapshot-case': '別の局面集を作る',
+    'new-replay-case': '別の対戦記録を作る',
+}
+for player in ('p1', 'p2'):
+    for name, label in {'next-delete-left': '先頭を削除', 'next-clear': 'NEXTを空にする', 'field-clear': '盤面を空にする'}.items():
+        TOOL_LABELS[f'{player}-{name}'] = label
+
+
+def approved_labels(html):
+    for element_id, label in TOOL_LABELS.items():
+        pattern = r'(<button\b[^>]*\bid="' + re.escape(element_id) + r'"[^>]*>)[^<]*(</button>)'
+        html = re.sub(pattern, lambda match: match[1] + label + match[2], html)
+    return html
 
 
 def build(output):
@@ -53,6 +74,8 @@ def build(output):
             prefix = '../' if relative.startswith('F/') else './'
             role = 'viewer' if relative.startswith('F/') else 'simulator'
             html = source.read_text(encoding='utf-8')
+            if role == 'viewer':
+                html = approved_labels(html)
             entry = f'<script src="{prefix}shared/workspace-entry.js" data-app="{role}"></script>'
             html = html.replace('<head>', '<head>\n' + entry, 1)
             html = html.replace('</head>', f'<link rel="stylesheet" href="{prefix}shared/appearance.css"><script src="{prefix}shared/appearance.js"></script></head>', 1)

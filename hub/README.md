@@ -14,7 +14,14 @@ at build time; it does not require the personal Lab server.
 - Seeking on the right does not change the left draft; applying a different position is explicit.
 - Wide viewer / resume preparation preserve both states without reloading either iframe.
 - Back after practice: split preparation. Source return opens the original practice anchor.
-- Narrow screens show preparation/reference toggles. Play always occupies the full workspace.
+- Narrow screens switch preparation/reference from the screen menu. Play always occupies the full workspace.
+
+There is no surrounding toolbar or tab row: the native app receives the full
+viewport height, including during preparation. Open/import and interrupted-record
+actions are inside the simulator's existing Share dialog. Practice reference
+navigation appears there only while preparing a replay position. The viewer's
+former Editor button opens the screen menu in the same slot and at the same width;
+the approved Japanese labels and the simulator's Record label retain their sizes.
 
 Hub has no user save button, replay library or named autosave entries. Files and
 links are opened through the small Open dialog. Sharing and file export remain
@@ -68,6 +75,8 @@ Run `tools/test-hub-workflow.cjs` against the built bundle with Playwright. Set
 use an isolated profile and cover both return origins, immutable sources, independent
 seeking, mobile layout, direct links, reload recovery and interrupted recordings.
 `tools/test-web-build.py` checks static paths, appearance and deployment boundaries.
+`tools/test-hub-appearance.cjs` compares native and embedded viewport, board and
+control geometry at desktop/mobile widths in both themes, and captures both views.
 The existing event codec and viewer AI/export regression checks also remain applicable.
 
 ## Restore point
