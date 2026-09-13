@@ -90,7 +90,10 @@ async function compare(label,expectedFrame,actualFrame,selectors,actualElement,r
             // remaining native layout with the same removal, not a new design.
             await nativeViewer.evaluate(()=>{document.getElementById('back-to-editor-btn').style.display='none';});
             await compare(label+'-viewer',nativeViewer.mainFrame(),viewer,viewerSelectors,hub.locator('#iframe-editor-custom'),nativeViewer);
-            assert.equal(await viewer.locator('#viewer-simulator-btn').textContent(),'ここから練習');checks++;
+            assert.equal(await viewer.locator('#viewer-simulator-btn').textContent(),'シミュレータ');checks++;
+            if (await viewer.locator('#viewer-page-indicator').getAttribute('aria-expanded') !== 'true') {
+                await viewer.locator('#viewer-page-indicator').click();
+            }
             await viewer.locator('#viewer-simulator-btn').click();
             await hub.waitForFunction(()=>document.body.dataset.mode==='split');
             const simWidth=await sim.evaluate(()=>innerWidth);

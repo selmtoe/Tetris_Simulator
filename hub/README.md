@@ -10,7 +10,7 @@ at build time; it does not require the personal Lab server.
 - Start: full simulator play. Its return destination is captured at start.
 - Back after ordinary play: full simulator preparation, even after earlier replay practice.
 - Record: full viewer showing that play's replay.
-- Practice here: simulator on the left, source viewer on the right.
+- Simulator (シミュレータ): practice on the left, source viewer on the right.
 - Seeking on the right does not change the left draft; applying a different position is explicit.
 - Wide viewer / resume preparation preserve both states without reloading either iframe.
 - Back after practice: split preparation. Source return opens the original practice anchor.
@@ -25,8 +25,28 @@ reference and full-view actions are inside the existing Share dialog. Appearance
 follows the same preference as the simulator, including live light/dark changes.
 
 Hub has no user save button, replay library or named autosave entries. Files and
-links are opened through the small Open dialog. Sharing and file export remain
-in the viewer. The old Hub's browser storage keys are not read, changed or deleted.
+links are opened through the small Open dialog. Replays are shared as links;
+legacy event files remain readable but their file-save control is removed.
+Image/GIF output and official Fumen links remain available. The old Hub's browser
+storage keys are not read, changed or deleted.
+
+## Replay controls and simulator defaults
+
+The viewer keeps Page on its own row, with Simulator, Share, Output and AI scoring
+on one row below it. The menu stays expanded when it clears the actual canvas.
+If it would overlap the canvas (including HOLD/NEXT), it collapses to Page and
+opens on hover, tap or keyboard. Resize and split-width changes recalculate this
+without resizing or moving the board. Its short expansion respects reduced motion.
+
+Cold Clear is the only public AI model. Its default decision time is 50 ms;
+saved custom timing is preserved, and removed model IDs fall back to Cold Clear.
+Other model workers and the local research runner are excluded from the bundle.
+Drawing settings appear only in debug mode. Simulator link settings immediately
+update the sharing URL. Placed pieces receive a plain white light overlay.
+
+The simulator shows 21 rows in preparation and play, using the same 40-row state
+and gameplay coordinates. Image imports still read the source game's 20 rows.
+`hub-before-controls-20260913` preserves the state before these changes.
 
 ## Optional motion preview
 
@@ -94,6 +114,10 @@ Run `tools/test-hub-workflow.cjs` against the built bundle with Playwright. Set
 use an isolated profile and cover both return origins, immutable sources, independent
 seeking, mobile layout, direct links, reload recovery and interrupted recordings.
 `tools/test-web-build.py` checks static paths, appearance and deployment boundaries.
+`tools/test-web-controls.cjs` covers adaptive controls, touch/keyboard input,
+link updates, legacy imports, model defaults and a browser AI scoring run.
+`tools/test-simulator-viewport.cjs` checks the new top row in edit/play input,
+transport and 20-row image recognition.
 `tools/test-web-cache-upgrade.cjs` installs a legacy native cache in an isolated
 browser, upgrades to the static build and verifies the soft palette without
 clearing old caches or the saved appearance preference.

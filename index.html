@@ -199,7 +199,7 @@ position: fixed; top: 10px; right: 10px; z-index: 160; gap: 10px;">
             <button class="tab-button active" data-tab="general">基本設定</button>
             <button class="tab-button" data-tab="p1-keys">1P操作設定</button>
             <button class="tab-button" data-tab="p2-keys" id="p2-keys-tab-btn" style="display: none;">2P操作設定</button>
-            <button class="tab-button" data-tab="layout-settings">描画設定</button>
+            <button class="tab-button" data-tab="layout-settings" hidden>描画設定</button>
             <button class="tab-button" data-tab="ai-settings">AI設定</button>
         </div>
 
@@ -272,7 +272,7 @@ justify-content: center; gap: 10px; flex-wrap: wrap;">
                 <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box;">
                 <div style="display: flex; gap: 10px; margin-top: 5px;">
                     <button id="copy-link-btn" class="button">リンクをコピー</button>
-                    <button id="advanced-link-btn" class="button">詳細なリンク生成</button>
+                    <button id="advanced-link-btn" class="button">リンクの設定</button>
                 </div>
             </div>
             <div id="advanced-link-options" style="display: none; margin-top: 15px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px;">
@@ -294,7 +294,6 @@ justify-content: center; gap: 10px; flex-wrap: wrap;">
                         <span>戻るボタンを非表示</span>
                     </label>
                 </div>
-                 <button id="generate-advanced-link-btn" class="button" style="margin-top: 10px;">リンクを再生成</button>
             </div>
         </div>
         
@@ -339,8 +338,6 @@ justify-content: center; gap: 10px; flex-wrap: wrap;">
 
 <script defer src="./simulator/app/virtual-controller.js"></script>
 <script defer src="./simulator/app/runtime-config.js?v=app-v21"></script>
-<script defer src="./simulator/candidate/kasane-stack-ren-candidate-harness.js?v=candidate-v3"></script>
-<script defer src="./simulator/candidate/kasane-stack-ren-telemetry.js?v=candidate-v2"></script>
 <script defer src="./simulator/app/player-engine.js?v=app-v27"></script>
 <script defer src="./simulator/app/pc-finder.js?v=app-v5"></script>
 <script defer src="./simulator/app/editor.js"></script>

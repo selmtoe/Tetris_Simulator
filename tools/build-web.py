@@ -17,7 +17,7 @@ spec = importlib.util.spec_from_file_location('web_appearance', ROOT / 'tools/te
 appearance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(appearance)
 
-DIRECTORIES = ('F/app', 'F/styles', 'styles', 'simulator/app', 'simulator/workers', 'icons')
+DIRECTORIES = ('F/app', 'F/styles', 'styles', 'simulator/app', 'icons')
 FILES = (
     'index.html', 'F/index.html', 'manifest.webmanifest', 'sw.js',
     'hub/index.html', 'hub/workspace.css', 'hub/js/workspace.js', 'hub/js/workflow.js', 'hub/js/recovery.js',
@@ -25,17 +25,19 @@ FILES = (
     'shared/workspace-entry.js', 'shared/tetris-event-codec.js', 'shared/cell-cnn-inference.js',
     'shared/motion.css', 'shared/motion.js',
     'simulator/pc-solver/sfinder-pc.js', 'simulator/pc-solver/sfinder-pc.wasm',
-    'simulator/candidate/kasane-stack-ren-candidate-harness.js',
-    'simulator/candidate/kasane-stack-ren-telemetry.js',
+    'simulator/workers/cold-clear-wasm-worker.js', 'simulator/workers/cold-clear-wasm.js',
+    'simulator/workers/cold-clear.wasm', 'simulator/workers/cold-clear-core.js',
+    'simulator/workers/pc-finder-worker.js',
     'Load PPT/tetris.onnx', 'Load PPT/tetris.model.json',
 )
 EXTENSIONS = {'.html', '.css', '.js', '.wasm', '.png', '.jpg', '.svg', '.webp', '.ico'}
+EXCLUDED = {'simulator/app/league-runner.js'}  # Local training and model comparisons.
 
 # The approved tools preview supplies these labels through its Lab bridge.
 # Publish the presentation alone, without the personal Lab integration.
 TOOL_LABELS = {
     'view-mode-btn': '再生で確認', 'back-to-editor-btn': '盤面を編集',
-    'send-to-simulator': 'ここから練習', 'viewer-simulator-btn': 'ここから練習',
+    'send-to-simulator': 'シミュレータ', 'viewer-simulator-btn': 'シミュレータ',
     'prev-page': '前の局面', 'next-page': '次の局面', 'new-page': '局面を追加',
     'delete-page': 'この局面を削除', 'new-snapshot-case': '別の局面集を作る',
     'new-replay-case': '別の対戦記録を作る',
@@ -107,6 +109,7 @@ def build(output):
     for directory in DIRECTORIES:
         paths.update(path.relative_to(ROOT).as_posix() for path in (ROOT / directory).rglob('*')
                      if path.is_file() and path.suffix in EXTENSIONS)
+    paths.difference_update(EXCLUDED)
     for relative in sorted(paths):
         source = ROOT / relative
         destination = output / relative
@@ -117,6 +120,8 @@ def build(output):
             prefix = '../' if relative.startswith('F/') else './'
             role = 'viewer' if relative.startswith('F/') else 'simulator'
             html = source.read_text(encoding='utf-8')
+            if role == 'simulator':
+                html = re.sub(r'<script\b[^>]*src="\./simulator/app/league-runner\.js[^\"]*"[^>]*></script>\s*', '', html)
             if role == 'viewer':
                 html = approved_labels(html)
             entry = f'<script src="{prefix}shared/workspace-entry.js" data-app="{role}"></script>'

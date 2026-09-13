@@ -58,7 +58,7 @@ if (saved) {
                 compatibleSettings.aiWeights = JSON.parse(JSON.stringify(DEFAULT_AI_WEIGHTS));
             }
             Object.assign(gameSettings, compatibleSettings);
-            if (migrateFirstPortBudget) gameSettings.aiThinkTime = 180;
+            if (migrateFirstPortBudget) gameSettings.aiThinkTime = 50;
             if (!Number.isFinite(gameSettings.aiNodeLimit)) gameSettings.aiNodeLimit = 120000;
             gameSettings.aiType = 'cold-clear';
             const savedModels = compatibleSettings.aiModels || {};
@@ -224,9 +224,7 @@ function populateAiSettingsTab() {
     labelType.textContent = 'AIモデル';
     const modelHint = document.createElement('span');
     modelHint.className = 'ai-settings-model-hint';
-    modelHint.textContent = gameSettings.debugEnabled
-        ? '編集画面のAI欄を長押しして、P1/P2別に選択'
-        : 'モデル選択はデバッグモードで利用できます';
+    modelHint.textContent = 'Cold Clear';
     itemType.append(labelType, modelHint);
     list.appendChild(itemType);
 
@@ -619,6 +617,7 @@ if (gameMode === '2P') {
     const contents = modal.querySelectorAll('.tab-content');
     
     function switchTab(tabName) {
+        if (tabName === 'layout-settings' && !gameSettings.debugEnabled) tabName = 'general';
         tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.tab === tabName));
         contents.forEach(content => content.classList.toggle('active', content.id === `tab-content-${tabName}`));
     }

@@ -142,6 +142,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyDebugModeUi() {
         const enabled = gameSettings.debugEnabled === true;
         document.body.classList.toggle('debug-mode-enabled', enabled);
+        const layoutTab = document.querySelector('[data-tab="layout-settings"]');
+        if (layoutTab) layoutTab.hidden = !enabled;
+        if (!enabled && layoutTab?.classList.contains('active')) {
+            document.querySelector('[data-tab="general"]').click();
+        }
         updateAiModelBadges();
         const analyzeButton = document.getElementById('analyzeBtn');
         if (analyzeButton) {
@@ -407,15 +412,12 @@ document.getElementById('advanced-link-btn').addEventListener('click', () => {
             hideBackCheckbox.disabled = true;
             hideBackCheckbox.checked = false;
         }
+        generateAndDisplayLink();
     });
 
-    document.getElementById('generate-advanced-link-btn').addEventListener('click', () => {
-        generateAndDisplayLink({
-            startSim: document.getElementById('start-sim-checkbox').checked,
-            noHold: document.getElementById('no-hold-checkbox').checked,
-            hideBack: document.getElementById('hide-back-btn-checkbox').checked
-        });
-    });
+    for (const id of ['no-hold-checkbox', 'hide-back-btn-checkbox']) {
+        document.getElementById(id).addEventListener('change', () => generateAndDisplayLink());
+    }
 document.getElementById('startGameBtn').addEventListener('click', () => {
         gameHistoryLog = [];
         window.resetRecordedReplay?.();

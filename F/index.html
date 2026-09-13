@@ -123,17 +123,21 @@
 </div>
 <div id="viewer-container">
     <canvas id="viewerCanvas"></canvas>
-    <div id="viewer-controls"> 
+    <div id="viewer-controls">
+        <div class="viewer-controls-shell">
+            <button id="viewer-page-indicator" type="button" aria-expanded="false" aria-controls="viewer-controls-panel" title="リプレイの操作を開く">Page 1 / 1</button>
+            <div id="viewer-controls-panel" inert aria-hidden="true">
         <div class="viewer-top-row">
-            <span id="viewer-page-indicator">Page 1 / 1</span>
-            <button id="viewer-simulator-btn" class="button">Simulator</button>
+            <button id="viewer-simulator-btn" class="button">シミュレータ</button>
             <button id="back-to-editor-btn" class="button">Editor</button>
             <button id="viewer-share-btn" class="button">共有</button>
             <button id="viewer-export-btn" class="button">出力</button>
             <button id="viewer-ai-score-btn" class="button">AI採点</button>
         </div>
         <div class="viewer-slider-container">
-            <input type="range" id="viewer-page-slider" min="0" max="0" value="0">
+            <input type="range" id="viewer-page-slider" min="0" max="0" value="0" aria-label="リプレイのページ">
+        </div>
+            </div>
         </div>
     </div>
 </div>
@@ -199,14 +203,13 @@ max-width: 500px; font-family: var(--font-ui);">
         
         <div class="share-section">
 
-            <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">エクスポート</h3>
+            <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">リンクで共有</h3>
             <p></p>
             <div class="share-item" style="display: flex; flex-direction: column; align-items: flex-start;">
                 <input type="text" id="share-link-input" readonly style="width: 100%; margin-top: 5px; margin-bottom: 5px; box-sizing: border-box; background-color: var(--primary-color); color: var(--font-color); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; font-family: var(--font-ui);">
                 <div style="display: flex;
 gap: 10px; margin-top: 5px; flex-wrap: wrap;">
                     <button id="copy-link-btn" class="button">リンクをコピー</button>
-                    <button id="export-event-file-btn" class="button">イベントリプレイを保存</button>
                     <button id="export-fumen-p1-btn" class="button" title="本家テト譜リンクをコピー（HOLD/NEXTは含まれません）" >本家テト譜をコピー（1P）</button>
                     <button id="export-fumen-p2-btn" class="button" style="display: none;" title="本家テト譜リンクをコピー（HOLD/NEXTは含まれません）">本家テト譜をコピー（2P）</button>
                 </div>
@@ -224,7 +227,7 @@ gap: 10px; margin-top: 5px; flex-wrap: wrap;">
             <h3 style="font-family: var(--font-display); color: var(--primary-hover-color); margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid var(--primary-color); padding-bottom: 5px;">インポート</h3>
             <p></p>
             <button id="import-from-data-btn" class="button">クリップボードからインポート</button>
-            <button id="import-event-file-btn" class="button">リプレイファイルをインポート</button>
+            <button id="import-event-file-btn" class="button">以前のリプレイファイルを読み込む</button>
             <input id="import-event-file" type="file" accept=".json,.tetrisevent,application/json" hidden>
         </div>
 
@@ -365,5 +368,6 @@ margin-top: 15px;">
 <script defer src="./app/83-share-controls.js?v=app-v19"></script>
 <script defer src="./app/84-ai-scoring.js?v=app-v21"></script>
 <script defer src="./app/85-workspace.js?v=workflow-v2"></script>
+<script defer src="./app/86-viewer-controls.js"></script>
 </body>
 </html>

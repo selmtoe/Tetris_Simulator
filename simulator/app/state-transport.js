@@ -194,7 +194,11 @@ function loadStateFromURL() {
 }
 
 
-function generateAndDisplayLink(options = {}) {
+function generateAndDisplayLink(options = {
+    startSim: document.getElementById('start-sim-checkbox').checked,
+    noHold: document.getElementById('no-hold-checkbox').checked,
+    hideBack: document.getElementById('start-sim-checkbox').checked && document.getElementById('hide-back-btn-checkbox').checked
+}) {
     const stateData = getGameStateForExport(options);
     const jsonString = JSON.stringify(stateData);
     const uint8Array = new TextEncoder().encode(jsonString);

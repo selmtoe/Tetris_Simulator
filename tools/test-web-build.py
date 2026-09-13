@@ -58,4 +58,10 @@ check('save-replay-form' not in html and 'record-list' not in html, 'Hub must no
 for path in ('hub/js/workspace.js', 'hub/js/recovery.js'):
     check(not re.search(r'tetrisHub(?:Auto)?Data', (OUTPUT / path).read_text(encoding='utf-8')), 'Old saved records must remain untouched')
 check((OUTPUT / 'hub/js/recovery.js').is_file(), 'Recovery must be included')
+check(not any('kasane' in path or 'candidate/' in path or 'league-runner' in path for path in manifest), 'Other AI models and research runners must not be distributed')
+# Scoring imports these dynamically, so HTML-only checks cannot catch omissions.
+for relative in ('F/app/84-ai-scoring-worker.js', 'simulator/workers/cold-clear-wasm-worker.js'):
+    for dependency in re.findall(r"importScripts\(['\"]([^'\"]+)['\"]\)", (OUTPUT / relative).read_text(encoding='utf-8')):
+        resolved = urlsplit(urljoin('/' + relative, dependency)).path.lstrip('/')
+        check((OUTPUT / resolved).is_file(), f'Missing worker dependency: {resolved}')
 print(json.dumps({'passed': True, 'checks': checks, 'files': len(manifest)}))

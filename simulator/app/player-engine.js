@@ -13,20 +13,7 @@ class Player {
         this.aiSearchInitialized = false;
         
         if (this.isAi) {
-            const productionWorkerScript = this.aiModel.startsWith('kasane-')
-                ? './simulator/workers/kasane-wasm-worker.js?v=kasane-v14'
-                : './simulator/workers/cold-clear-wasm-worker.js?v=controller-timing-v3';
-            // Only the exact opt-in candidate id may leave the production
-            // Worker/WASM path. The harness itself also uses exact equality,
-            // so kasane-stack-ren and every other production model stay on
-            // simulator/workers/kasane.wasm.
-            const workerScript = window.KasaneStackRenCandidateHarness
-                ? window.KasaneStackRenCandidateHarness.workerScriptFor(
-                    this.aiModel,
-                    productionWorkerScript
-                )
-                : productionWorkerScript;
-            this.aiWorker = new Worker(workerScript);
+            this.aiWorker = new Worker('./simulator/workers/cold-clear-wasm-worker.js?v=controller-timing-v3');
 
             this.aiWorker.onmessage = (e) => {
                 if (e.data && e.data.type === 'debug') {
@@ -1173,58 +1160,6 @@ if (this.linesClearedLastLock > 0) { this.startPostLockDelay('lineClear', gameSe
         };
     }
 
-    kasaneObservationSnapshot() {
-        const nowAbsoluteMs = performance.now();
-        const nowMs = Math.max(0, Math.floor(nowAbsoluteMs - gameStartTime));
-        const own = this.aiPlayerSnapshot(this, nowMs);
-        let opponent;
-        if (this.opponent) {
-            opponent = this.aiPlayerSnapshot(this.opponent, nowMs);
-        } else {
-            opponent = {
-                board: Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null)),
-                currentPiece: own.currentPiece,
-                nextQueue: own.nextQueue,
-                holdPiece: null,
-                canHold: true,
-                isB2B: false,
-                ren: -1,
-                incoming: [],
-                phase: { kind: 'ready' },
-                pieces: 0,
-                averagePieceMs: 350,
-                projectedDecisionLatencyMs: Math.max(0, Math.floor(Number(gameSettings.aiThinkTime) || 0))
-            };
-        }
-        return {
-            nowMs,
-            own,
-            opponent,
-            hasOpponent: Boolean(this.opponent),
-            model: this.aiModel,
-            // Search controls are budgets, not hard-coded KASANE presets.  The
-            // WASM wrapper clamps them and selects an adaptive search profile.
-            searchThinkTimeMs: Math.max(0, Math.floor(Number(gameSettings.aiThinkTime) || 0)),
-            nodeLimit: Number.isFinite(gameSettings.aiNodeLimit)
-                ? Math.max(32, Math.floor(gameSettings.aiNodeLimit))
-                : 120000,
-            rules: {
-                inputIntervalMs: Math.max(1, Math.floor(gameSettings.aiMoveDelay)),
-                lineClearDelayMs: Math.max(0, Math.floor(gameSettings.lineClearDelay)),
-                garbageGraceMs: Math.max(0, Math.floor(gameSettings.garbageGrace)),
-                // Every AI gets the same fixed decision window. The Player
-                // waits out any unused portion after the Worker responds, so
-                // both KASANE's lock projection and the opponent forecast use
-                // the same deterministic timestamp as the actual simulator.
-                decisionLatencyMs: Math.max(0, Math.floor(Number(gameSettings.aiThinkTime) || 0)),
-                previewCount: Math.max(1, Math.floor(gameSettings.maxNext)),
-                garbageRandomness: Math.max(0, Math.min(1, Number(gameSettings.garbageRandomness) || 0)),
-                perfectClearSpecialAttack: 10,
-                spawnDelayMs: Math.max(0, Math.floor(gameSettings.spawnDelay))
-            }
-        };
-    }
-
     requestAiMove() {
         const requestId = ++this.aiRequestId;
         this.isAiThinking = true; 
@@ -1239,20 +1174,6 @@ if (this.linesClearedLastLock > 0) { this.startPostLockDelay('lineClear', gameSe
             ren: this.ren
         };
         updateAiDebugDisplay(debugPayload);
-
-        if (this.aiModel.startsWith('kasane-')) {
-            if (this.aiWorker) {
-                this.aiSearchInitialized = true;
-                this.aiWorker.postMessage({
-                    type: 'analyze',
-                    requestId,
-                    model: this.aiModel,
-                    decisionLatencyMs: Math.max(0, Number(gameSettings.aiThinkTime) || 0),
-                    snapshot: this.kasaneObservationSnapshot()
-                });
-            }
-            return;
-        }
 
         const currentWeights = { ...gameSettings.aiWeights };
         if (gameSettings.banPC) currentWeights.perfect_clear = -999;
@@ -1290,8 +1211,7 @@ if (this.linesClearedLastLock > 0) { this.startPostLockDelay('lineClear', gameSe
         this.isAiThinking = false;
         this.aiSearchInitialized = false;
         if (this.aiWorker) {
-            const preserveStrategy = reason === 'garbage rise' && this.aiModel.startsWith('kasane-');
-            this.aiWorker.postMessage({ type: preserveStrategy ? 'invalidate' : 'reset' });
+            this.aiWorker.postMessage({ type: 'reset' });
         }
 
         const debugDisplay = document.getElementById('ai-tree-debug-display');

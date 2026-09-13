@@ -69,15 +69,6 @@ document.addEventListener('DOMContentLoaded', () => {
         input.select();
         copyToClipboard(input.value);
     });
-    document.getElementById('export-event-file-btn')?.addEventListener('click', () => {
-        const data = getCollectionDataForExport();
-        const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `tetris_replay_${new Date().toISOString().replace(/[:.]/g, '-')}.tetrisevent.json`;
-        link.click();
-        URL.revokeObjectURL(url);
-    });
     document.getElementById('import-from-data-btn').addEventListener('click', async () => {
         try {
             const text = await navigator.clipboard.readText();

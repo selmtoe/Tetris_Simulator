@@ -12,19 +12,11 @@
     }
 
     function drawPlacement(ctx, x, y, size) {
-        // An inset light edge with a dark backing remains visible on every
-        // piece color. Keep both strokes inside the cell and retain its fill.
-        const inset = size * 0.13;
+        // Lighten the whole placed cell without an outline or extra marker.
         ctx.save();
         ctx.globalAlpha = 1;
-        ctx.setLineDash([]);
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = '#253039';
-        ctx.lineWidth = size * 0.13;
-        ctx.strokeRect(x + inset, y + inset, size - inset * 2, size - inset * 2);
-        ctx.strokeStyle = '#fffdf7';
-        ctx.lineWidth = size * 0.065;
-        ctx.strokeRect(x + inset, y + inset, size - inset * 2, size - inset * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.38)';
+        ctx.fillRect(x, y, size, size);
         ctx.restore();
     }
 

@@ -22,6 +22,11 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
  let checks=0;
  const check = (condition,message)=>{assert.ok(condition,message);checks++;};
  async function mode(expected) { await page.waitForFunction(value=>document.body.dataset.mode===value,expected); checks++; }
+ async function expandViewer(frame) {
+   if (await frame.locator('#viewer-page-indicator').getAttribute('aria-expanded') !== 'true') {
+     await frame.locator('#viewer-page-indicator').click();
+   }
+ }
  async function navigationAction(id) {
    if (await page.locator('#viewer-pane').isHidden()) {
     const simulator=page.frame({url:/index\.html\?.*workspace=1/});
@@ -30,6 +35,7 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
     if (id==='#narrow-viewer') { await page.waitForFunction(()=>document.body.dataset.narrowPane==='viewer'); return; }
    }
    const viewer=page.frame({url:/\/F\/index\.html\?workspace=1/});
+   await expandViewer(viewer);
    await viewer.locator('#viewer-share-btn').click();
    await viewer.locator(id).click();
    if (id.startsWith('#narrow-')) await page.waitForFunction(pane=>document.body.dataset.narrowPane===pane,id.slice('#narrow-'.length));
@@ -66,10 +72,12 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   await mode('viewer');
   check(await viewer.locator('#back-to-editor-btn').isHidden(),'no generic screen button');
   check(await viewer.locator('#viewer-controls .lab-settings-open').count()===0,'no viewer appearance settings button');
+  await expandViewer(viewer);
   await viewer.locator('#viewer-page-slider').fill('2');
   await viewer.locator('#viewer-page-slider').dispatchEvent('input');
   check(await viewer.evaluate(()=>currentPageIndex)===2,'source seek applied');
   await screenshot('viewer');
+  await expandViewer(viewer);
   await viewer.locator('#viewer-simulator-btn').click();
   await mode('split');
   const practiceState = await sim.evaluate(()=>getGameStateForExport());
@@ -78,6 +86,7 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   const viewerBounds=await page.locator('#viewer-pane').boundingBox();
   check(simBounds.x < viewerBounds.x,'simulator left, viewer right');
   await screenshot('split');
+  await expandViewer(viewer);
   await viewer.locator('#viewer-page-slider').fill('3');
   await viewer.locator('#viewer-page-slider').dispatchEvent('input');
   assert.deepEqual(await sim.evaluate(()=>getGameStateForExport()),practiceState); checks++;
@@ -128,8 +137,10 @@ const fixture = {v:3,m:'1P',currentCase:0,cases:[{name:'練習元の記録',kind
   // Crash/reload recovery preserves two independent cursors and the edited
   // simulator draft. It never adds a user-managed save list.
   await page.setViewportSize({width:1280,height:800});
+  await expandViewer(linkedViewer);
   await linkedViewer.locator('#viewer-simulator-btn').click(); await mode('split');
   let recoveredSim=page.frame({url:/index\.html\?.*workspace=1/});
+  await expandViewer(linkedViewer);
   await linkedViewer.locator('#viewer-page-slider').fill('3');
   await linkedViewer.locator('#viewer-page-slider').dispatchEvent('input');
   const edited=await recoveredSim.evaluate(()=>{

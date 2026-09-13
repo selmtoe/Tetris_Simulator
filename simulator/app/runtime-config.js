@@ -4,7 +4,7 @@ const RESOLUTION_SCALE = 2;
 const BLOCK_SIZE = 28;
 const EDITOR_BLOCK_SIZE = 50;
 const BOARD_WIDTH = 10;
-const BOARD_VISIBLE_HEIGHT = 20;
+const BOARD_VISIBLE_HEIGHT = 21;
 const BOARD_HEIGHT = 40; 
 const HOLD_AREA_WIDTH = 5 * BLOCK_SIZE;
 const PLAYFIELD_WIDTH = BOARD_WIDTH * BLOCK_SIZE;
@@ -20,49 +20,7 @@ const AI_MODEL_CATALOG = Object.freeze({
         id: 'cold-clear',
         name: 'Cold Clear',
         shortName: 'Cold Clear',
-        description: '参照Rust/WASM版のCold Clear Standard'
-    }),
-    'kasane-basic': Object.freeze({
-        id: 'kasane-basic',
-        name: 'KASANE Basic v1',
-        shortName: 'KASANE Basic',
-        description: 'Base v3 + 相手予測・相殺外しTempoモデル'
-    }),
-    'kasane-guard': Object.freeze({
-        id: 'kasane-guard',
-        name: 'KASANE Guard v1',
-        shortName: 'KASANE Guard',
-        description: '相殺当て・おじゃま上昇回避・生存余白に特化した防御モデル'
-    }),
-    'kasane-strategy': Object.freeze({
-        id: 'kasane-strategy',
-        name: 'KASANE Strategy v2',
-        shortName: 'KASANE Strategy',
-        description: 'Cold Clear床 + 相殺待機・蓄積→即発火・防御反撃を学習した戦略NN'
-    }),
-    'kasane-stack-ren': Object.freeze({
-        id: 'kasane-stack-ren',
-        name: 'KASANE Stack-REN v3',
-        shortName: 'KASANE Stack-REN',
-        description: '積み込み→発火REN戦略用の独立AIモデル'
-    }),
-    'kasane-stack-ren-candidate': Object.freeze({
-        id: 'kasane-stack-ren-candidate',
-        name: 'KASANE Stack-REN Candidate',
-        shortName: 'Stack-REN Candidate',
-        description: '候補専用Worker/WASMで検証する明示選択モデル（本番WASMとは分離）'
-    }),
-    'kasane-strategy-candidate': Object.freeze({
-        id: 'kasane-strategy-candidate',
-        name: 'KASANE Strategy Candidate',
-        shortName: 'Strategy Candidate',
-        description: '同じ候補WASM内の通常攻撃・通常防御モデルだけを検証（Stack-REN無効）'
-    }),
-    'kasane-base': Object.freeze({
-        id: 'kasane-base',
-        name: 'KASANE Base v3',
-        shortName: 'KASANE Base',
-        description: '戦術介入なしの学習済み基盤モデル'
+        description: 'Cold Clear Standard'
     })
 });
 
@@ -162,7 +120,7 @@ let gameSettings = {
     touchControlType: 'button',
     aiMoveDelay: 50,
     aiSdfDelay: 50,
-    aiThinkTime: 180,
+    aiThinkTime: 50,
     aiNodeLimit: 120000,
     drawMoveDelay: 30,
     aiTemplates: { meisou: true, sangaku_2: 

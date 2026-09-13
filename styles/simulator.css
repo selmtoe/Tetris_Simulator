@@ -189,6 +189,7 @@
     border-bottom: 2px solid var(--primary-color);
     margin-bottom: 10px;
 }
+.tab-button[hidden] { display: none !important; }
 .tab-button {
     flex: 1;
     padding: 10px 15px;
