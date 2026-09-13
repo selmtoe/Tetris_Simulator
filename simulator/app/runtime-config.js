@@ -46,6 +46,18 @@ const AI_MODEL_CATALOG = Object.freeze({
         shortName: 'KASANE Stack-REN',
         description: '積み込み→発火REN戦略用の独立AIモデル'
     }),
+    'kasane-stack-ren-candidate': Object.freeze({
+        id: 'kasane-stack-ren-candidate',
+        name: 'KASANE Stack-REN Candidate',
+        shortName: 'Stack-REN Candidate',
+        description: '候補専用Worker/WASMで検証する明示選択モデル（本番WASMとは分離）'
+    }),
+    'kasane-strategy-candidate': Object.freeze({
+        id: 'kasane-strategy-candidate',
+        name: 'KASANE Strategy Candidate',
+        shortName: 'Strategy Candidate',
+        description: '同じ候補WASM内の通常攻撃・通常防御モデルだけを検証（Stack-REN無効）'
+    }),
     'kasane-base': Object.freeze({
         id: 'kasane-base',
         name: 'KASANE Base v3',

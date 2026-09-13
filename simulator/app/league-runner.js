@@ -7,6 +7,25 @@
 
     const SCHEMA = 'tetris-simulator-league.v1';
     const PIECES = Object.freeze(['I', 'O', 'T', 'L', 'J', 'S', 'Z']);
+    const STACK_REN_EVENTS = new Set([
+        'Stack-REN enter',
+        'Stack-REN build',
+        'Stack-REN fire',
+        'Stack-REN continue',
+        'Stack-REN abort'
+    ]);
+    const STACK_REN_FIRE_REASONS = Object.freeze([
+        'ValueStop',
+        'Survival',
+        'Pressure',
+        'NoSafeBuild'
+    ]);
+    const STACK_REN_FUNCTIONAL_STAGES = Object.freeze({
+        idle: 'Idle',
+        entered: 'Entered',
+        built: 'Built',
+        normalFired: 'NormalFired'
+    });
     const nativeSetTimeout = window.setTimeout;
     const nativeClearTimeout = window.clearTimeout;
     const nativeRequestAnimationFrame = window.requestAnimationFrame;
@@ -89,6 +108,20 @@
         });
     }
 
+    function cheese12Board() {
+        const board = emptyBoard();
+        // Bottom-up fixed holes. Every row changes column, so this is the
+        // reproducible twelve-row "scattered garbage holes" contract used by
+        // the native offense/defense specialist training protocol.
+        const holes = [0, 7, 2, 9, 4, 1, 8, 3, 6, 0, 5, 9];
+        for (let offset = 0; offset < holes.length; offset++) {
+            const row = BOARD_HEIGHT - 1 - offset;
+            board[row] = Array(BOARD_WIDTH).fill('G');
+            board[row][holes[offset]] = null;
+        }
+        return board;
+    }
+
     function scenarioBoards(name, suppliedBoards) {
         if (suppliedBoards?.p1 || suppliedBoards?.p2) {
             return {
@@ -119,7 +152,43 @@
             }
             return { name, p1, p2: emptyBoard() };
         }
+        if (name === 'cheese12-model-a' || name === 'cheese12-model-b') {
+            // The actual seat is resolved for each paired leg below, after
+            // model A/B have been swapped. This keeps the intended specialist
+            // role on the twelve-row board in both legs.
+            return { name, p1: emptyBoard(), p2: emptyBoard() };
+        }
         return { name: 'empty', p1: emptyBoard(), p2: emptyBoard() };
+    }
+
+    function initialBoardsForPlan(options, plan) {
+        if (options.scenario !== 'cheese12-model-a' && options.scenario !== 'cheese12-model-b') {
+            return options.initialBoards;
+        }
+        const targetModel = options.scenario === 'cheese12-model-a'
+            ? options.modelA
+            : options.modelB;
+        const p1IsTarget = plan.p1Model === targetModel;
+        return {
+            name: options.scenario,
+            p1: p1IsTarget ? cheese12Board() : emptyBoard(),
+            p2: p1IsTarget ? emptyBoard() : cheese12Board()
+        };
+    }
+
+    function initialBoardSummary(board) {
+        let occupiedCells = 0;
+        let nonemptyRows = 0;
+        const singleHoleRowsBottomUp = [];
+        for (let row = board.length - 1; row >= 0; row--) {
+            const occupied = board[row].reduce((count, cell) => count + (cell !== null ? 1 : 0), 0);
+            occupiedCells += occupied;
+            nonemptyRows += occupied > 0 ? 1 : 0;
+            if (occupied === BOARD_WIDTH - 1) {
+                singleHoleRowsBottomUp.push(board[row].findIndex(cell => cell === null));
+            }
+        }
+        return { occupiedCells, nonemptyRows, singleHoleRowsBottomUp };
     }
 
     function percentile(values, ratio) {
@@ -143,13 +212,444 @@
         };
     }
 
+    function effectiveWorkerDecisionLatency(
+        mode,
+        configuredMs,
+        workerResponseMs,
+        reportedSearchMs
+    ) {
+        const configured = Math.max(0, Number(configuredMs) || 0);
+        if (mode !== 'measured') return configured;
+        return Math.max(
+            configured,
+            Math.max(0, Number(workerResponseMs) || 0),
+            Math.max(0, Number(reportedSearchMs) || 0)
+        );
+    }
+
     function addCount(target, key, amount = 1) {
         const normalized = String(key || 'Unknown');
         target[normalized] = (target[normalized] || 0) + amount;
     }
 
+    function decodeStackRenDetail(strategyEvent, strategyDetail) {
+        if (!STACK_REN_EVENTS.has(strategyEvent) || !Number.isInteger(strategyDetail)) return null;
+        const rawDetail = strategyDetail & 0xff;
+        const decoded = {
+            event: strategyEvent,
+            rawDetail,
+            depth: null,
+            fireReasonCode: null,
+            fireReason: null,
+            declinedProvedFire: false,
+            noSafeEscape: false,
+            abortReason: null
+        };
+        if (strategyEvent === 'Stack-REN enter') {
+            const wellStart = rawDetail & 0x0f;
+            const wellWidth = (rawDetail >>> 4) & 0x0f;
+            decoded.well = {
+                start: wellStart,
+                width: wellWidth,
+                startColumn: wellStart + 1,
+                endColumn: wellStart + wellWidth
+            };
+            return decoded;
+        }
+
+        decoded.depth = rawDetail & 0x1f;
+        if (strategyEvent === 'Stack-REN fire') {
+            const reasonCode = (rawDetail >>> 5) & 0x07;
+            decoded.fireReasonCode = reasonCode;
+            decoded.fireReason = STACK_REN_FIRE_REASONS[reasonCode] || `Unknown(${reasonCode})`;
+        } else if (strategyEvent === 'Stack-REN build') {
+            decoded.declinedProvedFire = (rawDetail & (1 << 5)) !== 0;
+        } else if (strategyEvent === 'Stack-REN abort') {
+            decoded.noSafeEscape = (rawDetail & 0xe0) === (3 << 5);
+            decoded.abortReason = decoded.noSafeEscape ? 'NoSafeEscape' : null;
+        }
+        return decoded;
+    }
+
+    function observeStackRen(metric, decision) {
+        const decoded = decodeStackRenDetail(decision.strategyEvent, decision.strategyDetail);
+        if (!decoded) return;
+        decision.stackRen = decoded;
+        decision.stackRenEventIndex = metric.stackRen.events.length;
+        metric.stackRen.events.push({
+            moveIndex: decision.index,
+            atMs: decision.atMs,
+            executed: false,
+            lockAtMs: null,
+            attack: null,
+            ren: null,
+            ...decoded
+        });
+    }
+
+    function validStackRenWell(well) {
+        if (!well) return null;
+        const start = Number(well.start);
+        const width = Number(well.width);
+        if (!Number.isInteger(start) || !Number.isInteger(width)
+            || width < 2 || width > 4 || start < 0 || start + width > 10) return null;
+        return { start, width, startColumn: start + 1, endColumn: start + width };
+    }
+
+    function candidatePhysicalWellMetrics(board, debug, floor) {
+        const well = validStackRenWell({ start: debug?.wellStart, width: debug?.wellWidth });
+        if (!well || !Array.isArray(board) || board.length !== BOARD_HEIGHT) return null;
+        const heights = Array.from({ length: BOARD_WIDTH }, (_, column) => {
+            for (let row = 0; row < BOARD_HEIGHT; row++) {
+                if (board[row]?.[column] !== null) return BOARD_HEIGHT - row;
+            }
+            return 0;
+        });
+        const outside = heights.filter((_, column) =>
+            column < well.start || column >= well.start + well.width
+        );
+        const outsideMin = outside.length ? Math.min(...outside) : 0;
+        return {
+            well,
+            floor: Math.max(0, Math.floor(Number(floor) || 0)),
+            outsideMin,
+            depth: Math.max(0, outsideMin - Math.max(0, Math.floor(Number(floor) || 0))),
+            heights
+        };
+    }
+
+    function committedIWellBoard(well, depth = 18) {
+        const normalizedWell = validStackRenWell(well);
+        if (!normalizedWell) return null;
+        const board = emptyBoard();
+        const boundedDepth = clampInteger(depth, 1, BOARD_VISIBLE_HEIGHT - 2, 18);
+        for (let offset = 0; offset < boundedDepth; offset++) {
+            const row = BOARD_HEIGHT - 1 - offset;
+            for (let column = 0; column < BOARD_WIDTH; column++) {
+                if (column < normalizedWell.start
+                    || column >= normalizedWell.start + normalizedWell.width) {
+                    board[row][column] = 'G';
+                }
+            }
+        }
+        return board;
+    }
+
+    function applyCommittedIWellFunctionalFixture(player, metric, session, decision) {
+        const fixture = session.controlledFunctionalFixture;
+        if (!fixture || fixture.applied || metric.model !== 'kasane-stack-ren-candidate') return;
+        // Preserve a real Enter lock and one real Build lock. Only then replace
+        // the next Ready state with the mirrored production version of the
+        // committed-I-well unit fixture. Every subsequent decision, path and
+        // lock still comes from the immutable candidate WASM.
+        if (decision?.strategyEvent !== 'Stack-REN build'
+            || metric._stackRenFunctionalStage !== STACK_REN_FUNCTIONAL_STAGES.entered) return;
+        const well = validStackRenWell(metric._stackRenActiveWell);
+        const board = committedIWellBoard(well, fixture.depth);
+        if (!well || !board) return;
+
+        const before = {
+            board: initialBoardSummary(player.board),
+            currentPiece: player.player?.pieceType || null,
+            nextQueue: [...(player.nextQueue || [])],
+            incoming: incomingLines(player)
+        };
+        player.board = board;
+        player.pendingGarbage = 0;
+        player.garbageQueue = [];
+        player.ren = -1;
+        player.isB2B = false;
+        player.holdPiece = null;
+        player.holdDisabled = true;
+        player.canHold = false;
+        player.player.pieceType = 'I';
+        player.player.rotation = 0;
+        player.player.x = Math.floor(BOARD_WIDTH / 2)
+            - Math.floor(TETROMINOS.I.center[0]) - 1;
+        player.player.y = 20;
+        if (player.checkCollision(
+            player.player.x,
+            player.player.y,
+            player.getShape('I', player.player.rotation)
+        )) player.player.y = 19;
+        player.nextQueue = Array(Math.max(12, session.settings.maxNext + 4)).fill('I');
+        player.pieceStartedAtMs = performance.now();
+        player.aiWorker?.postMessage({ type: 'invalidate' });
+
+        fixture.applied = true;
+        fixture.applications.push({
+            seat: metric.seat,
+            model: metric.model,
+            afterExecutedMoveIndex: decision.index,
+            atMs: session.clockMs,
+            source: 'committed-edge-i-well-after-real-enter-build',
+            depth: fixture.depth,
+            well,
+            before,
+            after: {
+                board: initialBoardSummary(player.board),
+                currentPiece: player.player.pieceType,
+                nextQueue: [...player.nextQueue],
+                incoming: incomingLines(player),
+                canHold: player.canHold && !player.holdDisabled
+            }
+        });
+    }
+
+    // This consumes one event per *executed lock*. A returned Worker decision
+    // is not evidence until Player.lockPiece executes it, and any intervening
+    // lock (including a non-Stack-REN lock) invalidates the partial proof.
+    function observeExecutedStackRen(metric, decoded) {
+        const stage = metric._stackRenFunctionalStage;
+        const event = decoded?.event || null;
+        const completed = stage === STACK_REN_FUNCTIONAL_STAGES.normalFired
+            && event === 'Stack-REN continue';
+
+        if (event === 'Stack-REN enter') {
+            metric._stackRenFunctionalStage = STACK_REN_FUNCTIONAL_STAGES.entered;
+            metric.stackRen.executed.entries++;
+        } else if (event === 'Stack-REN build') {
+            metric.stackRen.executed.builds++;
+            metric._stackRenFunctionalStage = stage === STACK_REN_FUNCTIONAL_STAGES.entered
+                || stage === STACK_REN_FUNCTIONAL_STAGES.built
+                ? STACK_REN_FUNCTIONAL_STAGES.built
+                : STACK_REN_FUNCTIONAL_STAGES.idle;
+        } else if (event === 'Stack-REN fire') {
+            metric.stackRen.executed.fires++;
+            const normalFire = decoded.fireReason === 'ValueStop'
+                || decoded.fireReason === 'NoSafeBuild';
+            metric._stackRenFunctionalStage = stage === STACK_REN_FUNCTIONAL_STAGES.built
+                && normalFire
+                ? STACK_REN_FUNCTIONAL_STAGES.normalFired
+                : STACK_REN_FUNCTIONAL_STAGES.idle;
+        } else {
+            if (event === 'Stack-REN continue') metric.stackRen.executed.continues++;
+            if (event === 'Stack-REN abort') metric.stackRen.executed.aborts++;
+            metric._stackRenFunctionalStage = STACK_REN_FUNCTIONAL_STAGES.idle;
+        }
+
+        if (completed) metric.stackRen.functionalSequences++;
+    }
+
+    function completeStackRen(metric, decision, lockedCells) {
+        if (!Number.isInteger(decision.stackRenEventIndex)) return;
+        const evidence = metric.stackRen.events[decision.stackRenEventIndex];
+        if (!evidence || evidence.executed) return;
+        evidence.executed = true;
+        evidence.lockAtMs = decision.lockAtMs;
+        evidence.attack = clone(decision.attack);
+        evidence.ren = clone(decision.ren);
+        const decoded = decision.stackRen;
+        const isBuild = decision.strategyEvent === 'Stack-REN enter'
+            || decision.strategyEvent === 'Stack-REN build';
+        if (isBuild) {
+            const well = decision.strategyEvent === 'Stack-REN enter'
+                ? validStackRenWell(decoded.well)
+                : validStackRenWell(metric._stackRenActiveWell);
+            const cells = (lockedCells || [])
+                .filter(cell => Number.isInteger(cell?.x) && Number.isInteger(cell?.y))
+                .map(cell => ({ x: cell.x, y: cell.y }));
+            const insideCellCount = well
+                ? cells.filter(cell => cell.x >= well.start && cell.x < well.start + well.width).length
+                : 0;
+            evidence.build = {
+                well: clone(well),
+                cells,
+                insideCellCount,
+                totalCellCount: cells.length,
+                outsideOnly: Boolean(well) && insideCellCount === 0,
+                clearedLines: decision.attack?.lines || 0,
+                rawAttack: decision.attack?.raw || 0
+            };
+            const build = metric.stackRen.build;
+            build.actions++;
+            if ((decision.attack?.lines || 0) > 0) {
+                build.clearActions++;
+                build.clearedLines += decision.attack.lines;
+            }
+            if ((decision.attack?.raw || 0) > 0) {
+                build.rawAttackActions++;
+                build.rawAttack += decision.attack.raw;
+            }
+            if (well) {
+                build.wellKnownActions++;
+                build.insideActions += Number(insideCellCount > 0);
+                build.insideCells += insideCellCount;
+                build.totalCells += cells.length;
+            }
+            if (decision.strategyEvent === 'Stack-REN enter') {
+                metric._stackRenActiveWell = well;
+            }
+        }
+        if (decoded.depth !== null) {
+            metric.stackRen.maxDepth = Math.max(metric.stackRen.maxDepth, decoded.depth);
+        }
+        if (decision.strategyEvent === 'Stack-REN fire') {
+            metric.stackRen.fires++;
+            addCount(metric.stackRen.fireReasonCounts, decoded.fireReason);
+            metric.stackRen.fireDepth.sum += decoded.depth;
+            metric.stackRen.fireDepth.max = Math.max(metric.stackRen.fireDepth.max, decoded.depth);
+        }
+        if (decision.strategyEvent === 'Stack-REN fire'
+            || decision.strategyEvent === 'Stack-REN abort') {
+            metric._stackRenActiveWell = null;
+        }
+    }
+
     function incomingLines(player) {
         return player.pendingGarbage + player.garbageQueue.reduce((sum, packet) => sum + packet.lines, 0);
+    }
+
+    function isStackRenDecision(decision) {
+        return Boolean(decision && STACK_REN_EVENTS.has(decision.strategyEvent));
+    }
+
+    function isNormalCancellationDodgeDecision(decision) {
+        return Boolean(decision)
+            && !isStackRenDecision(decision)
+            && decision.intent === 'Cancellation dodge';
+    }
+
+    function isNormalCounterDecision(decision) {
+        return Boolean(decision)
+            && !isStackRenDecision(decision)
+            && (decision.intent === 'Counter'
+                || decision.policyOverride === 'Same placement counter'
+                || decision.strategyEvent === 'Release counter');
+    }
+
+    function fifoCancellationEvidence(packets, cancelledLines) {
+        let remaining = Math.max(0, Math.floor(Number(cancelledLines) || 0));
+        const touched = [];
+        for (const packet of packets || []) {
+            if (remaining <= 0) break;
+            const available = Math.max(0, Math.floor(Number(packet?.lines) || 0));
+            const lines = Math.min(available, remaining);
+            if (lines <= 0) continue;
+            touched.push({
+                packetId: packet.id ?? null,
+                state: packet.state || 'unknown',
+                receivedAtMs: Number.isFinite(packet.receivedAtMs) ? packet.receivedAtMs : null,
+                beforeLines: available,
+                cancelledLines: lines,
+                afterLines: available - lines
+            });
+            remaining -= lines;
+        }
+        return {
+            packets: touched.length,
+            lines: touched.reduce((sum, packet) => sum + packet.cancelledLines, 0),
+            touched
+        };
+    }
+
+    function counterLockEvidence(decision, packets, cancelledLines) {
+        if (!isNormalCounterDecision(decision) || !Number.isFinite(decision.lockAtMs)) return null;
+        const cancellation = fifoCancellationEvidence(packets, cancelledLines);
+        return {
+            moveIndex: decision.index,
+            decisionAtMs: decision.atMs,
+            lockAtMs: decision.lockAtMs,
+            intent: decision.intent,
+            policyOverride: decision.policyOverride,
+            strategyEvent: decision.strategyEvent,
+            successful: cancellation.lines > 0,
+            cancelledPackets: cancellation.packets,
+            cancelledLines: cancellation.lines,
+            packets: cancellation.touched
+        };
+    }
+
+    function observeExecutedCounter(metric, decision, packets, cancelledLines) {
+        const evidence = counterLockEvidence(decision, packets, cancelledLines);
+        if (!evidence) return null;
+        metric.counter.attemptedLocks++;
+        metric.counter.successfulLocks += Number(evidence.successful);
+        metric.counter.cancelledPackets += evidence.cancelledPackets;
+        metric.counter.cancelledLines += evidence.cancelledLines;
+        metric.counter.events.push(evidence);
+        return evidence;
+    }
+
+    function newIncomingPacket(metric, lines, state, receivedAtMs) {
+        const packet = {
+            id: ++metric._incomingPacketSequence,
+            lines: Math.max(0, Math.floor(Number(lines) || 0)),
+            state,
+            receivedAtMs: Number.isFinite(receivedAtMs) ? receivedAtMs : sessionClock(metric)
+        };
+        metric._incomingPackets.push(packet);
+        return packet;
+    }
+
+    function sessionClock(metric) {
+        return Number.isFinite(metric?._session?.clockMs) ? metric._session.clockMs : 0;
+    }
+
+    function consumeShadowPackets(metric, states, lines, terminalState) {
+        let remaining = Math.max(0, Math.floor(Number(lines) || 0));
+        const eligible = metric._incomingPackets
+            .filter(packet => states.includes(packet.state) && packet.lines > 0)
+            .sort((left, right) => left.receivedAtMs - right.receivedAtMs || left.id - right.id);
+        for (const packet of eligible) {
+            if (remaining <= 0) break;
+            const consumed = Math.min(packet.lines, remaining);
+            packet.lines -= consumed;
+            remaining -= consumed;
+            if (packet.lines === 0) packet.state = terminalState;
+        }
+        return remaining;
+    }
+
+    function reconcileIncomingPacketSnapshot(player, metric) {
+        const actualPending = Math.max(0, Math.floor(Number(player.pendingGarbage) || 0));
+        let trackedPending = metric._incomingPackets
+            .filter(packet => packet.state === 'pending')
+            .reduce((sum, packet) => sum + packet.lines, 0);
+        if (trackedPending > actualPending) {
+            consumeShadowPackets(metric, ['pending'], trackedPending - actualPending, 'reconciled');
+            trackedPending = actualPending;
+        }
+        if (trackedPending < actualPending) {
+            newIncomingPacket(metric, actualPending - trackedPending, 'pending', sessionClock(metric));
+        }
+
+        const queued = [];
+        for (const actual of player.garbageQueue || []) {
+            let shadow = metric._incomingPacketObjects.get(actual);
+            if (!shadow) {
+                shadow = newIncomingPacket(
+                    metric,
+                    actual.lines,
+                    'queued',
+                    Number.isFinite(actual.receivedTime) ? actual.receivedTime : sessionClock(metric)
+                );
+                metric._incomingPacketObjects.set(actual, shadow);
+            }
+            shadow.lines = Math.max(0, Math.floor(Number(actual.lines) || 0));
+            shadow.state = 'queued';
+            queued.push(shadow);
+        }
+        const pending = metric._incomingPackets
+            .filter(packet => packet.state === 'pending' && packet.lines > 0)
+            .sort((left, right) => left.receivedAtMs - right.receivedAtMs || left.id - right.id);
+        return [...pending, ...queued]
+            .filter(packet => packet.lines > 0)
+            .map(packet => ({
+                id: packet.id,
+                lines: packet.lines,
+                state: packet.state,
+                receivedAtMs: packet.receivedAtMs
+            }));
+    }
+
+    function applyCancellationEvidence(metric, evidence) {
+        for (const touched of evidence?.touched || []) {
+            const packet = metric._incomingPackets.find(candidate => candidate.id === touched.packetId);
+            if (!packet) continue;
+            packet.lines = Math.max(0, packet.lines - touched.cancelledLines);
+            if (packet.lines === 0) packet.state = 'cancelled';
+        }
     }
 
     function attackForCompletedLock(before, player) {
@@ -196,8 +696,25 @@
             holdFire: {
                 count: 0,
                 receivedDuringWait: 0,
+                sameBatchOpponentAttack: 0,
+                sameBatchSent: 0,
+                sameBatchSentLines: 0,
                 totalWaitMs: 0,
                 byIntent: {},
+                events: []
+            },
+            cancellationDodge: {
+                executedLocks: 0,
+                simultaneousLocks: 0,
+                crossedPackets: 0,
+                crossedLines: 0,
+                events: []
+            },
+            counter: {
+                attemptedLocks: 0,
+                successfulLocks: 0,
+                cancelledPackets: 0,
+                cancelledLines: 0,
                 events: []
             },
             garbageReceivedEvents: [],
@@ -207,6 +724,37 @@
                 starts: 0,
                 continuations: 0,
                 bonusAttack: 0
+            },
+            stackRen: {
+                maxDepth: 0,
+                fires: 0,
+                functionalSequences: 0,
+                executed: {
+                    entries: 0,
+                    builds: 0,
+                    fires: 0,
+                    continues: 0,
+                    aborts: 0
+                },
+                fireReasonCounts: {
+                    ValueStop: 0,
+                    Survival: 0,
+                    Pressure: 0,
+                    NoSafeBuild: 0
+                },
+                fireDepth: { sum: 0, max: 0 },
+                build: {
+                    actions: 0,
+                    clearActions: 0,
+                    clearedLines: 0,
+                    rawAttackActions: 0,
+                    rawAttack: 0,
+                    wellKnownActions: 0,
+                    insideActions: 0,
+                    insideCells: 0,
+                    totalCells: 0
+                },
+                events: []
             },
             charge: {
                 moves: 0,
@@ -230,11 +778,18 @@
             nodeCount: { samples: 0, last: null, max: null },
             _workerResponseMs: [],
             _reportedSearchMs: [],
+            _effectiveDecisionMs: [],
             _requestRealMs: new Map(),
             _garbageRandom: mulberry32(garbageSeed),
             _chargeStreak: null,
             _pendingCharge: null,
-            _activeDecision: null
+            _stackRenActiveWell: null,
+            _stackRenFunctionalStage: STACK_REN_FUNCTIONAL_STAGES.idle,
+            _activeDecision: null,
+            _session: null,
+            _incomingPacketSequence: 0,
+            _incomingPackets: [],
+            _incomingPacketObjects: new WeakMap()
         };
     }
 
@@ -343,23 +898,86 @@
 
     function patchPlayerForLeague(player, metric, session, headless) {
         player.__leagueMetric = metric;
+        metric._session = session;
 
         const productionLockPiece = player.lockPiece.bind(player);
         player.lockPiece = function instrumentedLockPiece(...args) {
+            const lockedCells = this.player.pieceType
+                ? this.getShape(this.player.pieceType, this.player.rotation).map(([dx, dy]) => ({
+                    x: Math.floor(this.player.x + dx),
+                    y: Math.floor(this.player.y + dy)
+                }))
+                : [];
+            const audit = session.relativeFloorAudit;
+            const activeStackRen = metric._activeDecision?.stackRen;
+            const touchedRows = [...new Set(lockedCells
+                .filter(cell => cell.y >= 0 && cell.y < BOARD_HEIGHT)
+                .map(cell => cell.y))];
+            const additions = new Set(lockedCells.map(cell => `${cell.x}:${cell.y}`));
+            const predictedClearRows = touchedRows.filter(y =>
+                Array.from({ length: BOARD_WIDTH }, (_, x) =>
+                    this.board[y]?.[x] !== null || additions.has(`${x}:${y}`)
+                ).every(Boolean)
+            );
+            let floorAuditInjection = null;
+            if (
+                audit
+                && !audit.injected
+                && audit.rows > 0
+                && metric.model === 'kasane-stack-ren-candidate'
+                && activeStackRen?.event === 'Stack-REN build'
+                && predictedClearRows.length === 0
+            ) {
+                const pendingBefore = Math.max(0, Math.floor(Number(this.pendingGarbage) || 0));
+                this.pendingGarbage = pendingBefore + audit.rows;
+                const auditPacket = newIncomingPacket(metric, audit.rows, 'pending', session.clockMs);
+                floorAuditInjection = {
+                    seat: metric.seat,
+                    model: metric.model,
+                    moveIndex: metric._activeDecision.index,
+                    lockAtMs: session.clockMs,
+                    requestedRows: audit.rows,
+                    pendingBefore,
+                    pendingAfterInjection: this.pendingGarbage,
+                    packetId: auditPacket.id,
+                    packetStateBeforeLock: auditPacket.state,
+                    predictedClearRows,
+                    source: 'candidate-relative-floor-matured-packet',
+                    _packet: auditPacket
+                };
+                audit.injected = true;
+                audit.injections.push(floorAuditInjection);
+            }
             const before = {
                 incoming: incomingLines(this),
+                incomingPackets: reconcileIncomingPacketSnapshot(this, metric),
                 isB2B: this.isB2B,
                 ren: this.ren,
                 tspin: this.checkForTSpin(),
                 perfectClear: this.stats.perfectClear
             };
             const result = productionLockPiece(...args);
+            if (floorAuditInjection) {
+                floorAuditInjection.linesCleared = this.linesClearedLastLock;
+                floorAuditInjection.pendingAfterLock = Math.max(
+                    0,
+                    Math.floor(Number(this.pendingGarbage) || 0)
+                );
+                floorAuditInjection.pieceCountAfterLock = this.pieceCount;
+                floorAuditInjection.riseObserved = floorAuditInjection.pendingAfterLock === 0
+                    && this.linesClearedLastLock === 0;
+                floorAuditInjection.packetStateAfterLock = floorAuditInjection._packet.state;
+                floorAuditInjection.packetLinesAfterLock = floorAuditInjection._packet.lines;
+                delete floorAuditInjection._packet;
+            }
             const rawAttack = attackForCompletedLock(before, this);
             const completedRen = this.linesClearedLastLock > 0 ? before.ren + 1 : -1;
             const renBonus = this.linesClearedLastLock > 0
                 ? ([0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 4, 4, 5][Math.min(completedRen, 13)] || 0)
                 : 0;
             const cancelled = Math.min(rawAttack, Math.max(0, before.incoming - incomingLines(this)));
+            const fifoCancellation = fifoCancellationEvidence(before.incomingPackets, cancelled);
+            applyCancellationEvidence(metric, fifoCancellation);
             metric.locks++;
             metric.linesCleared += this.linesClearedLastLock;
             metric.attacks.raw += rawAttack;
@@ -369,8 +987,13 @@
             if (completedRen === 0) metric.ren.starts++;
             if (completedRen > 0) metric.ren.continuations++;
             metric.ren.bonusAttack += renBonus;
+            const executedStackRen = metric._activeDecision?.stackRen || null;
             if (metric._activeDecision) {
                 const decision = metric._activeDecision;
+                const executionTiming = this.aiExecutionTiming;
+                if (executionTiming?.requestId === decision.requestId) {
+                    decision.executionTiming = clone(executionTiming);
+                }
                 decision.lockAtMs = session.clockMs;
                 decision.attack = {
                     raw: rawAttack,
@@ -378,7 +1001,18 @@
                     sent: Math.max(0, rawAttack - cancelled),
                     lines: this.linesClearedLastLock
                 };
+                const counterEvidence = observeExecutedCounter(
+                    metric,
+                    decision,
+                    before.incomingPackets,
+                    cancelled
+                );
+                if (counterEvidence) {
+                    decision.counter = clone(counterEvidence);
+                }
                 decision.ren = { before: before.ren, after: completedRen, bonusAttack: renBonus };
+                completeStackRen(metric, decision, lockedCells);
+                applyCommittedIWellFunctionalFixture(this, metric, session, decision);
                 if (decision.waitMs > 0 && rawAttack > 0) {
                     const receipt = metric.garbageReceivedEvents.find(event =>
                         event.atMs >= decision.atMs && event.atMs <= session.clockMs
@@ -409,18 +1043,39 @@
                 }
                 metric._activeDecision = null;
             }
+            observeExecutedStackRen(metric, executedStackRen);
             return result;
         };
 
         const productionAddGarbage = player.addGarbage.bind(player);
         player.addGarbage = function instrumentedAddGarbage(lines) {
             const normalized = Math.max(0, Math.floor(Number(lines) || 0));
+            const queueLengthBefore = this.garbageQueue.length;
             metric.attacks.received += normalized;
             if (normalized > 0) metric.garbageReceivedEvents.push({ atMs: session.clockMs, lines: normalized });
             if (this.opponent?.__leagueMetric) {
                 this.opponent.__leagueMetric.attacks.delivered += normalized;
             }
-            return productionAddGarbage(lines);
+            const result = productionAddGarbage(lines);
+            if (normalized > 0 && this.garbageQueue.length > queueLengthBefore) {
+                const actual = this.garbageQueue[this.garbageQueue.length - 1];
+                const shadow = newIncomingPacket(metric, normalized, 'queued', session.clockMs);
+                metric._incomingPacketObjects.set(actual, shadow);
+            }
+            return result;
+        };
+
+        const productionProcessGarbageQueue = player.processGarbageQueue.bind(player);
+        player.processGarbageQueue = function instrumentedProcessGarbageQueue(...args) {
+            const queuedBefore = [...this.garbageQueue];
+            const result = productionProcessGarbageQueue(...args);
+            const queuedAfter = new Set(this.garbageQueue);
+            for (const actual of queuedBefore) {
+                if (queuedAfter.has(actual)) continue;
+                const shadow = metric._incomingPacketObjects.get(actual);
+                if (shadow && shadow.lines > 0) shadow.state = 'pending';
+            }
+            return result;
         };
 
         const productionRiseGarbage = player.riseGarbage.bind(player);
@@ -429,7 +1084,40 @@
             Math.random = metric._garbageRandom;
             try {
                 const lines = this.pendingGarbage;
+                const decision = metric._activeDecision;
+                const debug = decision?.candidateStackRenDebug;
+                const injection = session.relativeFloorAudit?.injections?.find(event =>
+                    event.seat === metric.seat && event.moveIndex === decision?.index
+                );
+                const beforeMetrics = injection && lines > 0
+                    ? candidatePhysicalWellMetrics(this.board, debug, debug?.connectionFloor)
+                    : null;
                 const result = productionRiseGarbage(...args);
+                const consumed = Math.max(0, lines - Math.max(0, Number(this.pendingGarbage) || 0));
+                const afterFloor = beforeMetrics
+                    ? beforeMetrics.floor + consumed
+                    : null;
+                const afterMetrics = beforeMetrics
+                    ? candidatePhysicalWellMetrics(this.board, debug, afterFloor)
+                    : null;
+                if (injection && beforeMetrics && afterMetrics) {
+                    injection.riseTransition = {
+                        moveIndex: decision.index,
+                        pieceCountAfterLock: this.pieceCount,
+                        lines: consumed,
+                        beforeFloor: beforeMetrics.floor,
+                        afterFloor,
+                        beforeOutsideMin: beforeMetrics.outsideMin,
+                        afterOutsideMin: afterMetrics.outsideMin,
+                        beforeDepth: beforeMetrics.depth,
+                        afterDepth: afterMetrics.depth,
+                        beforeHeights: beforeMetrics.heights,
+                        afterHeights: afterMetrics.heights
+                    };
+                }
+                if (consumed > 0) {
+                    consumeShadowPackets(metric, ['pending'], consumed, 'risen');
+                }
                 if (lines > 0 && this.pendingGarbage === 0) {
                     metric.garbageRiseEvents.push({ atMs: session.clockMs, lines });
                 }
@@ -443,16 +1131,24 @@
 
         const productionRequestAiMove = player.requestAiMove.bind(player);
         player.requestAiMove = function instrumentedRequestAiMove(...args) {
+            const requestedRealMs = nativePerformanceNow();
+            const requestedAtMs = session.clockMs;
             const result = productionRequestAiMove(...args);
             const requestId = this.aiRequestId;
-            const requestedRealMs = nativePerformanceNow();
+            const configuredDecisionLatencyMs = session.settings.aiThinkTime;
             metric._requestRealMs.set(requestId, requestedRealMs);
             session.pendingWorkerMoves.set(`${this.id}:${requestId}`, {
                 player: this,
                 metric,
                 requestId,
-                readyAtMs: session.clockMs + session.settings.aiThinkTime,
+                requestedAtMs,
+                configuredReadyAtMs: requestedAtMs + configuredDecisionLatencyMs,
+                readyAtMs: requestedAtMs + configuredDecisionLatencyMs,
+                configuredDecisionLatencyMs,
                 requestedRealMs,
+                workerResponseMs: null,
+                reportedSearchMs: null,
+                effectiveDecisionLatencyMs: configuredDecisionLatencyMs,
                 result: null
             });
             if (session.forceNoLegalMoveSeat === `p${this.id}` && !session.forcedNoLegalMoveUsed) {
@@ -506,6 +1202,20 @@
             if (pending.syntheticNoLegalMove) return;
             pending.result = { data: clone(data) };
             pending.respondedRealMs = nativePerformanceNow();
+            pending.workerResponseMs = Math.max(
+                0,
+                pending.respondedRealMs - pending.requestedRealMs
+            );
+            pending.reportedSearchMs = Number.isFinite(Number(data.searchElapsedMs))
+                ? Math.max(0, Number(data.searchElapsedMs))
+                : null;
+            pending.effectiveDecisionLatencyMs = effectiveWorkerDecisionLatency(
+                session.workerLatencyMode,
+                pending.configuredDecisionLatencyMs,
+                pending.workerResponseMs,
+                pending.reportedSearchMs
+            );
+            pending.readyAtMs = pending.requestedAtMs + pending.effectiveDecisionLatencyMs;
         };
     }
 
@@ -532,16 +1242,20 @@
             moves: clone(metric.moves),
             waits: clone(metric.waits),
             holdFire: clone(metric.holdFire),
+            cancellationDodge: clone(metric.cancellationDodge),
+            counter: clone(metric.counter),
             garbageReceivedEvents: clone(metric.garbageReceivedEvents),
             garbageRiseEvents: clone(metric.garbageRiseEvents),
             ren: clone(metric.ren),
+            stackRen: clone(metric.stackRen),
             charge,
             noLegalMove: clone(metric.noLegalMove),
             workerErrors: [...metric.workerErrors],
             nodeCount: clone(metric.nodeCount),
             inference: {
                 workerResponse: summarizeSamples(metric._workerResponseMs),
-                reportedSearch: summarizeSamples(metric._reportedSearchMs)
+                reportedSearch: summarizeSamples(metric._reportedSearchMs),
+                effectiveDecision: summarizeSamples(metric._effectiveDecisionMs)
             },
             stats: clone(player.stats),
             finalState: {
@@ -553,6 +1267,78 @@
             }
         };
         return result;
+    }
+
+    function annotateSameBatchHoldFire(session) {
+        for (const player of session.players) {
+            const metric = player.__leagueMetric;
+            const opponentMetric = player.opponent?.__leagueMetric;
+            if (!metric || !opponentMetric) continue;
+            const opponentAttacksByLock = new Map();
+            for (const move of opponentMetric.moves) {
+                if (move.lockAtMs === null || !(move.attack?.raw > 0)) continue;
+                const attacks = opponentAttacksByLock.get(move.lockAtMs) || [];
+                attacks.push(move.attack);
+                opponentAttacksByLock.set(move.lockAtMs, attacks);
+            }
+            for (const event of metric.holdFire.events) {
+                const simultaneous = opponentAttacksByLock.get(event.lockAtMs) || [];
+                event.sameBatchOpponentAttack = simultaneous.length > 0;
+                event.sameBatchOpponentRaw = simultaneous.reduce((sum, attack) => sum + attack.raw, 0);
+                event.sameBatchSent = event.sameBatchOpponentAttack && event.attack.sent > 0;
+                if (event.sameBatchOpponentAttack) metric.holdFire.sameBatchOpponentAttack++;
+                if (event.sameBatchSent) {
+                    metric.holdFire.sameBatchSent++;
+                    metric.holdFire.sameBatchSentLines += event.attack.sent;
+                }
+            }
+        }
+    }
+
+    function cancellationDodgePacketEvidence(move, opponentMoves) {
+        if (!isNormalCancellationDodgeDecision(move) || !Number.isFinite(move.lockAtMs)) return null;
+        const simultaneous = (opponentMoves || []).filter(opponentMove =>
+            Number.isFinite(opponentMove.lockAtMs) && opponentMove.lockAtMs === move.lockAtMs
+        );
+        // `attack.sent` is measured after that opponent consumed only its own
+        // pre-existing incoming queue. Because same-timestamp locks are flushed
+        // as one batch after both Player locks, each positive value here is a
+        // genuinely crossing packet; it was not available for the dodger's
+        // same-lock cancellation step.
+        const crossed = simultaneous.filter(opponentMove => opponentMove.attack?.sent > 0);
+        return {
+            moveIndex: move.index,
+            decisionAtMs: move.atMs,
+            lockAtMs: move.lockAtMs,
+            plannedWaitMs: move.waitMs || 0,
+            simultaneous: simultaneous.length > 0,
+            opponentLocks: simultaneous.length,
+            crossedPackets: crossed.length,
+            crossedLines: crossed.reduce((sum, opponentMove) => sum + opponentMove.attack.sent, 0),
+            opponentPackets: crossed.map(opponentMove => ({
+                moveIndex: opponentMove.index,
+                raw: opponentMove.attack.raw,
+                cancelled: opponentMove.attack.cancelled,
+                sent: opponentMove.attack.sent
+            }))
+        };
+    }
+
+    function annotateCancellationDodgePackets(session) {
+        for (const player of session.players) {
+            const metric = player.__leagueMetric;
+            const opponentMetric = player.opponent?.__leagueMetric;
+            if (!metric || !opponentMetric) continue;
+            for (const move of metric.moves) {
+                const evidence = cancellationDodgePacketEvidence(move, opponentMetric.moves);
+                if (!evidence) continue;
+                metric.cancellationDodge.executedLocks++;
+                metric.cancellationDodge.simultaneousLocks += Number(evidence.simultaneous);
+                metric.cancellationDodge.crossedPackets += evidence.crossedPackets;
+                metric.cancellationDodge.crossedLines += evidence.crossedLines;
+                metric.cancellationDodge.events.push(evidence);
+            }
+        }
     }
 
     function maximumBoardHeight(board) {
@@ -652,11 +1438,27 @@
             const data = pending.result.data;
             const requestedRealMs = metric._requestRealMs.get(requestId) ?? pending.requestedRealMs;
             metric._requestRealMs.delete(requestId);
-            const responseMs = Math.max(0, (pending.respondedRealMs ?? nativePerformanceNow()) - requestedRealMs);
+            const responseMs = pending.workerResponseMs ?? Math.max(
+                0,
+                (pending.respondedRealMs ?? nativePerformanceNow()) - requestedRealMs
+            );
+            const reportedSearchMs = pending.reportedSearchMs ?? (
+                Number.isFinite(Number(data.searchElapsedMs))
+                    ? Math.max(0, Number(data.searchElapsedMs))
+                    : null
+            );
+            const effectiveDecisionMs = pending.effectiveDecisionLatencyMs
+                ?? effectiveWorkerDecisionLatency(
+                    session.workerLatencyMode,
+                    pending.configuredDecisionLatencyMs,
+                    responseMs,
+                    reportedSearchMs
+                );
             metric._workerResponseMs.push(responseMs);
+            metric._effectiveDecisionMs.push(effectiveDecisionMs);
 
-            if (Number.isFinite(Number(data.searchElapsedMs))) {
-                metric._reportedSearchMs.push(Math.max(0, Number(data.searchElapsedMs)));
+            if (reportedSearchMs !== null) {
+                metric._reportedSearchMs.push(reportedSearchMs);
             }
             if (data.intent) addCount(metric.intents, data.intent);
             if (data.strategyEvent) addCount(metric.strategyEvents, data.strategyEvent);
@@ -671,7 +1473,7 @@
             const decision = {
                 index: metric.moves.length,
                 requestId,
-                requestedAtMs: pending.readyAtMs - session.settings.aiThinkTime,
+                requestedAtMs: pending.requestedAtMs,
                 atMs: session.clockMs,
                 piece: data.piece || null,
                 x: Number.isFinite(Number(data.x)) ? Number(data.x) : null,
@@ -679,15 +1481,44 @@
                 rotation: Number.isFinite(Number(data.rotation)) ? Number(data.rotation) : null,
                 intent: data.intent || null,
                 strategyEvent: data.strategyEvent || null,
+                strategyDetail: Number.isFinite(Number(data.strategyDetail))
+                    ? Math.max(0, Math.floor(Number(data.strategyDetail)))
+                    : null,
                 policyOverride: data.policyOverride || null,
                 waitMs,
+                controllerMs: Number.isFinite(Number(data.controllerMs))
+                    ? Math.max(0, Math.floor(Number(data.controllerMs)))
+                    : null,
+                controllerInputs: Number.isFinite(Number(data.controllerInputs))
+                    ? Math.max(0, Math.floor(Number(data.controllerInputs)))
+                    : null,
                 searchElapsedMs: Number.isFinite(Number(data.searchElapsedMs)) ? Number(data.searchElapsedMs) : null,
+                candidateStackRenDebug: data.candidateStackRenDebug
+                    ? clone(data.candidateStackRenDebug)
+                    : null,
                 noLegalMove: !data.piece,
                 chargeRelease: false,
                 lockAtMs: null,
                 attack: null
             };
+            if (session.workerLatencyMode === 'measured') {
+                decision.workerLatency = {
+                    mode: 'measured',
+                    configuredMs: pending.configuredDecisionLatencyMs,
+                    workerResponseMs: Number(responseMs.toFixed(3)),
+                    reportedSearchMs: reportedSearchMs === null
+                        ? null
+                        : Number(reportedSearchMs.toFixed(3)),
+                    effectiveMs: Number(effectiveDecisionMs.toFixed(3)),
+                    additionalMs: Number(Math.max(
+                        0,
+                        effectiveDecisionMs - pending.configuredDecisionLatencyMs
+                    ).toFixed(3)),
+                    hostLoadDependent: true
+                };
+            }
             metric.moves.push(decision);
+            observeStackRen(metric, decision);
             observeIntent(metric, decision);
             if (data.piece) metric._activeDecision = decision;
 
@@ -770,8 +1601,9 @@
 
         const requiredSequenceLength = options.maxPiecesPerPlayer + gameSettings.maxNext + 32;
         const sequence = createPieceSequence(deriveSeed(plan.seed, 'shared-pieces'), requiredSequenceLength);
-        editorData.p1.board = clone(options.initialBoards.p1);
-        editorData.p2.board = clone(options.initialBoards.p2);
+        const initialBoards = initialBoardsForPlan(options, plan);
+        editorData.p1.board = clone(initialBoards.p1);
+        editorData.p2.board = clone(initialBoards.p2);
         editorData.p1.nextQueue = [...sequence];
         editorData.p2.nextQueue = [...sequence];
         editorData.p1.hold = null;
@@ -783,10 +1615,22 @@
             clockMs: 0,
             headless: options.headless,
             settings: options.settings,
+            workerLatencyMode: options.workerLatencyMode,
             allowGarbageFlush: false,
             pendingWorkerMoves: new Map(),
             forceNoLegalMoveSeat: options.forceNoLegalMoveSeat,
             forcedNoLegalMoveUsed: false,
+            relativeFloorAudit: options.relativeFloorAuditRows > 0 ? {
+                rows: options.relativeFloorAuditRows,
+                injected: false,
+                injections: []
+            } : null,
+            controlledFunctionalFixture: options.controlledFunctionalFixture ? {
+                kind: options.controlledFunctionalFixture,
+                depth: 18,
+                applied: false,
+                applications: []
+            } : null,
             players: [],
             metrics: {}
         };
@@ -842,6 +1686,8 @@
 
             gameState = 'LEAGUE_FINISHED';
             players = [];
+            annotateSameBatchHoldFire(session);
+            annotateCancellationDodgePackets(session);
             const p1Result = finalPlayerMetric(p1, session.metrics.p1);
             const p2Result = finalPlayerMetric(p2, session.metrics.p2);
             const winnerModel = terminal.winnerSeat === 'p1'
@@ -862,6 +1708,16 @@
                 reason: terminal.reason,
                 durationMs: session.clockMs,
                 wallDurationMs: Number((nativePerformanceNow() - wallStartedMs).toFixed(3)),
+                initialBoards: {
+                    p1: initialBoardSummary(initialBoards.p1),
+                    p2: initialBoardSummary(initialBoards.p2)
+                },
+                relativeFloorAudit: session.relativeFloorAudit
+                    ? clone(session.relativeFloorAudit)
+                    : null,
+                controlledFunctionalFixture: session.controlledFunctionalFixture
+                    ? clone(session.controlledFunctionalFixture)
+                    : null,
                 players: { p1: p1Result, p2: p2Result }
             };
         } finally {
@@ -907,12 +1763,20 @@
             baseSeed,
             pairs,
             headless: options.headless !== false,
+            workerLatencyMode: options.workerLatencyMode === 'measured'
+                ? 'measured'
+                : 'deterministic-freeze',
             fixedTickMs: clampInteger(options.fixedTickMs, 1, 50, 10),
             maxDurationMs: clampInteger(options.maxDurationMs, 100, 3600000, 120000),
             wallTimeoutMs: clampInteger(options.wallTimeoutMs, 1000, 3600000, 300000),
             maxPiecesPerPlayer: clampInteger(options.maxPiecesPerPlayer, 1, 10000, 600),
             forceNoLegalMoveSeat: options.forceNoLegalMoveSeat === 'p1' || options.forceNoLegalMoveSeat === 'p2'
                 ? options.forceNoLegalMoveSeat
+                : null,
+            relativeFloorAuditRows: clampInteger(options.relativeFloorAuditRows, 0, 20, 0),
+            controlledFunctionalFixture: options.controlledFunctionalFixture
+                === 'committed-i-well-after-enter-build'
+                ? 'committed-i-well-after-enter-build'
                 : null,
             scenario: initialBoards.name,
             initialBoards,
@@ -981,7 +1845,29 @@
                     intents: {},
                     strategyEvents: {},
                     policyOverrides: {},
-                    holdFire: { count: 0, receivedDuringWait: 0, totalWaitMs: 0, byIntent: {} },
+                    holdFire: {
+                        count: 0,
+                        receivedDuringWait: 0,
+                        sameBatchOpponentAttack: 0,
+                        sameBatchSent: 0,
+                        sameBatchSentLines: 0,
+                        totalWaitMs: 0,
+                        byIntent: {}
+                    },
+                    cancellationDodge: {
+                        executedLocks: 0,
+                        simultaneousLocks: 0,
+                        crossedPackets: 0,
+                        crossedLines: 0,
+                        events: []
+                    },
+                    counter: {
+                        attemptedLocks: 0,
+                        successfulLocks: 0,
+                        cancelledPackets: 0,
+                        cancelledLines: 0,
+                        events: []
+                    },
                     charge: {
                         moves: 0,
                         consecutive: { sequences: 0, totalLength: 0, maxLength: 0, histogram: {} },
@@ -989,13 +1875,45 @@
                         chargeRelease: { count: 0, byIntent: {} }
                     },
                     ren: { max: -1, starts: 0, continuations: 0, bonusAttack: 0 },
+                    stackRen: {
+                        maxDepth: 0,
+                        fires: 0,
+                        functionalSequences: 0,
+                        executed: {
+                            entries: 0,
+                            builds: 0,
+                            fires: 0,
+                            continues: 0,
+                            aborts: 0
+                        },
+                        fireReasonCounts: {
+                            ValueStop: 0,
+                            Survival: 0,
+                            Pressure: 0,
+                            NoSafeBuild: 0
+                        },
+                        fireDepth: { sum: 0, max: 0 },
+                        build: {
+                            actions: 0,
+                            clearActions: 0,
+                            clearedLines: 0,
+                            rawAttackActions: 0,
+                            rawAttack: 0,
+                            wellKnownActions: 0,
+                            insideActions: 0,
+                            insideCells: 0,
+                            totalCells: 0
+                        },
+                        events: []
+                    },
                     _workerResponseMs: [],
-                    _reportedSearchMs: []
+                    _reportedSearchMs: [],
+                    _effectiveDecisionMs: []
                 };
             }
         }
 
-        for (const game of games) {
+        for (const [gameIndex, game] of games.entries()) {
             for (const seat of ['p1', 'p2']) {
                 const player = game.players[seat];
                 const aggregate = byModel[player.model];
@@ -1016,9 +1934,34 @@
                 }
                 aggregate.holdFire.count += player.holdFire?.count || 0;
                 aggregate.holdFire.receivedDuringWait += player.holdFire?.receivedDuringWait || 0;
+                aggregate.holdFire.sameBatchOpponentAttack += player.holdFire?.sameBatchOpponentAttack || 0;
+                aggregate.holdFire.sameBatchSent += player.holdFire?.sameBatchSent || 0;
+                aggregate.holdFire.sameBatchSentLines += player.holdFire?.sameBatchSentLines || 0;
                 aggregate.holdFire.totalWaitMs += player.holdFire?.totalWaitMs || 0;
                 for (const [intent, count] of Object.entries(player.holdFire?.byIntent || {})) {
                     addCount(aggregate.holdFire.byIntent, intent, count);
+                }
+                for (const field of [
+                    'executedLocks',
+                    'simultaneousLocks',
+                    'crossedPackets',
+                    'crossedLines'
+                ]) {
+                    aggregate.cancellationDodge[field] += player.cancellationDodge?.[field] || 0;
+                }
+                for (const event of player.cancellationDodge?.events || []) {
+                    aggregate.cancellationDodge.events.push({ gameIndex, seat, ...event });
+                }
+                for (const field of [
+                    'attemptedLocks',
+                    'successfulLocks',
+                    'cancelledPackets',
+                    'cancelledLines'
+                ]) {
+                    aggregate.counter[field] += player.counter?.[field] || 0;
+                }
+                for (const event of player.counter?.events || []) {
+                    aggregate.counter.events.push({ gameIndex, seat, ...event });
                 }
                 aggregate.charge.moves += player.charge.moves;
                 aggregate.charge.consecutive.sequences += player.charge.consecutive.sequences;
@@ -1042,11 +1985,47 @@
                 aggregate.ren.starts += player.ren?.starts || 0;
                 aggregate.ren.continuations += player.ren?.continuations || 0;
                 aggregate.ren.bonusAttack += player.ren?.bonusAttack || 0;
+                aggregate.stackRen.maxDepth = Math.max(
+                    aggregate.stackRen.maxDepth,
+                    player.stackRen?.maxDepth || 0
+                );
+                aggregate.stackRen.fires += player.stackRen?.fires || 0;
+                aggregate.stackRen.functionalSequences += player.stackRen?.functionalSequences || 0;
+                for (const field of ['entries', 'builds', 'fires', 'continues', 'aborts']) {
+                    aggregate.stackRen.executed[field] += player.stackRen?.executed?.[field] || 0;
+                }
+                for (const [reason, count] of Object.entries(player.stackRen?.fireReasonCounts || {})) {
+                    addCount(aggregate.stackRen.fireReasonCounts, reason, count);
+                }
+                aggregate.stackRen.fireDepth.sum += player.stackRen?.fireDepth?.sum || 0;
+                aggregate.stackRen.fireDepth.max = Math.max(
+                    aggregate.stackRen.fireDepth.max,
+                    player.stackRen?.fireDepth?.max || 0
+                );
+                for (const field of [
+                    'actions',
+                    'clearActions',
+                    'clearedLines',
+                    'rawAttackActions',
+                    'rawAttack',
+                    'wellKnownActions',
+                    'insideActions',
+                    'insideCells',
+                    'totalCells'
+                ]) {
+                    aggregate.stackRen.build[field] += player.stackRen?.build?.[field] || 0;
+                }
+                for (const event of player.stackRen?.events || []) {
+                    aggregate.stackRen.events.push({ gameIndex, seat, ...event });
+                }
                 if (player.inference.workerResponse.samples) {
                     aggregate._workerResponseMs.push(player.inference.workerResponse.meanMs);
                 }
                 if (player.inference.reportedSearch.samples) {
                     aggregate._reportedSearchMs.push(player.inference.reportedSearch.meanMs);
+                }
+                if (player.inference.effectiveDecision.samples) {
+                    aggregate._effectiveDecisionMs.push(player.inference.effectiveDecision.meanMs);
                 }
             }
         }
@@ -1059,10 +2038,12 @@
                 : 0;
             aggregate.inference = {
                 workerResponsePerGame: summarizeSamples(aggregate._workerResponseMs),
-                reportedSearchPerGame: summarizeSamples(aggregate._reportedSearchMs)
+                reportedSearchPerGame: summarizeSamples(aggregate._reportedSearchMs),
+                effectiveDecisionPerGame: summarizeSamples(aggregate._effectiveDecisionMs)
             };
             delete aggregate._workerResponseMs;
             delete aggregate._reportedSearchMs;
+            delete aggregate._effectiveDecisionMs;
         }
 
         return {
@@ -1122,9 +2103,22 @@
                 engine: {
                     gameLogic: 'simulator/app/player-engine.js::Player',
                     aiWorkers: 'production',
-                    clock: 'deterministic-fixed-tick',
+                    clock: normalized.workerLatencyMode === 'measured'
+                        ? 'fixed-tick-with-measured-worker-latency'
+                        : 'deterministic-fixed-tick',
                     fixedTickMs: normalized.fixedTickMs,
-                    rendering: normalized.headless ? 'omitted' : 'production-Player.draw'
+                    rendering: normalized.headless ? 'omitted' : 'production-Player.draw',
+                    workerLatency: {
+                        mode: normalized.workerLatencyMode,
+                        configuredMs: normalized.settings.aiThinkTime,
+                        effectiveRule: normalized.workerLatencyMode === 'measured'
+                            ? 'max(configuredMs, workerResponseMs, reportedSearchMs)'
+                            : 'configuredMs (virtual clock freezes while awaiting worker)',
+                        hostLoadDependent: normalized.workerLatencyMode === 'measured',
+                        reproducibility: normalized.workerLatencyMode === 'measured'
+                            ? 'host-load-dependent; compare same-seed mirrored legs, not byte-identical reruns'
+                            : 'deterministic virtual-clock mode'
+                    }
                 },
                 pairing: {
                     baseSeed: normalized.baseSeed,
@@ -1139,7 +2133,9 @@
                 },
                 scenario: normalized.scenario,
                 testHooks: {
-                    forcedNoLegalMoveSeat: normalized.forceNoLegalMoveSeat
+                    forcedNoLegalMoveSeat: normalized.forceNoLegalMoveSeat,
+                    candidateRelativeFloorAuditRows: normalized.relativeFloorAuditRows,
+                    candidateFunctionalFixture: normalized.controlledFunctionalFixture
                 },
                 settings: clone(normalized.settings),
                 limits: {
@@ -1176,6 +2172,9 @@
             moves: deterministicMoves(player.moves),
             garbageReceivedEvents: player.garbageReceivedEvents,
             holdFire: player.holdFire,
+            cancellationDodge: player.cancellationDodge,
+            counter: player.counter,
+            stackRen: player.stackRen,
             charge: player.charge,
             noLegalMove: player.noLegalMove,
             stats: player.stats,
@@ -1196,6 +2195,12 @@
     }
 
     async function verifyRenderConsistency(options = {}) {
+        if (options.workerLatencyMode === 'measured') {
+            throw new Error(
+                'Render consistency requires deterministic-freeze worker latency; '
+                + 'measured mode is intentionally host-load-dependent'
+            );
+        }
         const base = { ...options, headless: false };
         const rendered = await run(base);
         const headless = await run({ ...options, headless: true });
@@ -1226,8 +2231,30 @@
         const anchor = document.createElement('a');
         anchor.href = url;
         anchor.download = filename;
-        anchor.click();
-        nativeSetTimeout.call(window, () => URL.revokeObjectURL(url), 0);
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        try {
+            anchor.click();
+        } finally {
+            anchor.remove();
+        }
+        // Chromium may begin consuming a programmatically clicked Blob URL on
+        // a later task. Revoking at 0 ms races that handoff and can silently
+        // suppress the download, so retain the small result Blob briefly.
+        nativeSetTimeout.call(window, () => URL.revokeObjectURL(url), 30_000);
+    }
+
+    function exposeDownloadFallback(result, filename) {
+        let button = document.getElementById('league-download-result');
+        if (!button) {
+            button = document.createElement('button');
+            button.id = 'league-download-result';
+            button.type = 'button';
+            button.style.cssText = 'position:fixed;top:18px;right:30px;z-index:20001;padding:8px 12px;';
+            document.body.appendChild(button);
+        }
+        button.textContent = `結果JSONを保存: ${filename}`;
+        button.onclick = () => downloadJson(result, filename);
     }
 
     function ensureOutputElement() {
@@ -1259,9 +2286,12 @@
             fixedTickMs: queryInteger(params, 'leagueTickMs', 10),
             aiThinkTime: queryInteger(params, 'leagueThinkMs', 180),
             aiNodeLimit: queryInteger(params, 'leagueNodeLimit', 120000),
+            workerLatencyMode: params.get('leagueWorkerLatencyMode') || 'deterministic-freeze',
             headless: params.get('leagueHeadless') !== '0',
             scenario: params.get('leagueScenario') || 'empty',
             forceNoLegalMoveSeat: params.get('leagueForceNoLegalMove'),
+            relativeFloorAuditRows: queryInteger(params, 'leagueCandidateFloorAuditRows', 0),
+            controlledFunctionalFixture: params.get('leagueCandidateFunctionalFixture'),
             onProgress: progress => {
                 window.__tetrisLeagueProgress = progress;
                 output.textContent = `League running ${progress.completedGames}/${progress.totalGames}\nLast: ${progress.latest.seats.p1} vs ${progress.latest.seats.p2} -> ${progress.latest.winnerModel || 'draw'} (${progress.latest.reason})`;
@@ -1275,6 +2305,17 @@
             window.__tetrisLeagueResult = result;
             window.__tetrisLeagueStatus = 'complete';
             output.textContent = JSON.stringify(result, null, 2);
+            if (params.get('leagueDownload') === '1') {
+                const requested = params.get('leagueFilename') || `tetris-league-${Date.now()}.json`;
+                const filename = /^[A-Za-z0-9._-]+\.json$/.test(requested)
+                    ? requested
+                    : `tetris-league-${Date.now()}.json`;
+                downloadJson(result, filename);
+                // Some Chromium profiles block downloads without a user
+                // activation. Keep an explicit one-click retry bound to the
+                // exact same in-memory result and sanitized filename.
+                exposeDownloadFallback(result, filename);
+            }
             document.dispatchEvent(new CustomEvent('tetris-league-complete', { detail: result }));
             return result;
         } catch (error) {
@@ -1290,6 +2331,18 @@
         run,
         verifyRenderConsistency,
         autoRunFromLocation,
-        downloadJson
+        downloadJson,
+        telemetry: Object.freeze({
+            decodeStackRenDetail,
+            observeExecutedStackRen,
+            cancellationDodgePacketEvidence,
+            isNormalCancellationDodgeDecision,
+            isNormalCounterDecision,
+            fifoCancellationEvidence,
+            counterLockEvidence,
+            observeExecutedCounter,
+            effectiveWorkerDecisionLatency,
+            committedIWellBoard
+        })
     });
 })();

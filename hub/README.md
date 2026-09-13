@@ -16,6 +16,10 @@ The fumen-for-mobile frame remains an external integration by design. The two
 local iframe URLs are deliberately relative, so the complete application can
 run from one repository and one local server.
 
+Editor snapshots carried by the existing `postMessage` contract now use the
+shared v4 `te1` event replay. The editor still accepts saved v3 page
+collections, so existing Hub entries remain loadable.
+
 ## Module map
 
 - `bridge.js` — iframe postMessage routing and official-editor clipboard import

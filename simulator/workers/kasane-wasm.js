@@ -2,7 +2,8 @@
 
 'use strict';
 
-const KASANE_MOVE_SIZE = 32;
+const KASANE_MOVE_BASE_SIZE = 32;
+const KASANE_MOVE_TIMING_SIZE = 36;
 const KASANE_INTENTS = [
     'Stack',
     'Spike now',
@@ -51,14 +52,14 @@ class KasaneWasmBridge {
         this.instance = instance;
         this.exports = instance.exports;
         this.memory = this.exports.memory;
-        this.moveSize = this.exports.ks_move_size ? this.exports.ks_move_size() : KASANE_MOVE_SIZE;
+        this.moveSize = this.exports.ks_move_size ? this.exports.ks_move_size() : KASANE_MOVE_BASE_SIZE;
         if (!this.memory || !this.exports.ks_alloc || !this.exports.ks_dealloc ||
-            !this.exports.ks_choose_json || this.moveSize < KASANE_MOVE_SIZE) {
+            !this.exports.ks_choose_json || this.moveSize < KASANE_MOVE_BASE_SIZE) {
             throw new Error('KASANE WASM ABI is incomplete.');
         }
     }
 
-    static async load(wasmPath = './kasane.wasm?v=kasane-v9') {
+    static async load(wasmPath = './kasane.wasm?v=kasane-v14') {
         const response = await fetch(wasmPath, { credentials: 'same-origin' });
         if (!response.ok) throw new Error(`KASANE WASM HTTP ${response.status}`);
         let result;
@@ -132,7 +133,10 @@ class KasaneWasmBridge {
                 strategyEvent: KASANE_STRATEGY_EVENTS[view.getUint8(25)] || 'None',
                 policyOverride: KASANE_POLICY_OVERRIDES[view.getUint8(26)] || 'None',
                 strategyDetail: view.getUint8(27),
-                attack: view.getUint32(28, true)
+                attack: view.getUint32(28, true),
+                controllerMs: this.moveSize >= KASANE_MOVE_TIMING_SIZE
+                    ? view.getUint32(32, true)
+                    : null
             };
         } finally {
             this.exports.ks_dealloc(outputPtr, this.moveSize);

@@ -9,12 +9,23 @@ class Player {
         this.isAiThinking = false;
         this.aiWorker = null;
         this.aiRequestId = 0;
+        this.aiRequestStartedAtMs = new Map();
         this.aiSearchInitialized = false;
         
         if (this.isAi) {
-            const workerScript = this.aiModel.startsWith('kasane-')
-                ? './simulator/workers/kasane-wasm-worker.js?v=kasane-v9'
-                : './simulator/workers/cold-clear-wasm-worker.js';
+            const productionWorkerScript = this.aiModel.startsWith('kasane-')
+                ? './simulator/workers/kasane-wasm-worker.js?v=kasane-v14'
+                : './simulator/workers/cold-clear-wasm-worker.js?v=controller-timing-v3';
+            // Only the exact opt-in candidate id may leave the production
+            // Worker/WASM path. The harness itself also uses exact equality,
+            // so kasane-stack-ren and every other production model stay on
+            // simulator/workers/kasane.wasm.
+            const workerScript = window.KasaneStackRenCandidateHarness
+                ? window.KasaneStackRenCandidateHarness.workerScriptFor(
+                    this.aiModel,
+                    productionWorkerScript
+                )
+                : productionWorkerScript;
             this.aiWorker = new Worker(workerScript);
 
             this.aiWorker.onmessage = (e) => {
@@ -44,11 +55,28 @@ class Player {
                 } else if (e.data && e.data.type === 'move') {
                     const isCurrentRequest = e.data.requestId === null || e.data.requestId === undefined || e.data.requestId === this.aiRequestId;
                     if (gameState === 'PLAYING' && this.isAiThinking && isCurrentRequest) {
-                        this.executeAiMove(e.data.piece ? e.data : null);
+                        const requestedAtMs = this.aiRequestStartedAtMs.get(this.aiRequestId);
+                        const elapsedMs = Number.isFinite(requestedAtMs)
+                            ? Math.max(0, performance.now() - requestedAtMs)
+                            : Math.max(0, Number(gameSettings.aiThinkTime) || 0);
+                        const move = e.data.piece ? {
+                            ...e.data,
+                            decisionWaitMs: Math.max(0, (Number(gameSettings.aiThinkTime) || 0) - elapsedMs)
+                        } : null;
+                        this.aiRequestStartedAtMs.delete(this.aiRequestId);
+                        this.executeAiMove(move);
                     }
                 } else if (e.data && e.data.piece && gameState === 'PLAYING' && this.isAiThinking) {
                     // Compatibility with the former Worker message shape.
-                    this.executeAiMove(e.data);
+                    const requestedAtMs = this.aiRequestStartedAtMs.get(this.aiRequestId);
+                    const elapsedMs = Number.isFinite(requestedAtMs)
+                        ? Math.max(0, performance.now() - requestedAtMs)
+                        : Math.max(0, Number(gameSettings.aiThinkTime) || 0);
+                    this.aiRequestStartedAtMs.delete(this.aiRequestId);
+                    this.executeAiMove({
+                        ...e.data,
+                        decisionWaitMs: Math.max(0, (Number(gameSettings.aiThinkTime) || 0) - elapsedMs)
+                    });
                 }
             };
         }
@@ -72,9 +100,10 @@ class Player {
         this.reset();
     }
 
-reset() {
+    reset() {
         this.isAiThinking = false;
         this.aiRequestId++;
+        this.aiRequestStartedAtMs.clear();
         this.aiSearchInitialized = false;
         if (this.aiWorker) this.aiWorker.postMessage({ type: 'reset' });
         if (this.id === '1') analysisData = []; // P1リセット時に分析データも初期化
@@ -105,7 +134,9 @@ this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
         this.dasTimer = 0; this.arrTimer = 0; this.sdfTimer = 0;
         this.dasDirection = 0;
         this.isGrounded = false; this.gameOver = false; this.isClearingLine = false; this.lineClearDelayTimer = 0;
+        this.lineClearDelayEndsAtMs = null;
         this.isSpawning = false; this.spawnDelayTimer = 0;
+        this.spawnDelayEndsAtMs = null;
         this.gameClear = false;
 
 
@@ -208,6 +239,39 @@ case 'rotateCW':  this.rotate(1); break;
             case 'hold':      this.hold(); break;
 }
 }
+
+    startPostLockDelay(kind, delayMs) {
+        const normalizedDelay = Math.max(0, Number(delayMs) || 0);
+        const endsAtMs = performance.now() + normalizedDelay;
+        if (kind === 'lineClear') {
+            this.isClearingLine = true;
+            this.isSpawning = false;
+            this.lineClearDelayTimer = normalizedDelay;
+            this.lineClearDelayEndsAtMs = endsAtMs;
+            this.spawnDelayTimer = 0;
+            this.spawnDelayEndsAtMs = null;
+        } else {
+            this.isClearingLine = false;
+            this.isSpawning = true;
+            this.spawnDelayTimer = normalizedDelay;
+            this.spawnDelayEndsAtMs = endsAtMs;
+            this.lineClearDelayTimer = 0;
+            this.lineClearDelayEndsAtMs = null;
+        }
+    }
+
+    refreshPostLockDelayTimers(dt) {
+        const nowMs = performance.now();
+        if (this.isClearingLine) {
+            this.lineClearDelayTimer = Number.isFinite(this.lineClearDelayEndsAtMs)
+                ? Math.max(0, this.lineClearDelayEndsAtMs - nowMs)
+                : Math.max(0, this.lineClearDelayTimer - dt);
+        } else if (this.isSpawning) {
+            this.spawnDelayTimer = Number.isFinite(this.spawnDelayEndsAtMs)
+                ? Math.max(0, this.spawnDelayEndsAtMs - nowMs)
+                : Math.max(0, this.spawnDelayTimer - dt);
+        }
+    }
     
 update(dt) {
         if (gameStartTime > 0) {
@@ -261,14 +325,12 @@ this.arrTimer -= gameSettings.arr;
         }
         this.dasDirection = horizDir;
 if (this.isClearingLine || this.isSpawning) {
-            if (this.isClearingLine) {
-                this.lineClearDelayTimer -= dt;
-            } else {
-                this.spawnDelayTimer -= dt;
-            }
+            this.refreshPostLockDelayTimers(dt);
 if ((this.isClearingLine && this.lineClearDelayTimer <= 0) || (this.isSpawning && this.spawnDelayTimer <= 0)) { 
                 this.isClearingLine = false;
                 this.isSpawning = false;
+                this.lineClearDelayEndsAtMs = null;
+                this.spawnDelayEndsAtMs = null;
 this.riseGarbage(); 
                 if (this.nextQueue[0] === 'E') {
                     if (this.holdPiece) {
@@ -295,8 +357,12 @@ return;
                     }
                 }
                 this.spawnNewPiece();
-}
-            return;
+                // AI decisions begin on the exact phase-end boundary, matching
+                // native `ends_ms`. Human input still resumes next frame.
+                if (!this.isAi) return;
+            } else {
+                return;
+            }
 }
 
         if (this.isAi) {
@@ -772,9 +838,9 @@ return;
         }
 
         this.lockTimer = 0;
-if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearDelayTimer = gameSettings.lineClearDelay;
+if (this.linesClearedLastLock > 0) { this.startPostLockDelay('lineClear', gameSettings.lineClearDelay);
 } 
-        else if (gameSettings.spawnDelay > 0) { this.isSpawning = true; this.spawnDelayTimer = gameSettings.spawnDelay;
+        else if (gameSettings.spawnDelay > 0) { this.startPostLockDelay('spawn', gameSettings.spawnDelay);
 }
         else { this.riseGarbage(); this.holdActionUsed = false; this.spawnNewPiece();
 }
@@ -1069,9 +1135,12 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
 
     aiPhaseSnapshot(player, nowMs) {
         if (player.isClearingLine) {
+            const endsMs = Number.isFinite(player.lineClearDelayEndsAtMs)
+                ? Math.max(0, Math.floor(player.lineClearDelayEndsAtMs - gameStartTime))
+                : Math.floor(nowMs + Math.max(0, player.lineClearDelayTimer));
             return {
                 kind: 'lineClear',
-                endsMs: Math.floor(nowMs + Math.max(0, player.lineClearDelayTimer))
+                endsMs
             };
         }
         if (player.player?.pieceType) {
@@ -1096,7 +1165,11 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
             incoming: this.aiIncomingSnapshot(player, nowMs),
             phase: this.aiPhaseSnapshot(player, nowMs),
             pieces: player.pieceCount,
-            averagePieceMs: Number.isFinite(player.averagePieceMs) ? player.averagePieceMs : 350
+            averagePieceMs: Number.isFinite(player.averagePieceMs) ? player.averagePieceMs : 350,
+            // Worker response latency is unknowable before the request. The
+            // candidate combines this configured floor with each player's own
+            // observed Ready-to-lock EWMA; own/opponent stay independent.
+            projectedDecisionLatencyMs: Math.max(0, Math.floor(Number(gameSettings.aiThinkTime) || 0))
         };
     }
 
@@ -1119,7 +1192,8 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
                 incoming: [],
                 phase: { kind: 'ready' },
                 pieces: 0,
-                averagePieceMs: 350
+                averagePieceMs: 350,
+                projectedDecisionLatencyMs: Math.max(0, Math.floor(Number(gameSettings.aiThinkTime) || 0))
             };
         }
         return {
@@ -1138,10 +1212,11 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
                 inputIntervalMs: Math.max(1, Math.floor(gameSettings.aiMoveDelay)),
                 lineClearDelayMs: Math.max(0, Math.floor(gameSettings.lineClearDelay)),
                 garbageGraceMs: Math.max(0, Math.floor(gameSettings.garbageGrace)),
-                // KASANE's worker reports as soon as its bounded search ends,
-                // matching Cold Clear. Actual search time is deducted from a
-                // tactical wait by the worker instead of being charged twice.
-                decisionLatencyMs: 0,
+                // Every AI gets the same fixed decision window. The Player
+                // waits out any unused portion after the Worker responds, so
+                // both KASANE's lock projection and the opponent forecast use
+                // the same deterministic timestamp as the actual simulator.
+                decisionLatencyMs: Math.max(0, Math.floor(Number(gameSettings.aiThinkTime) || 0)),
                 previewCount: Math.max(1, Math.floor(gameSettings.maxNext)),
                 garbageRandomness: Math.max(0, Math.min(1, Number(gameSettings.garbageRandomness) || 0)),
                 perfectClearSpecialAttack: 10,
@@ -1150,9 +1225,10 @@ if (this.linesClearedLastLock > 0) { this.isClearingLine = true; this.lineClearD
         };
     }
 
-requestAiMove() {
+    requestAiMove() {
         const requestId = ++this.aiRequestId;
         this.isAiThinking = true; 
+        this.aiRequestStartedAtMs.set(requestId, performance.now());
         const debugPayload = {
             playerId: this.id,
             board: this.board,
@@ -1210,6 +1286,7 @@ requestAiMove() {
         if (!this.isAi) return;
 
         this.aiRequestId++;
+        this.aiRequestStartedAtMs.clear();
         this.isAiThinking = false;
         this.aiSearchInitialized = false;
         if (this.aiWorker) {
@@ -1556,27 +1633,26 @@ requestAiMove() {
         );
 
         if (!isCurrentExecution()) return;
+        const executionPreparationStartedAtMs = performance.now();
 
-        const tacticalWaitMs = Math.max(0, Number(move.waitMs) || 0);
-        if (tacticalWaitMs > 0) {
-            await new Promise(resolve => setTimeout(resolve, tacticalWaitMs));
-            if (!isCurrentExecution()) return;
+        const needsHold = move.hold === true || this.player.pieceType !== move.piece;
+        if (needsHold && !this.canHold) {
+            this.isAiThinking = false;
+            return;
         }
 
-        if (this.player.pieceType !== move.piece) {
-            if (this.canHold) {
-                this.hold();
-                await new Promise(resolve => setTimeout(resolve, gameSettings.aiMoveDelay));
-                if (!isCurrentExecution()) return;
-            } else {
-                this.isAiThinking = false;
-                return;
+        const minoType = needsHold ? move.piece : this.player.pieceType;
+        const startState = needsHold
+            ? {
+                x: Math.floor(BOARD_WIDTH / 2) - Math.floor(TETROMINOS[minoType].center[0]) - 1,
+                y: 20,
+                r: 0
             }
+            : { x: this.player.x, y: this.player.y, r: this.player.rotation };
+        if (needsHold && this.checkCollision(startState.x, startState.y, this.getShape(minoType, 0))) {
+            startState.y = 19;
         }
-
-        const startState = { x: this.player.x, y: this.player.y, r: this.player.rotation };
 const targetState = { x: move.x, y: move.y, r: move.rotation };
-        const minoType = this.player.pieceType;
 if (minoType === 'I') {
             targetState.x += 1;
 startState.x += 1;
@@ -1597,6 +1673,55 @@ const path = this.findShortestPath_forAI(startState, targetState, minoType, path
         if (!path) {
             this.invalidateAiSearch('unreachable placement');
             return;
+        }
+
+        const moveDelayMs = Math.max(0, Number(gameSettings.aiMoveDelay) || 0);
+        const sdfDelayMs = Math.max(0, Number(gameSettings.aiSdfDelay) || 0);
+        const actualControllerMs = Number(needsHold) * moveDelayMs + path.reduce(
+            (total, action) => total + (action === '↓' ? sdfDelayMs : moveDelayMs),
+            0
+        );
+        const reportedControllerMs = Number(move.controllerMs);
+        const reportedControllerInputs = Number(move.controllerInputs);
+        const predictedControllerMs = Number.isFinite(reportedControllerMs) && reportedControllerMs > 0
+            ? reportedControllerMs
+            : Number.isFinite(reportedControllerInputs) && reportedControllerInputs >= 1
+                ? Math.floor(reportedControllerInputs) * moveDelayMs
+                : actualControllerMs;
+        // Keep every production operation at its real input/SDF duration. Only
+        // the pre-operation tactical hold is corrected, so the final lock stays
+        // at the timestamp evaluated by Rust even if its path representation
+        // and the browser BFS contain different numbers of descent steps.
+        const tacticalWaitMs = Math.max(
+            0,
+            Math.max(0, Number(move.waitMs) || 0) + predictedControllerMs - actualControllerMs
+        );
+        this.aiExecutionTiming = {
+            requestId: executionRequestId,
+            plannedWaitMs: Math.max(0, Number(move.waitMs) || 0),
+            effectiveWaitMs: tacticalWaitMs,
+            predictedControllerMs,
+            actualControllerMs
+        };
+
+        const preparationElapsedMs = Math.max(0, performance.now() - executionPreparationStartedAtMs);
+        const decisionWaitMs = Math.max(
+            0,
+            Math.max(0, Number(move.decisionWaitMs) || 0) - preparationElapsedMs
+        );
+        if (decisionWaitMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, decisionWaitMs));
+            if (!isCurrentExecution()) return;
+        }
+        if (tacticalWaitMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, tacticalWaitMs));
+            if (!isCurrentExecution()) return;
+        }
+
+        if (needsHold) {
+            this.hold();
+            await new Promise(resolve => setTimeout(resolve, moveDelayMs));
+            if (!isCurrentExecution()) return;
         }
 
         for (const action of path) {
@@ -1630,10 +1755,7 @@ this.player.y = newState.y;
                         this.player.y = this.getGhostY();
                         break;
                 }
-                let delay = gameSettings.aiMoveDelay;
-                if (action === '↓') {
-                    delay = gameSettings.aiSdfDelay;
-                }
+                const delay = action === '↓' ? sdfDelayMs : moveDelayMs;
                 await new Promise(resolve => setTimeout(resolve, delay));
                 if (!isCurrentExecution()) return;
         }

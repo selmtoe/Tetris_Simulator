@@ -626,6 +626,22 @@
             return lastRun ? badSituationPages(lastRun) : [];
         }
 
+        // The personal Lab bridge reads completed results only; scoring itself is unchanged.
+        window.getLabScoringReport = () => lastRun ? {
+            engine: 'Cold Clear', completedAt: lastRun.completedAt, settings: lastRun.settings,
+            attempted: lastRun.results.length,
+            scored: lastRun.results.filter(r => ['scored','inferred'].includes(r.status)).length,
+            ignored: lastRun.results.filter(r => r.status === 'ignored').map(r => ({pageIndex:r.pageIndex,reason:r.reconstruction})),
+            candidates: lastRun.results.filter(r => r.blunder && ['scored','inferred'].includes(r.status)).map(r => ({
+                pageIndex:r.pageIndex, time:lastRun.pages[r.pageIndex]?.time ?? null,
+                gap:scoreGap(r), actualScore:resultScore(r,'actual'), bestScore:resultScore(r,'best'),
+                status:r.status, searchEngine:r.searchEngine, actualMove:cleanClone(r.actualMove || null), bestMove:cleanClone(r.bestMove || null),
+                sourceBoard:cleanClone(r.sourceBoard || r.displayBoard || lastRun.pages[r.pageIndex]?.p1?.board), aiPlan:cleanClone(r.aiPlan || []),
+                snapshot:{v:3,m:lastRun.mode,currentCase:0,cases:[{name:'採点した手の前後',kind:'snapshot',gameMode:lastRun.mode,
+                    pages:cleanClone(lastRun.pages.slice(r.pageIndex,r.pageIndex+2))}]}
+            }))
+        } : null;
+
         function editorOutputData() {
             const pages = getOutputPages();
             return pages.length ? getFumenDataForExport(pages, lastRun.mode) : null;
@@ -698,6 +714,8 @@
             const replay = typeof currentCaseIsReplay === 'function' && currentCaseIsReplay();
             const operationPages = replay ? scoringPageIndices() : null;
             const replayInitial = replay ? cleanClone(currentCase()?.initial || {}) : null;
+            const settings = {startPage:startPage+1,endPage:endPage+1,nodeBudget:Number(nodeInput.value),
+                detailNodeBudget:Number(detailNodeInput.value),planLength:Number(planLengthInput.value),thresholdScore:Number(thresholdInput.value)};
             lastRun = null;
             destroyPlanAnimations();
             resultPanel.hidden = true;
@@ -723,6 +741,7 @@
                         pages,
                         mode: gameMode,
                         replay,
+                        settings, completedAt:new Date().toISOString(),
                         results: Array.isArray(message.results) ? message.results : []
                     };
                     scoreWorker.terminate();

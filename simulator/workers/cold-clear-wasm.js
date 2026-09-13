@@ -3,6 +3,7 @@
 'use strict';
 
 const COLD_CLEAR_MOVE_SIZE = 60;
+const COLD_CLEAR_TIMING_MOVE_SIZE = 64;
 
 class ColdClearWasmBridge {
     constructor(instance) {
@@ -11,12 +12,13 @@ class ColdClearWasmBridge {
         this.memory = this.exports.memory;
         this.moveSize = this.exports.cc_move_size ? this.exports.cc_move_size() : COLD_CLEAR_MOVE_SIZE;
         this.candidateSize = this.exports.cc_candidate_size ? this.exports.cc_candidate_size() : 20;
+        this.supportsDecisionTopUp = Boolean(this.exports.cc_begin_decision);
         if (!this.memory || !this.exports.cc_create || !this.exports.cc_alloc) {
             throw new Error('Cold Clear WASM ABI is incomplete.');
         }
     }
 
-    static async load(wasmPath = './cold-clear.wasm') {
+    static async load(wasmPath = './cold-clear.wasm?v=controller-timing-v2') {
         const url = new URL(wasmPath, self.location.href);
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Cold Clear WASM HTTP ${response.status}`);
@@ -76,6 +78,21 @@ class ColdClearWasmBridge {
         return this.exports.cc_node_count(handle) >>> 0;
     }
 
+    beginDecision(handle, nodeBudget, incoming = 0) {
+        // Keep the checked-in production binary loadable while the candidate
+        // ABI is evaluated. Without the new export the old absolute max still
+        // applies (and telemetry will expose zero work); only the separately
+        // built candidate receives true retained-DAG top-ups.
+        if (!this.supportsDecisionTopUp) {
+            return (this.nodeCount(handle) + Math.max(1, nodeBudget | 0)) >>> 0;
+        }
+        return this.exports.cc_begin_decision(
+            handle,
+            Math.max(1, nodeBudget | 0),
+            Math.max(0, incoming | 0)
+        ) >>> 0;
+    }
+
     candidates(handle) {
         if (!this.exports.cc_candidate_count || !this.exports.cc_write_candidates) return [];
         const count = this.exports.cc_candidate_count(handle) >>> 0;
@@ -105,13 +122,13 @@ class ColdClearWasmBridge {
         }
     }
 
-    think(handle, milliseconds, nodeLimit) {
+    think(handle, milliseconds, decisionNodeLimit) {
         const before = this.nodeCount(handle);
         const deadline = performance.now() + Math.max(1, milliseconds);
         let calls = 0;
         let after = before;
-        while (performance.now() < deadline && after < nodeLimit) {
-            const remaining = Math.max(1, nodeLimit - after);
+        while (performance.now() < deadline && after < decisionNodeLimit) {
+            const remaining = Math.max(1, decisionNodeLimit - after);
             const batch = Math.min(256, remaining);
             const previous = after;
             after = this.exports.cc_think(handle, batch) >>> 0;
@@ -137,7 +154,10 @@ class ColdClearWasmBridge {
                 y: view.getInt32(12, true),
                 inputs: Array.from(bytes.slice(17, 17 + bytes[16])).map(value => String.fromCharCode(value)),
                 nodes: view.getUint32(52, true),
-                depth: view.getUint32(56, true)
+                depth: view.getUint32(56, true),
+                controllerInputs: this.moveSize >= COLD_CLEAR_TIMING_MOVE_SIZE
+                    ? view.getUint32(60, true)
+                    : null
             };
         } finally {
             this.exports.cc_dealloc(ptr, this.moveSize);

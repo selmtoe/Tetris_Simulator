@@ -2,7 +2,7 @@
 
 'use strict';
 
-importScripts('./kasane-wasm.js?v=kasane-v9');
+importScripts('./kasane-wasm.js?v=kasane-v14');
 
 let bridge = null;
 let generation = 0;
@@ -28,11 +28,9 @@ async function analyze(data) {
         return;
     }
 
-    // The snapshot timestamp precedes synchronous WASM inference. Consume that
-    // real elapsed time from a tactical wait so the requested lock timestamp
-    // remains stable, but never turn the AI setting into an artificial minimum
-    // delay (Cold Clear treats it as a search budget too).
-    move.waitMs = Math.max(0, Math.round(move.waitMs - searchElapsedMs));
+    // `waitMs` is additional tactical delay after the simulator's fixed
+    // decision window. Player.executeAiMove waits out the unused part of that
+    // window, so inference time must not be subtracted here.
     move.searchElapsedMs = Math.round(searchElapsedMs);
     const modelLabel = data.model === 'kasane-base'
         ? 'KASANE Base v3'
@@ -49,14 +47,26 @@ async function analyze(data) {
     const overrideLabel = move.policyOverride && move.policyOverride !== 'None'
         ? ` | override ${move.policyOverride}`
         : '';
-    const wellWidth = (move.strategyDetail >>> 4) & 0x0f;
-    const wellStart = move.strategyDetail & 0x0f;
-    const wellLabel = wellWidth >= 2 && wellWidth <= 4 && wellStart + wellWidth <= 10
-        ? ` | well C${wellStart + 1}-C${wellStart + wellWidth}`
-        : '';
+    let stackRenLabel = '';
+    if (move.strategyEvent === 'Stack-REN enter') {
+        const wellWidth = (move.strategyDetail >>> 4) & 0x0f;
+        const wellStart = move.strategyDetail & 0x0f;
+        if (wellWidth >= 2 && wellWidth <= 4 && wellStart + wellWidth <= 10) {
+            stackRenLabel = ` | well C${wellStart + 1}-C${wellStart + wellWidth}`;
+        }
+    } else if (move.strategyEvent === 'Stack-REN fire') {
+        const fireReasons = ['TargetDepth', 'Survival', 'Pressure'];
+        const depth = move.strategyDetail & 0x1f;
+        const reasonCode = (move.strategyDetail >>> 5) & 0x07;
+        stackRenLabel = ` | depth ${depth} | fire ${fireReasons[reasonCode] || `Unknown(${reasonCode})`}`;
+    } else if (move.strategyEvent === 'Stack-REN build'
+        || move.strategyEvent === 'Stack-REN continue'
+        || move.strategyEvent === 'Stack-REN abort') {
+        stackRenLabel = ` | depth ${move.strategyDetail & 0x1f}`;
+    }
     self.postMessage({
         type: 'debug',
-        message: `${modelLabel} | ${move.intent}${strategyLabel}${overrideLabel}${wellLabel} | score ${move.score.toFixed(2)} | wait ${move.waitMs} ms | search ${move.searchElapsedMs} ms`
+        message: `${modelLabel} | ${move.intent}${strategyLabel}${overrideLabel}${stackRenLabel} | score ${move.score.toFixed(2)} | wait ${move.waitMs} ms | search ${move.searchElapsedMs} ms`
     });
     self.postMessage({
         type: 'move',
