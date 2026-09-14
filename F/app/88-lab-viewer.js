@@ -8,17 +8,19 @@
         parentOrigin = source.origin;
     } catch { return; }
     document.documentElement.dataset.labVideoViewer = 'true';
-    let ready = false, key = null, applying = false, resizeFrame = 0;
+    let ready = false, key = null, applying = false, resizeFrame = 0, lastSize = '';
     const notify = (type, data = {}) => window.parent.postMessage({type, key, ...data}, parentOrigin);
     const fit = () => {
         resizeFrame = 0;
         const canvas = document.getElementById('viewerCanvas'), controls = document.getElementById('viewer-controls');
         if (!canvas?.width || !canvas.offsetWidth) return;
-        const top = controls.querySelector('.viewer-controls-shell').getBoundingClientRect().bottom + 8;
-        const height = Math.max(1, innerHeight - top - 6), width = Math.min(Math.max(1, innerWidth - 12), height * canvas.width / canvas.height);
+        const top = controls.querySelector('.viewer-controls-shell').getBoundingClientRect().bottom + 18;
+        const width = Math.max(1, innerWidth - 24), height = width * canvas.height / canvas.width;
         const root = document.documentElement;root.dataset.labViewerFit = 'true';
         root.style.setProperty('--lab-viewer-width', width + 'px');
-        root.style.setProperty('--lab-viewer-center', (top + (width * canvas.height / canvas.width) / 2) + 'px');
+        root.style.setProperty('--lab-viewer-center', (top + height / 2) + 'px');
+        const frameHeight = Math.ceil(top + height + 18), size = key + ':' + frameHeight;
+        if (key && size !== lastSize) { lastSize = size;notify('labViewerSize', {height:frameHeight}); }
     };
     const schedule = () => { if (!resizeFrame) resizeFrame = requestAnimationFrame(fit); };
     window.addEventListener('tetris:viewer-ready', () => {
@@ -32,13 +34,7 @@
         style.textContent = `
             html[data-lab-video-viewer] #back-to-editor-btn,html[data-lab-video-viewer] .lab-settings-open{display:none!important}
             html[data-lab-video-viewer] #viewer-container{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
-            html[data-lab-video-viewer] #viewer-container #viewer-controls{top:2px;--viewer-menu-height:30px}
-            html[data-lab-video-viewer] #viewer-controls .viewer-controls-shell{width:150px;height:30px;border-radius:12px;box-shadow:none;transition:none}
-            html[data-lab-video-viewer] #viewer-controls #viewer-page-indicator{height:30px;line-height:30px}
             html[data-lab-video-viewer] #viewer-controls-panel{display:none!important}
-            html[data-lab-video-viewer] #viewer-controls .viewer-top-row .button{padding:5px 8px}
-            html[data-lab-video-viewer] #viewer-controls .viewer-slider-container{margin-top:4px}
-            @media(max-width:320px){html[data-lab-video-viewer] #viewer-controls .viewer-top-row{gap:3px}html[data-lab-video-viewer] #viewer-controls .viewer-top-row .button{padding:5px 4px;font-size:11px}}
         `;
         document.head.append(style);
         document.getElementById('viewerCanvas').setAttribute('aria-label', 'P1・P2の盤面。各盤面の左がHOLD、右がNEXTです。');
