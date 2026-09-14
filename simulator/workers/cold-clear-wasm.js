@@ -18,7 +18,7 @@ class ColdClearWasmBridge {
         }
     }
 
-    static async load(wasmPath = './cold-clear.wasm?v=controller-timing-v2') {
+    static async load(wasmPath = './cold-clear.wasm?v=search-draws-v4') {
         const url = new URL(wasmPath, self.location.href);
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Cold Clear WASM HTTP ${response.status}`);
@@ -119,6 +119,30 @@ class ColdClearWasmBridge {
             return candidates;
         } finally {
             this.exports.cc_dealloc(ptr, count * this.candidateSize);
+        }
+    }
+
+    plan(handle, limit = 12) {
+        if (!this.exports.cc_write_plan) return [];
+        const capacity = Math.max(1, Math.min(40, Math.floor(limit)));
+        const ptr = this.exports.cc_alloc(capacity * this.candidateSize);
+        if (!ptr) throw new Error('Cold Clear WASM plan allocation failed.');
+        try {
+            const count = Math.min(capacity, this.exports.cc_write_plan(handle, ptr, capacity) >>> 0);
+            const view = new DataView(this.memory.buffer, ptr, count * this.candidateSize);
+            return Array.from({ length: count }, (_, index) => {
+                const offset = index * this.candidateSize;
+                return {
+                    piece: String.fromCharCode(view.getUint8(offset)),
+                    hold: view.getUint8(offset + 1) !== 0,
+                    rotation: view.getUint8(offset + 2),
+                    tspin: view.getUint8(offset + 3) === 2 ? 'full' : (view.getUint8(offset + 3) === 1 ? 'mini' : null),
+                    x: view.getInt32(offset + 4, true),
+                    y: view.getInt32(offset + 8, true)
+                };
+            });
+        } finally {
+            this.exports.cc_dealloc(ptr, capacity * this.candidateSize);
         }
     }
 

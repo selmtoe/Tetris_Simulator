@@ -1,6 +1,6 @@
 /* Independent one-shot queries; never alter a playing Cold Clear bot's DAG. */
 'use strict';
-importScripts('./pc-finder-worker.js', './cold-clear-core.js', './cold-clear-wasm.js');
+importScripts('./pc-finder-worker.js', './cold-clear-core.js', './cold-clear-wasm.js?v=search-draws-v4');
 
 function routeSnapshot(data) {
     const queue = [];
@@ -81,7 +81,7 @@ function* renSearch(data) {
 }
 
 async function aiSearch(data) {
-    const bridge = await ColdClearWasmBridge.load('./cold-clear.wasm?v=controller-timing-v2');
+    const bridge = await ColdClearWasmBridge.load('./cold-clear.wasm?v=search-draws-v4');
     const snapshot = { ...data, nodeLimit: data.nodeLimit || 120000 };
     const handle = bridge.create(snapshot);
     const plan = [];

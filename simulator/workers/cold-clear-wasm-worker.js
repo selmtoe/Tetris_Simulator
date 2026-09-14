@@ -2,7 +2,7 @@
 
 'use strict';
 
-importScripts('./cold-clear-wasm.js?v=controller-timing-v2');
+importScripts('./cold-clear-wasm.js?v=search-draws-v4');
 
 let bridge = null;
 let search = 0;

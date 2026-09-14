@@ -19,6 +19,7 @@ use normal::CandidateScore;
 pub use normal::{BotState, ThinkResult, Thinker};
 use opening_book::Book;
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use std::slice;
 
 #[cfg(any(
@@ -165,6 +166,7 @@ pub struct CcMove {
     pub movements: [u8; 32],
     pub nodes: u32,
     pub depth: u32,
+    pub controller_inputs: u32,
 }
 
 #[repr(C)]
@@ -193,6 +195,7 @@ impl Default for CcMove {
             movements: [0; 32],
             nodes: 0,
             depth: 0,
+            controller_inputs: 0,
         }
     }
 }
@@ -308,7 +311,75 @@ fn movement_byte(movement: PieceMovement) -> u8 {
     }
 }
 
-fn output_move(result: &mut CcMove, mv: &Move, info: &Info) {
+fn expanded_controller_inputs(board: &Board, mv: &Move) -> u32 {
+    let fallback = (mv.inputs.len() + usize::from(mv.hold) + 1).min(u32::MAX as usize) as u32;
+    let mut path_board = board.clone();
+    let Some(current) = path_board.advance_queue() else {
+        return fallback;
+    };
+    let piece = if mv.hold {
+        match path_board.hold(current) {
+            Some(held) => held,
+            None => match path_board.advance_queue() {
+                Some(next) => next,
+                None => return fallback,
+            },
+        }
+    } else {
+        current
+    };
+    let Some(spawned) = SpawnRule::Row19Or20.spawn(piece, &path_board) else {
+        return fallback;
+    };
+
+    // Preserve the deployed timing ABI: count normal inputs and SDF cells.
+    // Consumers must apply their respective configured durations separately.
+    let mut exact: Option<Vec<PieceMovement>> = None;
+    let mut equivalent: Option<Vec<PieceMovement>> = None;
+    for placement in find_moves(&path_board, spawned, MovementMode::ZeroGComplete) {
+        let movements: Vec<_> = placement.inputs.movements.into_iter().collect();
+        let slot = if placement.location == mv.expected_location {
+            &mut exact
+        } else if placement.location.same_location(&mv.expected_location) {
+            &mut equivalent
+        } else {
+            continue;
+        };
+        if slot
+            .as_ref()
+            .map_or(true, |current| movements.len() < current.len())
+        {
+            *slot = Some(movements);
+        }
+    }
+    let movements = exact
+        .or(equivalent)
+        .unwrap_or_else(|| mv.inputs.iter().copied().collect());
+    let Some(mut falling) = SpawnRule::Row19Or20.spawn(piece, &path_board) else {
+        return fallback;
+    };
+    let mut sonic_drop_count = 0_usize;
+    let mut soft_drop_cells = 0_u64;
+    for &movement in &movements {
+        let before_y = falling.y;
+        if !movement.apply(&mut falling, &path_board) {
+            return fallback;
+        }
+        if movement == PieceMovement::SonicDrop {
+            sonic_drop_count += 1;
+            soft_drop_cells = soft_drop_cells
+                .saturating_add(u64::try_from(before_y.saturating_sub(falling.y)).unwrap_or(0));
+        }
+    }
+    let ordinary = movements.len().saturating_sub(sonic_drop_count) as u64;
+    ordinary
+        .saturating_add(soft_drop_cells.max(sonic_drop_count as u64))
+        .saturating_add(u64::from(mv.hold))
+        .saturating_add(1)
+        .min(u32::MAX as u64) as u32
+}
+
+fn output_move(result: &mut CcMove, mv: &Move, info: &Info, board: &Board) {
     result.status = 1;
     result.piece = piece_to_byte(mv.expected_location.kind.0);
     result.hold = mv.hold as u8;
@@ -334,6 +405,7 @@ fn output_move(result: &mut CcMove, mv: &Move, info: &Info) {
         result.nodes = normal.nodes;
         result.depth = normal.depth;
     }
+    result.controller_inputs = expanded_controller_inputs(board, mv);
 }
 
 fn output_candidate(result: &mut CcCandidate, candidate: &CandidateScore) {
@@ -489,7 +561,7 @@ pub unsafe extern "C" fn cc_suggest(bot: *mut CcBot, incoming: u32, result: *mut
         .suggest_move(&bot.evaluator, None::<&Book>, incoming)
     {
         bot.pending = Some(mv.expected_location);
-        output_move(output, &mv, &info);
+        output_move(output, &mv, &info, &bot.board);
         1
     } else {
         0
@@ -616,6 +688,39 @@ pub unsafe extern "C" fn cc_write_candidates(
         };
         output_candidate(&mut result, candidate);
         *output.add(index) = result;
+    }
+    written as u32
+}
+
+/// Read the already-searched known-piece continuation without committing or
+/// expanding the bot. Use the existing 20-byte candidate ABI for each move.
+#[no_mangle]
+pub unsafe extern "C" fn cc_write_plan(
+    bot: *const CcBot,
+    output: *mut CcCandidate,
+    capacity: u32,
+) -> u32 {
+    if bot.is_null() || output.is_null() || capacity == 0 {
+        return 0;
+    }
+    let bot = &*bot;
+    let mut board = bot.board.clone();
+    let mut written = 0;
+    for (mv, _) in bot.state.principal_variation().iter().take(capacity as usize) {
+        let Some(current) = board.advance_queue() else { break };
+        let hold = current != mv.kind.0;
+        if hold {
+            let selected = board.hold(current).or_else(|| board.advance_queue());
+            if selected != Some(mv.kind.0) { break; }
+        }
+        let mut result = CcCandidate {
+            piece: 0, hold: 0, rotation: 0, tspin: 0,
+            x: 0, y: 0, value: 0, spike: 0,
+        };
+        output_candidate(&mut result, &CandidateScore { mv: *mv, hold, value: 0, spike: 0 });
+        *output.add(written) = result;
+        written += 1;
+        board.lock_piece(*mv);
     }
     written as u32
 }

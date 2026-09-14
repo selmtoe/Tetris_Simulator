@@ -13,7 +13,7 @@ class Player {
         this.aiSearchInitialized = false;
         
         if (this.isAi) {
-            this.aiWorker = new Worker('./simulator/workers/cold-clear-wasm-worker.js?v=controller-timing-v3');
+            this.aiWorker = new Worker('./simulator/workers/cold-clear-wasm-worker.js?v=search-draws-v4');
 
             this.aiWorker.onmessage = (e) => {
                 if (e.data && e.data.type === 'debug') {

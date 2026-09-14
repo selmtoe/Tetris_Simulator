@@ -4,7 +4,7 @@
 // search implementation is the same Cold Clear port, but each page pair owns
 // a scratch DAG in this worker.
 importScripts('../../simulator/workers/cold-clear-core.js');
-importScripts('../../simulator/workers/cold-clear-wasm.js');
+importScripts('../../simulator/workers/cold-clear-wasm.js?v=search-draws-v4');
 
 const { Search } = self.ColdClearSimulatorCore;
 const PIECES = Object.freeze(['I', 'O', 'T', 'L', 'J', 'S', 'Z']);
@@ -14,7 +14,7 @@ let wasmBridgePromise = null;
 
 function loadWasmBridge() {
     if (!wasmBridgePromise) {
-        wasmBridgePromise = ColdClearWasmBridge.load('../../simulator/workers/cold-clear.wasm');
+        wasmBridgePromise = ColdClearWasmBridge.load('../../simulator/workers/cold-clear.wasm?v=search-draws-v4');
     }
     return wasmBridgePromise;
 }
@@ -635,6 +635,31 @@ function principalVariation(search, firstEdge, limit = 4) {
     return moves;
 }
 
+function analysisVariation(search, result, limit, wasmSearch) {
+    if (!wasmSearch) return principalVariation(search, result.bestEdge, limit);
+    const plan = wasmSearch.bridge.plan(wasmSearch.handle, limit);
+    // Older cached binaries have no plan export. Show at most their verified
+    // first move; never fill a WASM continuation with unsearched JS choices.
+    if (!plan.length || !sameScoredMove(plan[0], result.bestMove)) {
+        return result.bestEdge && sameScoredMove(publicMove(result.bestEdge), result.bestMove)
+            ? [planMove(search, result.bestEdge)] : [];
+    }
+    const moves = [];
+    let node = search.root;
+    for (const move of plan) {
+        if (!node.children) search.expand(node);
+        const edge = node.children?.find(candidate => {
+            const converted = publicMove(candidate);
+            return sameScoredMove(converted, move) && converted.tspin === move.tspin;
+        });
+        if (!edge) break;
+        // JS reconstructs colours/HOLD/NEXT only; the WASM DAG chose the move.
+        moves.push({ ...candidatePublicMove(move), stateAfter: planMove(search, edge).stateAfter });
+        node = edge.child;
+    }
+    return moves;
+}
+
 function scorePairLegacy(search, actualEdge) {
     const bestEdge = search.best(0) || actualEdge;
     const actual = staticEdgeValue(search, actualEdge);
@@ -645,11 +670,14 @@ function scorePairLegacy(search, actualEdge) {
 }
 
 function sameScoredMove(left, right) {
-    return left && right && left.piece === right.piece &&
-        Boolean(left.hold) === Boolean(right.hold) &&
-        Number(left.rotation) === Number(right.rotation) &&
-        Number(left.x) === Number(right.x) &&
-        Number(left.y) === Number(right.y);
+    if (!left || !right || left.piece !== right.piece ||
+        Boolean(left.hold) !== Boolean(right.hold) || (left.tspin || null) !== (right.tspin || null)) return false;
+    if (Number(left.rotation) === Number(right.rotation) &&
+        Number(left.x) === Number(right.x) && Number(left.y) === Number(right.y)) return true;
+    // I/S/Z/O may have another rotation/anchor for the same four cells.
+    // Different move generators retain different representatives of that lock.
+    const a = candidatePublicMove(left).cells, b = candidatePublicMove(right).cells;
+    return a.length === 4 && b.length === 4 && sameCells(a, b);
 }
 
 function candidatePublicMove(candidate) {
@@ -662,7 +690,7 @@ function candidatePublicMove(candidate) {
         tspin: candidate.tspin,
         hold: Boolean(candidate.hold),
         cells: shape
-            .map(([dx, dy]) => [candidate.x + dx, candidate.y + dy])
+            .map(([dx, dy]) => [candidate.x + (candidate.piece === 'I' ? 1 : 0) + dx, candidate.y + dy])
             .filter(([x, y]) => x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT)
     };
 }
@@ -771,9 +799,9 @@ async function scoreTransition(pageIndex, source, target, context, nodeBudget, d
     // Fill the requested known-piece PV after the score search. This can
     // expand a few deterministic child nodes, so refresh the values and the
     // best edge before publishing both the plan and the final node count.
-    let aiPlan = principalVariation(search, final.bestEdge, planLength);
+    let aiPlan = analysisVariation(search, final, planLength, wasmSearch);
     final = await scorePair(search, actualEdge, wasmSearch);
-    aiPlan = principalVariation(search, final.bestEdge, planLength);
+    aiPlan = analysisVariation(search, final, planLength, wasmSearch);
     final = await scorePair(search, actualEdge, wasmSearch);
     // A small PV expansion can surface a rough-threshold gap that was not
     // visible at the original frontier. Finish it with the same detailed DAG
@@ -783,7 +811,7 @@ async function scoreTransition(pageIndex, source, target, context, nodeBudget, d
         else search.thinkNodes(detailNodeBudget, 10000);
         detailed = true;
         final = await scorePair(search, actualEdge, wasmSearch);
-        aiPlan = principalVariation(search, final.bestEdge, planLength);
+        aiPlan = analysisVariation(search, final, planLength, wasmSearch);
         final = await scorePair(search, actualEdge, wasmSearch);
     }
 
@@ -883,16 +911,16 @@ async function scoreRecordedOperation(pageIndex, source, operation, context, nod
         final = await scorePair(search, actualEdge, wasmSearch);
         detailed = true;
     }
-    let aiPlan = principalVariation(search, final.bestEdge, planLength);
+    let aiPlan = analysisVariation(search, final, planLength, wasmSearch);
     final = await scorePair(search, actualEdge, wasmSearch);
-    aiPlan = principalVariation(search, final.bestEdge, planLength);
+    aiPlan = analysisVariation(search, final, planLength, wasmSearch);
     final = await scorePair(search, actualEdge, wasmSearch);
     if (!detailed && meetsThreshold(final.scoreGap, thresholdScore)) {
         if (wasmSearch) wasmSearch.bridge.think(wasmSearch.handle, 10000, detailNodeBudget);
         else search.thinkNodes(detailNodeBudget, 10000);
         detailed = true;
         final = await scorePair(search, actualEdge, wasmSearch);
-        aiPlan = principalVariation(search, final.bestEdge, planLength);
+        aiPlan = analysisVariation(search, final, planLength, wasmSearch);
         final = await scorePair(search, actualEdge, wasmSearch);
     }
 

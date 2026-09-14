@@ -214,6 +214,10 @@ impl<E: Evaluator> BotState<E> {
 }
 
 impl BotState<crate::evaluation::Standard> {
+    pub fn principal_variation(&self) -> Vec<(FallingPiece, LockResult)> {
+        self.tree.get_plan()
+    }
+
     pub fn candidate_scores(&self) -> Vec<CandidateScore> {
         self.tree
             .get_next_candidates()

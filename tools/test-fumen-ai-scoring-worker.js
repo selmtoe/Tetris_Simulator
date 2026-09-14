@@ -2,6 +2,8 @@
 
 'use strict';
 
+(async () => {
+
 const assert = (condition, message) => {
     if (!condition) throw new Error(message);
 };
@@ -128,10 +130,11 @@ function targetFromEdge(boardBefore, search, edge, { preClear = false } = {}) {
     };
 }
 
-function run(pages, runId, options = {}) {
+async function run(pages, runId, options = {}) {
     const start = messages.length;
-    workerScope.onmessage({ data: {
+    await workerScope.onmessage({ data: {
         type: 'score',
+        useWasm: false, // This file verifies the legacy compatibility path.
         runId,
         pages,
         startPage: options.startPage || 0,
@@ -152,8 +155,8 @@ function run(pages, runId, options = {}) {
     return done.results;
 }
 
-function expectSingle(pages, runId, status = 'scored', options = {}) {
-    const results = run(pages, runId, options);
+async function expectSingle(pages, runId, status = 'scored', options = {}) {
+    const results = await run(pages, runId, options);
     assert(results.length === 1, 'Expected exactly one transition result.');
     assert(results[0].status === status, `Unexpected status: ${results[0].status}`);
     return results[0];
@@ -171,7 +174,7 @@ const normalSearch = makeSearch(normalBoard, 'T', ['I', 'O', 'L', 'J', 'S', 'Z']
 const normalEdge = firstEdge(normalSearch, edge => !edge.hold && edge.placement.type === 'T');
 const normalSource = sourcePage(normalBoard, 'TIOLJSZ');
 const normalTarget = targetFromEdge(normalBoard, normalSearch, normalEdge);
-const normal = expectSingle([normalSource, normalTarget], 1);
+const normal = await expectSingle([normalSource, normalTarget], 1);
 assert(normal.sourceConvention === 'next-first' && normal.targetConvention === 'next-first', 'NEXT[0] convention was not preserved.');
 assert(normal.actualMove.piece === 'T' && !normal.actualMove.hold, 'The recorded move did not use source NEXT[0].');
 assert(sameCells(normal.actualMove.cells, edgeCells(normalEdge)), 'Actual highlight was not the literal four-cell page delta.');
@@ -185,13 +188,13 @@ assert(!Object.prototype.hasOwnProperty.call(normal, 'lossPercent'), 'Percentage
 // a nearest legal Cold Clear candidate.
 const fiveCellsTarget = JSON.parse(JSON.stringify(normalTarget));
 fiveCellsTarget.p1.board[0][0] = 'X';
-assert(expectSingle([normalSource, fiveCellsTarget], 2, 'ignored').reconstruction === 'invalid-page-delta', 'Five-cell delta was not excluded.');
+assert((await expectSingle([normalSource, fiveCellsTarget], 2, 'ignored')).reconstruction === 'invalid-page-delta', 'Five-cell delta was not excluded.');
 
 const wrongShapeTarget = JSON.parse(JSON.stringify(normalTarget));
 const removedActual = edgeCells(normalEdge)[0];
 wrongShapeTarget.p1.board[removedActual[1]][removedActual[0]] = null;
 wrongShapeTarget.p1.board[0][0] = 'X';
-assert(expectSingle([normalSource, wrongShapeTarget], 3, 'ignored').reconstruction === 'invalid-page-delta', 'Wrong four-cell shape was not excluded.');
+assert((await expectSingle([normalSource, wrongShapeTarget], 3, 'ignored')).reconstruction === 'invalid-page-delta', 'Wrong four-cell shape was not excluded.');
 
 const removedOldBoard = empty();
 removedOldBoard[39][0] = 'G';
@@ -199,18 +202,18 @@ const removedSearch = makeSearch(removedOldBoard, 'T', ['I', 'O', 'L', 'J', 'S',
 const removedEdge = firstEdge(removedSearch, edge => !edge.hold && edge.placement.type === 'T');
 const removedTarget = targetFromEdge(removedOldBoard, removedSearch, removedEdge);
 removedTarget.p1.board[39][0] = null;
-assert(expectSingle([sourcePage(removedOldBoard, 'TIOLJSZ'), removedTarget], 4, 'ignored').reconstruction === 'invalid-page-delta', 'Removing an old block was not excluded.');
+assert((await expectSingle([sourcePage(removedOldBoard, 'TIOLJSZ'), removedTarget], 4, 'ignored')).reconstruction === 'invalid-page-delta', 'Removing an old block was not excluded.');
 
 const shiftedNextTarget = JSON.parse(JSON.stringify(normalTarget));
 shiftedNextTarget.p1.next = shiftedNextTarget.p1.next.slice(1);
-assert(expectSingle([normalSource, shiftedNextTarget], 5, 'ignored').reconstruction === 'invalid-page-delta', 'Preview-only NEXT was incorrectly accepted.');
+assert((await expectSingle([normalSource, shiftedNextTarget], 5, 'ignored')).reconstruction === 'invalid-page-delta', 'Preview-only NEXT was incorrectly accepted.');
 
 const wrongHoldTarget = JSON.parse(JSON.stringify(normalTarget));
 wrongHoldTarget.p1.hold = 'Z';
-assert(expectSingle([normalSource, wrongHoldTarget], 6, 'ignored').reconstruction === 'invalid-page-delta', 'Target HOLD mismatch was incorrectly accepted.');
+assert((await expectSingle([normalSource, wrongHoldTarget], 6, 'ignored')).reconstruction === 'invalid-page-delta', 'Target HOLD mismatch was incorrectly accepted.');
 
 const missingNextSource = sourcePage(normalBoard, '');
-assert(expectSingle([missingNextSource, normalTarget], 7, 'ignored').reconstruction === 'invalid-page-delta', 'Missing NEXT invented a seven-piece fallback.');
+assert((await expectSingle([missingNextSource, normalTarget], 7, 'ignored')).reconstruction === 'invalid-page-delta', 'Missing NEXT invented a seven-piece fallback.');
 
 // A nonempty HOLD is the only alternate source piece.  Empty HOLD must not
 // use NEXT[1] as an invented action.
@@ -218,7 +221,7 @@ const heldSearch = makeSearch(normalBoard, 'T', ['I', 'O', 'L', 'J', 'S', 'Z'], 
 const heldEdge = firstEdge(heldSearch, edge => edge.hold && edge.placement.type === 'J');
 const heldSource = sourcePage(normalBoard, 'TIOLJSZ', 'J');
 const heldTarget = targetFromEdge(normalBoard, heldSearch, heldEdge);
-const held = expectSingle([heldSource, heldTarget], 8);
+const held = await expectSingle([heldSource, heldTarget], 8);
 assert(held.actualMove.hold && held.actualMove.piece === 'J', 'Nonempty HOLD action was not reconstructed.');
 
 // Regression: J rotation 3 must keep its foot below-left of the pivot.  This
@@ -226,14 +229,14 @@ assert(held.actualMove.hold && held.actualMove.piece === 'J', 'Nonempty HOLD act
 // other J rotations still reconstruct correctly.
 const jRotation3Edge = firstEdge(heldSearch, edge => edge.hold && edge.placement.type === 'J' && edge.placement.rotation === 3);
 const jRotation3Target = targetFromEdge(normalBoard, heldSearch, jRotation3Edge);
-const jRotation3 = expectSingle([heldSource, jRotation3Target], 18);
+const jRotation3 = await expectSingle([heldSource, jRotation3Target], 18);
 assert(jRotation3.actualMove.rotation === 3, 'J rotation 3 was not preserved.');
 assert(sameCells(jRotation3.actualMove.cells, edgeCells(jRotation3Edge)), 'J rotation 3 cells do not match the simulator geometry.');
 
 const emptyHoldSearch = makeSearch(normalBoard, 'T', ['I', 'O', 'L', 'J', 'S', 'Z']);
 const emptyHoldEdge = firstEdge(emptyHoldSearch, edge => edge.hold && edge.placement.type === 'I');
 const emptyHoldTarget = targetFromEdge(normalBoard, emptyHoldSearch, emptyHoldEdge);
-assert(expectSingle([normalSource, emptyHoldTarget], 9, 'ignored').reconstruction === 'invalid-page-delta', 'Empty HOLD incorrectly reconstructed NEXT[1].');
+assert((await expectSingle([normalSource, emptyHoldTarget], 9, 'ignored')).reconstruction === 'invalid-page-delta', 'Empty HOLD incorrectly reconstructed NEXT[1].');
 
 // The simulator records a pre-clear page just after lock.  It is still a
 // valid +4 transition even though Cold Clear's child board has cleared lines.
@@ -244,7 +247,7 @@ const clearEdge = firstEdge(clearSearch, edge => !edge.hold && edge.placement.ty
 const clearSource = sourcePage(clearBoard, 'ITOLJSZ');
 const preClearTarget = targetFromEdge(clearBoard, clearSearch, clearEdge, { preClear: true });
 const postClearTarget = targetFromEdge(clearBoard, clearSearch, clearEdge);
-const clearResults = run([clearSource, preClearTarget, postClearTarget], 10, { endPage: 1 });
+const clearResults = await run([clearSource, preClearTarget, postClearTarget], 10, { endPage: 1 });
 assert(clearResults[0].status === 'scored', 'The lock-before-clear +4 page was not scored.');
 assert(clearResults[1].status === 'ignored', 'The following clear-only page was not excluded.');
 assert(sameCells(clearResults[0].actualMove.cells, edgeCells(clearEdge)), 'Pre-clear highlight did not use the observed four cells.');
@@ -252,7 +255,7 @@ assert(sameCells(clearResults[0].actualMove.cells, edgeCells(clearEdge)), 'Pre-c
 // Official Fumen pages normally omit the simulator's transient pre-clear
 // frame.  The next page is therefore the post-lock board, and scoring must
 // match Cold Clear's child board even though the literal delta has removals.
-const directClear = expectSingle([clearSource, postClearTarget], 20);
+const directClear = await expectSingle([clearSource, postClearTarget], 20);
 assert(directClear.reconstruction === 'lock-result', 'A direct line-clear Fumen transition was not reconstructed from the lock result.');
 assert(sameCells(directClear.actualMove.cells, edgeCells(clearEdge)), 'Direct line-clear highlight did not use the locked four cells.');
 
@@ -265,7 +268,7 @@ for (let x = 1; x < BOARD_WIDTH; x++) garbageBaseline[39][x] = 'G';
 const garbageSearch = makeSearch(garbageBaseline, 'I', ['T', 'O', 'L', 'J', 'S', 'Z']);
 const garbageEdge = firstEdge(garbageSearch, edge => !edge.hold && edge.placement.type === 'I' && edgeCells(edge).some(([x, y]) => x === 0 && y === 39));
 const garbageTarget = targetFromEdge(garbageBaseline, garbageSearch, garbageEdge, { preClear: true });
-const garbage = expectSingle([
+const garbage = await expectSingle([
     sourcePage(garbageSourceBoard, 'ITOLJSZ'),
     garbageTarget
 ], 11);
@@ -279,18 +282,18 @@ const doubleGarbageSearch = makeSearch(doubleGarbageBaseline, 'I', ['T', 'O', 'L
 const doubleGarbageEdge = firstEdge(doubleGarbageSearch, edge => !edge.hold && edge.placement.type === 'I' &&
     edgeCells(edge).some(([x, y]) => x === 0 && y === 38) && edgeCells(edge).some(([x, y]) => x === 0 && y === 39));
 const doubleGarbageTarget = targetFromEdge(doubleGarbageBaseline, doubleGarbageSearch, doubleGarbageEdge, { preClear: true });
-const doubleGarbage = expectSingle([
+const doubleGarbage = await expectSingle([
     sourcePage(empty(), 'ITOLJSZ'),
     doubleGarbageTarget
 ], 12);
 assert(doubleGarbage.reconstruction === 'garbage-rise' && doubleGarbage.garbageRows === 2, 'Two-row garbage rise was not normalized.');
 
 const garbageOnlyTarget = sourcePage(garbageBaseline, 'ITOLJSZ');
-assert(expectSingle([sourcePage(garbageSourceBoard, 'ITOLJSZ'), garbageOnlyTarget], 13, 'ignored').reconstruction === 'invalid-page-delta', 'Garbage-only page was scored as a P1 move.');
+assert((await expectSingle([sourcePage(garbageSourceBoard, 'ITOLJSZ'), garbageOnlyTarget], 13, 'ignored')).reconstruction === 'invalid-page-delta', 'Garbage-only page was scored as a P1 move.');
 
 const invalidGarbageTarget = JSON.parse(JSON.stringify(garbageTarget));
 for (let x = 1; x < BOARD_WIDTH; x++) invalidGarbageTarget.p1.board[39][x] = 'T';
-assert(expectSingle([sourcePage(garbageSourceBoard, 'ITOLJSZ'), invalidGarbageTarget], 14, 'ignored').reconstruction === 'invalid-page-delta', 'Non-G garbage row was accepted.');
+assert((await expectSingle([sourcePage(garbageSourceBoard, 'ITOLJSZ'), invalidGarbageTarget], 14, 'ignored')).reconstruction === 'invalid-page-delta', 'Non-G garbage row was accepted.');
 
 // Candidate-only detailed pass remains on the same DAG, and every animated
 // planned move has authoritative HOLD/NEXT state after it.
@@ -302,7 +305,7 @@ const poorEdge = [...normalSearch.root.children]
         return a - b;
     })[0];
 const poorTarget = targetFromEdge(normalBoard, normalSearch, poorEdge);
-const detailed = expectSingle([normalSource, poorTarget], 15, 'scored', {
+const detailed = await expectSingle([normalSource, poorTarget], 15, 'scored', {
     nodeBudget: 500,
     detailNodeBudget: 18000,
     thresholdScore: 1
@@ -321,9 +324,9 @@ const longSearch = makeSearch(normalBoard, 'T', longNext.slice(1).split(''));
 const longEdge = firstEdge(longSearch, edge => !edge.hold && edge.placement.type === 'T');
 const longSource = sourcePage(normalBoard, longNext);
 const longTarget = targetFromEdge(normalBoard, longSearch, longEdge);
-const shortPlan = expectSingle([longSource, longTarget], 16, 'scored', { planLength: 0 });
+const shortPlan = await expectSingle([longSource, longTarget], 16, 'scored', { planLength: 0 });
 assert(shortPlan.aiPlan.length === 1, 'Plan length lower bound was not clamped to one.');
-const maxPlan = expectSingle([longSource, longTarget], 17, 'scored', { planLength: 99 });
+const maxPlan = await expectSingle([longSource, longTarget], 17, 'scored', { planLength: 99 });
 assert(maxPlan.aiPlan.length === 12, 'Plan length upper bound was not clamped to twelve known moves.');
 assert(maxPlan.nodes >= maxPlan.roughNodes, 'Final node count did not include PV branch expansion.');
 
@@ -352,7 +355,7 @@ const replayPages = [
     { p1: { board: replayBoard1, hold: '', next: 'OLJSZ', operation: operationFromEdge(replayEdge1) } },
     { p1: { board: replayBoard2, hold: '', next: 'LJSZ', operation: operationFromEdge(replayEdge2) } }
 ];
-const replayResults = run(replayPages, 18, {
+const replayResults = await run(replayPages, 18, {
     replay: true,
     operationPages: [0, 1, 2],
     endPage: 2,
@@ -367,7 +370,7 @@ const holdReplayEdge0 = firstEdge(holdReplaySearch0, edge => edge.hold && edge.p
 const holdReplayBoard1 = addEdge(empty(), holdReplayEdge0);
 const holdReplaySearch1 = makeSearch(holdReplayBoard1, 'I', ['O', 'L', 'J', 'S', 'Z'], 'T');
 const holdReplayEdge1 = firstEdge(holdReplaySearch1, edge => !edge.hold && edge.placement.type === 'I');
-const holdReplayResults = run([
+const holdReplayResults = await run([
     { p1: { board: empty(), hold: 'J', next: 'IOLJSZ', operation: operationFromEdge(holdReplayEdge0) } },
     { p1: { board: holdReplayBoard1, hold: 'T', next: 'OLJSZ', operation: operationFromEdge(holdReplayEdge1) } }
 ], 19, {
@@ -381,7 +384,7 @@ assert(holdReplayResults.length === 2 && holdReplayResults.every(result => resul
 // normalizeReplayCase stores HOLD/NEXT after resolving the operation on each
 // page. The scorer must still reconstruct the pre-operation state from the
 // initial sequence; otherwise every normalized HOLD page is rejected.
-const normalizedHoldReplayResults = run([
+const normalizedHoldReplayResults = await run([
     { p1: { board: empty(), hold: 'T', next: 'IOLJSZ', operation: operationFromEdge(holdReplayEdge0) } },
     { p1: { board: holdReplayBoard1, hold: 'T', next: 'OLJSZ', operation: operationFromEdge(holdReplayEdge1) } }
 ], 21, {
@@ -401,7 +404,7 @@ const emptyHoldReplayBoard1 = addEdge(empty(), emptyHoldReplayEdge0);
 const emptyHoldReplaySearch1 = makeSearch(emptyHoldReplayBoard1, 'O', ['L', 'J', 'S', 'Z'], 'T');
 const emptyHoldReplayEdge1 = firstEdge(emptyHoldReplaySearch1, edge => !edge.hold && edge.placement.type === 'O');
 const legacyEmptyHoldOperation = { ...operationFromEdge(emptyHoldReplayEdge0), holdUsed: false };
-const emptyHoldReplayResults = run([
+const emptyHoldReplayResults = await run([
     { p1: { board: empty(), hold: '', next: 'IOLJSZ', operation: legacyEmptyHoldOperation } },
     { p1: { board: emptyHoldReplayBoard1, hold: 'T', next: 'LJSZ', operation: operationFromEdge(emptyHoldReplayEdge1) } }
 ], 20, {
@@ -423,3 +426,5 @@ console.log(JSON.stringify({
     requestedPlans: { short: shortPlan.aiPlan.length, max: maxPlan.aiPlan.length },
     replay: { operations: replayResults.length, holdOperations: holdReplayResults.length, emptyHoldOperations: emptyHoldReplayResults.length, statuses: replayResults.map(result => result.status) }
 }, null, 2));
+
+})().catch(error => { console.error(error); process.exitCode = 1; });

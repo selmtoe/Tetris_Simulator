@@ -120,12 +120,45 @@ pub(crate) fn seed_deterministic_search(seed: u64) {
 
 #[cfg(target_arch = "wasm32")]
 fn simulator_rng() -> rand::rngs::mock::StepRng {
-    // Match the native deterministic-search branch exactly: the caller's
-    // board-derived seed is the first StepRng value and subsequent calls add
-    // the same Weyl increment. This keeps native confirmation and the WASM
-    // deployment on the same stochastic search path.
     let x = SEARCH_RNG_STATE.fetch_add(0x9E37_79B9_7F4A_7C15, AtomicOrdering::Relaxed);
-    rand::rngs::mock::StepRng::new(x, 0x9E37_79B9_7F4A_7C15)
+    rand::rngs::mock::StepRng::new(mix_search_draw(x), 0x9E37_79B9_7F4A_7C15)
+}
+
+#[cfg(all(test, feature = "deterministic-search"))]
+mod search_draw_tests {
+    use super::*;
+
+    #[test]
+    fn reproducible_draws_cover_successive_branch_pairs() {
+        let sampler = rand::distributions::WeightedIndex::new([1_i64; 16]).unwrap();
+        let sample = || simulator_rng().sample(&sampler);
+        seed_deterministic_search(0xA076_1D64_78BD_642F);
+        let first: Vec<_> = (0..32).map(|_| sample()).collect();
+        seed_deterministic_search(0xA076_1D64_78BD_642F);
+        let second: Vec<_> = (0..32).map(|_| sample()).collect();
+        assert_eq!(first, second);
+        let mut seen = [false; 256];
+        let mut previous = sample();
+        for _ in 0..20_000 {
+            let next = sample();
+            seen[previous * 16 + next] = true;
+            previous = next;
+        }
+        let pairs = seen.iter().filter(|&&value| value).count();
+        assert!(pairs >= 240, "branch draws are correlated: only {}/256 pairs", pairs);
+    }
+}
+
+// Restore the pre-September search draws. Feeding the un-mixed Weyl
+// counter directly to WeightedIndex correlates successive branch choices;
+// a reproducible search still needs to mix each draw, not just its seed.
+#[cfg(any(target_arch = "wasm32", feature = "deterministic-search"))]
+fn mix_search_draw(mut x: u64) -> u64 {
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^ (x >> 31)
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "deterministic-search"))]
@@ -145,7 +178,7 @@ fn simulator_rng() -> rand::rngs::mock::StepRng {
         state.set(current.wrapping_add(0x9E37_79B9_7F4A_7C15));
         current
     });
-    rand::rngs::mock::StepRng::new(x, 0x9E37_79B9_7F4A_7C15)
+    rand::rngs::mock::StepRng::new(mix_search_draw(x), 0x9E37_79B9_7F4A_7C15)
 }
 
 pub struct DagState<E: 'static, R: 'static> {

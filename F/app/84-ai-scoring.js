@@ -727,7 +727,7 @@
             stopButton.hidden = false;
             status.textContent = 'Cold Clear で局面を復元しています…';
 
-            scoreWorker = new Worker('./app/84-ai-scoring-worker.js?v=app-v21');
+            scoreWorker = new Worker('./app/84-ai-scoring-worker.js?v=search-draws-v4');
             scoreWorker.onmessage = event => {
                 const message = event.data || {};
                 if (message.runId !== runId) return;
