@@ -38,6 +38,7 @@
             html[data-lab-video-viewer] #viewer-controls-panel{top:32px;width:calc(100vw - 28px)}
             html[data-lab-video-viewer] #viewer-controls .viewer-top-row .button{padding:5px 8px}
             html[data-lab-video-viewer] #viewer-controls .viewer-slider-container{margin-top:4px}
+            @media(max-width:320px){html[data-lab-video-viewer] #viewer-controls .viewer-top-row{gap:3px}html[data-lab-video-viewer] #viewer-controls .viewer-top-row .button{padding:5px 4px;font-size:11px}}
         `;
         document.head.append(style);
         document.getElementById('viewerCanvas').setAttribute('aria-label', 'P1・P2の盤面。各盤面の左がHOLD、右がNEXTです。');
