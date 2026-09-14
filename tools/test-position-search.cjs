@@ -205,6 +205,17 @@ function replay(initial, result) {
             equal(await view.locator('#ai-score-title').textContent(),'AI分析 （P1のみ）','existing AI scoring opens from Analysis');
             await view.locator('#ai-score-close').tap();
             await view.evaluate(() => {
+                const empty=()=>Array.from({length:40},()=>Array(10).fill(null));
+                const pages=Array.from({length:13},(_,i)=>({p1:{active:'O',next:'OOOOO',hold:'',board:Array.from({length:40},(_,y)=>Array.from({length:10},(_,x)=>y>=16+i*2&&x!==4&&x!==5?'G':null)),operation:i<12?{type:'O',rotation:'spawn',x:4,y:39,coordinateSpace:'simulator'}:null},p2:{board:empty(),next:'',hold:''}}));
+                return TetrisWorkspace.import({v:3,m:'1P',cases:[{name:'Rolling five-NEXT replay',kind:'replay',gameMode:'1P',initial:{p1:{board:pages[0].p1.board,sequence:'O'.repeat(18),hold:''},p2:{board:empty(),sequence:'',hold:''}},pages}]});
+            });
+            equal(await view.evaluate(()=>PositionAnalysis.snapshot('p1','ren').nextQueue.length),17,'viewer gathers all rolling five-NEXT previews');
+            if(await view.locator('#viewer-page-indicator').getAttribute('aria-expanded')!=='true')await view.locator('#viewer-page-indicator').tap();
+            await view.locator('#viewer-analysis-btn').tap();await view.locator('#viewer-ren-search-btn').tap();
+            await view.waitForFunction(()=>document.querySelector('.route-status').textContent.includes('最大 11 REN'));
+            equal(await view.locator('#route-dialog input').getAttribute('max'),'12','rolling replay reaches twelve clearing locks beyond ten');
+            await view.locator('[data-route-close]').tap();
+            await view.evaluate(() => {
                 const board=Array.from({length:40},(_,y)=>Array.from({length:10},(_,x)=>y>=20&&x<6?'G':null));
                 board[39][6]=board[39][7]=board[39][8]='G';
                 return TetrisWorkspace.import({v:3,m:'1P',cases:[{name:'REN',kind:'snapshot',gameMode:'1P',pages:[{p1:{board,next:'TILJSZOTILJSZOTILJSZOTILJSZO',hold:''},p2:{board:Array.from({length:40},()=>Array(10).fill(null)),next:'',hold:''}}]}]});

@@ -4,17 +4,78 @@
     let worker, timer, generation = 0, frames = [], route = [], frameIndex = 0, source, originPage, mode = 'pc';
     let dialog, status, canvas, slider, position, practice, stop, playerSelect;
     const clone = value => JSON.parse(JSON.stringify(value));
-    const pieces = value => String(value || '').toUpperCase().replace(/[^IOTLSJZ]/g, '');
+    const pieces = value => String(value || '').toUpperCase().split('E')[0].replace(/[^IOTLSJZ]/g, '');
 
-    function snapshot(playerId) {
-        const page = fumenPages[currentPageIndex][playerId];
-        let queue = pieces(displayNextForPage(playerId)).split('');
-        let current = operationForPage(page)?.type || page.active || queue.shift();
+    function stateAt(playerId, index) {
+        const page = fumenPages[index][playerId];
+        let queue = pieces(displayNextForPage(playerId, index)).split('');
+        let current = Object.hasOwn(page, 'active') ? pieces(page.active)[0] : operationForPage(page)?.type || queue.shift();
         let hold = page.hold || null;
         if (currentCaseIsReplay()) {
-            const state = replayStateAtPage(currentCase(), playerId, currentPageIndex);
+            const state = replayStateAtPage(currentCase(), playerId, index);
             current = state.current; queue = state.queue; hold = state.hold || null;
         }
+        if (!current && queue.length) current = queue.shift();
+        return {current:current || null, queue:[...queue], hold, operation:operationForPage(page), page};
+    }
+
+    // Join rolling previews using the actual lock/HOLD transitions. Overlap
+    // alone is ambiguous for repeated pieces and merged P1/P2 timeline pages.
+    function extendKnownQueue(initial, following, recordedSequence = '') {
+        const known = [...initial.queue];
+        const sequence = pieces(recordedSequence);
+        const recordedTail = () => {
+            const prefix = known.join(''), start = prefix.length >= 3 ? sequence.indexOf(prefix) : -1;
+            return start >= 0 && sequence.indexOf(prefix, start + 1) < 0 ? sequence.slice(start).split('') : null;
+        };
+        // Legacy replays already store the full remaining queue. Avoid walking
+        // thousands of pages (and repeatedly cloning their long suffixes).
+        const direct = recordedTail();
+        if (direct) return direct;
+        let previous = initial, offset = 0;
+        for (const next of following) {
+            // Merged timelines repeat the player's pending operation while
+            // only the opponent advances. It must not be locked twice.
+            if (previous.page && next.page && previous.current === next.current && previous.hold === next.hold &&
+                previous.queue.join('') === next.queue.join('') &&
+                JSON.stringify(previous.page.board) === JSON.stringify(next.page.board)) {previous = next;continue;}
+            const queue = known.slice(offset), operation = previous.operation;
+            let consumed = 0, current = previous.current, hold = previous.hold || null;
+            if (operation) {
+                if (operation.type !== current) {
+                    if (hold === operation.type) {hold = current;}
+                    else if (!hold && queue[0] === operation.type) {hold = current;consumed++;}
+                    else break;
+                }
+                current = queue[consumed++];
+            } else if (previous.page && next.page && !Object.hasOwn(previous.page, 'active') &&
+                       JSON.stringify(previous.page.board) !== JSON.stringify(next.page.board)) break;
+            const candidates = [{current, hold, consumed}];
+            if (hold) candidates.push({current:hold, hold:current, consumed});
+            else if (queue[consumed]) candidates.push({current:queue[consumed], hold:current, consumed:consumed + 1});
+            const offsets = new Set(candidates.filter(candidate => candidate.current && candidate.current === next.current &&
+                (candidate.hold || null) === (next.hold || null) &&
+                next.queue.every((piece, i) => !queue[candidate.consumed + i] || queue[candidate.consumed + i] === piece))
+                .map(candidate => candidate.consumed));
+            // A gap or contradictory recognition result is not a random bag.
+            if (offsets.size !== 1) break;
+            offset += [...offsets][0];
+            for (let i = Math.max(0, known.length - offset); i < next.queue.length; i++) known.push(next.queue[i]);
+            previous = next;
+        }
+        // Recorded full streams are authoritative, but never choose arbitrarily
+        // between repeated windows. Rolling transitions above disambiguate them.
+        return recordedTail() || known;
+    }
+
+    function snapshot(playerId, kind = mode) {
+        const page = fumenPages[currentPageIndex][playerId], state = stateAt(playerId, currentPageIndex);
+        let queue = state.queue;
+        if (kind === 'ren') {
+            function* following() {for (let i = currentPageIndex + 1; i < fumenPages.length; i++) yield stateAt(playerId, i);}
+            queue = extendKnownQueue(state, following(), currentCase()?.initial?.[playerId]?.sequence);
+        }
+        const current = state.current, hold = state.hold;
         return { board: clone(page.board), currentPiece: current, nextQueue: [...queue], holdPiece: hold,
             canHold: true, ren: Number.isInteger(page.ren) ? page.ren : -1 };
     }
@@ -74,7 +135,7 @@
         status.textContent = `${mode === 'pc' ? 'PC' : 'REN'}探索中… · 現在ミノ＋NEXT ${source.nextQueue.length}個`;
         stop.hidden = false;
         const id = generation;
-        worker = new Worker('../simulator/workers/route-search-worker.js?v=search-v1');
+        worker = new Worker('../simulator/workers/route-search-worker.js?v=ren-known-queue-v2');
         worker.onmessage = event => {
             if (generation !== id) return;
             if (fumenPages[currentPageIndex] !== originPage) { cancel(); dialog.close(); return; }
@@ -87,7 +148,7 @@
                     slider.max = route.length; slider.disabled = false;
                     frameIndex = Math.min(frameIndex, route.length); draw();
                     status.textContent = mode === 'ren'
-                        ? `${data.complete ? '最大' : '探索中 · 暫定'} ${data.ren} REN（${route.length}回連続消去）`
+                        ? `${data.complete ? '最大' : '探索中 · 暫定'} ${data.ren} REN（${route.length}回連続消去 · 既知NEXT ${source.nextQueue.length}個）`
                         : `${data.lines}ラインPC · ${route.length}手`;
                 } catch (error) { cancel(); status.textContent = error.message; }
             } else if (data.type === 'progress') status.textContent = 'REN探索中…';
@@ -137,5 +198,5 @@
         document.getElementById('viewer-pc-search-btn').onclick = () => open('pc');
         document.getElementById('viewer-ren-search-btn').onclick = () => open('ren');
     });
-    window.PositionAnalysis = { snapshot, routeFrames };
+    window.PositionAnalysis = { snapshot, routeFrames, extendKnownQueue };
 })();

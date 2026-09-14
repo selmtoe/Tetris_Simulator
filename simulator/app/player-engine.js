@@ -1603,16 +1603,13 @@ const path = this.findShortestPath_forAI(startState, targetState, minoType, path
             0
         );
         const reportedControllerMs = Number(move.controllerMs);
-        const reportedControllerInputs = Number(move.controllerInputs);
         const predictedControllerMs = Number.isFinite(reportedControllerMs) && reportedControllerMs > 0
             ? reportedControllerMs
-            : Number.isFinite(reportedControllerInputs) && reportedControllerInputs >= 1
-                ? Math.floor(reportedControllerInputs) * moveDelayMs
-                : actualControllerMs;
-        // Keep every production operation at its real input/SDF duration. Only
-        // the pre-operation tactical hold is corrected, so the final lock stays
-        // at the timestamp evaluated by Rust even if its path representation
-        // and the browser BFS contain different numbers of descent steps.
+            : actualControllerMs;
+        // Cold Clear reports a count, not a duration: its count cannot price
+        // soft drops at the user's separate SDF rate. Execute the real browser
+        // path without adding a fictional wait. Explicit millisecond forecasts
+        // can still account for a tactical wait when a worker supplies one.
         const tacticalWaitMs = Math.max(
             0,
             Math.max(0, Number(move.waitMs) || 0) + predictedControllerMs - actualControllerMs
