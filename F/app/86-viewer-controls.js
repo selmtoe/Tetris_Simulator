@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let leaveTimer;
 
     function open() {
+        if (document.documentElement.dataset.labVideoViewer === 'true') return;
         clearTimeout(leaveTimer);
         controls.classList.add('is-expanded');
         panel.inert = false;
@@ -70,6 +71,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     function updatePresentation() {
         layoutFrame = 0;
+        if (document.documentElement.dataset.labVideoViewer === 'true') {
+            persistent = false;
+            close(true);
+            controls.dataset.presentation = 'page-only';
+            trigger.disabled = true;
+            trigger.title = 'リプレイのページ';
+            return;
+        }
         if (!canvas.offsetWidth || !viewer.offsetWidth || !controls.offsetWidth) return;
         const board = canvas.getBoundingClientRect();
         const anchor = controls.getBoundingClientRect();
@@ -82,7 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // breathing room. Do not shrink or shift the board to make the menu fit.
         const overlaps = left < board.right + 8 && left + width > board.left - 8 &&
             anchor.top < board.bottom + 8 && bottom > board.top - 8;
-        const next = document.documentElement.dataset.labVideoViewer === 'true' || !overlaps && bottom + 8 <= innerHeight;
+        const next = !overlaps && bottom + 8 <= innerHeight;
         const changed = controls.dataset.presentation !== (next ? 'persistent' : 'compact');
         persistent = next;
         controls.dataset.presentation = next ? 'persistent' : 'compact';

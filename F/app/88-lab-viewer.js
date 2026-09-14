@@ -32,10 +32,10 @@
         style.textContent = `
             html[data-lab-video-viewer] #back-to-editor-btn,html[data-lab-video-viewer] .lab-settings-open{display:none!important}
             html[data-lab-video-viewer] #viewer-container{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
-            html[data-lab-video-viewer] #viewer-container #viewer-controls{top:2px;--viewer-menu-height:108px}
-            html[data-lab-video-viewer] #viewer-controls .viewer-controls-shell{width:calc(100vw - 12px);height:108px;border-radius:12px;box-shadow:none;transition:none}
+            html[data-lab-video-viewer] #viewer-container #viewer-controls{top:2px;--viewer-menu-height:30px}
+            html[data-lab-video-viewer] #viewer-controls .viewer-controls-shell{width:150px;height:30px;border-radius:12px;box-shadow:none;transition:none}
             html[data-lab-video-viewer] #viewer-controls #viewer-page-indicator{height:30px;line-height:30px}
-            html[data-lab-video-viewer] #viewer-controls-panel{top:32px;width:calc(100vw - 28px)}
+            html[data-lab-video-viewer] #viewer-controls-panel{display:none!important}
             html[data-lab-video-viewer] #viewer-controls .viewer-top-row .button{padding:5px 8px}
             html[data-lab-video-viewer] #viewer-controls .viewer-slider-container{margin-top:4px}
             @media(max-width:320px){html[data-lab-video-viewer] #viewer-controls .viewer-top-row{gap:3px}html[data-lab-video-viewer] #viewer-controls .viewer-top-row .button{padding:5px 4px;font-size:11px}}
