@@ -214,25 +214,61 @@ function openShareModal() {
     document.getElementById('advanced-link-options').style.display = 'block';
     document.getElementById('share-modal').style.display = 'flex';
 }
+function gamepadIndexForBinding(binding, defaultIndex) {
+    if (!binding || !['pad_button', 'pad_axis'].includes(binding.type)) return null;
+    // Older profiles kept the device number only in the displayed label.
+    const legacy = /^Pad(\d+)-/.exec(binding.label || '');
+    const preferred = Number.isInteger(binding.padIndex) ? binding.padIndex : legacy ? Number(legacy[1]) : defaultIndex;
+    const connected = Object.keys(gamepads).map(Number);
+    if (binding.padId) {
+        if (gamepads[preferred]?.id === binding.padId) return preferred;
+        return connected.find(index => gamepads[index].id === binding.padId) ?? null;
+    }
+    if (gamepads[preferred]) return preferred;
+    // Reconnection can change an index. A single connected pad is unambiguous
+    // for old profiles; newly registered bindings also remember the device ID.
+    return connected.length === 1 ? connected[0] : null;
+}
+
+function gamepadBindingPressed(binding, pad) {
+    if (!pad || !binding) return false;
+    if (binding.type === 'pad_button') return !!pad.buttons[binding.value];
+    if (binding.type === 'pad_axis') {
+        const axis = /^(\d+)([+-])$/.exec(String(binding.value));
+        if (!axis) return false;
+        const value = pad.axes[Number(axis[1])] || 0;
+        return axis[2] === '+' ? value > AXIS_THRESHOLD : value < -AXIS_THRESHOLD;
+    }
+    return false;
+}
+
+function playerInputSuspended() {
+    return isBindingKey || ['settings-modal', 'share-modal', 'rule-modal', 'analysis-modal', 'ai-model-modal']
+        .some(id => document.getElementById(id)?.getClientRects().length);
+}
+
+let bindingGamepadBaseline = false;
 function pollGamepads() {
-    const rawPads = navigator.getGamepads();
-    if (!rawPads) return;
-
-    for (let i = 0; i < rawPads.length; i++) {
-        const pad = rawPads[i];
-        if (!pad) {
-            delete gamepads[i];
-            delete prevGamepads[i];
-            continue;
+    let rawPads;
+    try { rawPads = navigator.getGamepads?.() || []; }
+    catch { gamepads = {}; prevGamepads = {}; return; }
+    const previous = gamepads;
+    gamepads = {};
+    for (const pad of rawPads) {
+        if (pad && pad.connected !== false) gamepads[pad.index] = {
+            id: pad.id, buttons: Array.from(pad.buttons, b => b.pressed), axes: Array.from(pad.axes)
         };
+    }
+    prevGamepads = previous;
+    if (bindingGamepadBaseline) { bindingGamepadBaseline = false; return; }
 
-        gamepads[i] = { buttons: pad.buttons.map(b => b.pressed), axes: [...pad.axes] };
-
+    for (const rawIndex of Object.keys(gamepads)) {
+        const i = Number(rawIndex), pad = gamepads[i];
         if (isBindingKey) {
             if (prevGamepads[i]) {
                 for (let j = 0; j < pad.buttons.length; j++) {
                     if (gamepads[i].buttons[j] && !prevGamepads[i].buttons[j]) {
-                        bindKey({ type: 'pad_button', value: j, label: `Pad${i}-Btn${j}` });
+                        bindKey({ type: 'pad_button', value: j, padIndex: i, padId: pad.id, label: `Pad${i}-Btn${j}` });
                         return;
                     }
                 }
@@ -240,38 +276,23 @@ function pollGamepads() {
                     const val = gamepads[i].axes[j], prevVal = prevGamepads[i].axes[j];
                     if (Math.abs(val) > AXIS_THRESHOLD && Math.abs(prevVal) < AXIS_THRESHOLD) {
                         const dir = val > 0 ? '+' : '-';
-                        bindKey({ type: 'pad_axis', value: `${j}${dir}`, label: `Pad${i}-Axis${j}${dir}` });
+                        bindKey({ type: 'pad_axis', value: `${j}${dir}`, padIndex: i, padId: pad.id, label: `Pad${i}-Axis${j}${dir}` });
                         return;
                     }
                 }
             }
-        } else if (gameState === 'PLAYING') {
+        } else if (gameState === 'PLAYING' && !playerInputSuspended()) {
              players.forEach(p => {
-                if(p.padIndex === i) {
+                if (!p.isAi) {
                     Object.keys(p.keyBindings).forEach(action => {
                         const binding = p.keyBindings[action];
-                        if (binding.type === 'pad_button' && gamepads[i].buttons[binding.value] && !prevGamepads[i]?.buttons[binding.value]) {
-                           p.handlePress(action);
-                        } 
-                        else if (binding.type === 'pad_axis') {
-                            const [axis, dir] = [parseInt(binding.value[0]), binding.value[1]];
-                            const val = gamepads[i].axes[axis];
-                            const prevVal = prevGamepads[i] ? prevGamepads[i].axes[axis] : 0;
-                            const threshold = AXIS_THRESHOLD;
-                            if (dir === '+' && val > threshold && prevVal < threshold) {
-                                p.handlePress(action);
-                            } else if (dir === '-' && val < -threshold && prevVal > -threshold) {
-                                p.handlePress(action);
-                            }
-                        }
+                        if (gamepadIndexForBinding(binding, p.padIndex) === i &&
+                            gamepadBindingPressed(binding, pad) && !gamepadBindingPressed(binding, prevGamepads[i])) p.handlePress(action);
                     });
                 }
             });
         }
     }
-    Object.keys(gamepads).forEach(i => {
-        prevGamepads[i] = { buttons: [...gamepads[i].buttons], axes: [...gamepads[i].axes] };
-    });
 }
 
 

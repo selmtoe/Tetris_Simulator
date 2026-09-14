@@ -186,17 +186,12 @@ this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
     }
 
     isActionPressed(action) {
+        if (playerInputSuspended()) return false;
         const binding = this.keyBindings[action];
         if (binding?.type === 'key' && this.keys[binding.value]) return true;
+        if (binding?.type === 'key' && binding.code && this.keys['code:' + binding.code]) return true;
         
-        if (this.padIndex !== null && gamepads[this.padIndex]) {
-            if (binding?.type === 'pad_button' && gamepads[this.padIndex].buttons[binding.value]) return true;
-            if (binding?.type === 'pad_axis') {
-                const [axis, dir] = [parseInt(binding.value[0]), binding.value[1]];
-                const axisValue = gamepads[this.padIndex].axes[axis];
-                if ((dir === '+' && axisValue > AXIS_THRESHOLD) || (dir === '-' && axisValue < -AXIS_THRESHOLD)) return true;
-            }
-        }
+        if (gamepadBindingPressed(binding, gamepads[gamepadIndexForBinding(binding, this.padIndex)])) return true;
         
 
         if (this.id === '1' && gameSettings.touchControlsEnabled && gameSettings.touchControlType === 'button') {

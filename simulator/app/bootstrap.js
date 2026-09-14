@@ -872,19 +872,27 @@ e.preventDefault();
     document.getElementById('vc-copy-layout-btn').addEventListener('click', virtualController.copyLayoutsToClipboard);
     document.getElementById('vc-paste-layout-btn').addEventListener('click', virtualController.importLayoutsFromClipboard);
 
+    // Capture before focused menu controls consume Space/Enter/arrow keys.
     document.addEventListener('keydown', e => {
-        if (isBindingKey) {
-            e.preventDefault();
-            let keyLabel = e.key;
-            if (keyLabel === ' ') keyLabel = 'Space';
-            bindKey({ type: 'key', value: e.key.toLowerCase(), label: keyLabel });
-        } 
-        else if (gameState === 'PLAYING') {
+        if (!isBindingKey) return;
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (e.repeat) return;
+        const ime = e.isComposing || ['Process', 'Unidentified'].includes(e.key);
+        const physical = e.code?.replace(/^(Key|Digit)/, '');
+        if (ime && (!physical || e.code === 'Unidentified')) return;
+        const label = ime ? physical : e.key === ' ' ? 'Space' : e.key;
+        bindKey({ type: 'key', value: (ime ? physical : e.key).toLowerCase(), label, ...(ime ? { code: e.code } : {}) });
+    }, true);
+    document.addEventListener('keydown', e => {
+        if (gameState === 'PLAYING' && !playerInputSuspended()) {
             players.forEach(p => {
+                if (p.isAi) return;
                 p.keys[e.key.toLowerCase()] = true;
+                p.keys['code:' + e.code] = true;
                 Object.keys(p.keyBindings).forEach(action => {
                     const binding = p.keyBindings[action];
-                    if (binding.type === 'key' && binding.value === e.key.toLowerCase()) {
+                    if (binding?.type === 'key' && (binding.value === e.key.toLowerCase() || binding.code && binding.code === e.code)) {
+                        e.preventDefault();
                         p.handlePress(action);
                     }
                 });
@@ -892,10 +900,8 @@ e.preventDefault();
         }
     });
     document.addEventListener('keyup', e => {
-        if (gameState === 'PLAYING') {
-            players.forEach(p => p.keys[e.key.toLowerCase()] = false );
-        }
-    });
+        players.forEach(p => { p.keys[e.key.toLowerCase()] = false; p.keys['code:' + e.code] = false; });
+    }, true);
 
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js')

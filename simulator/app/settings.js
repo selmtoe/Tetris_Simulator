@@ -4,6 +4,8 @@ function bindKey(binding) {
     if (!isBindingKey || !bindingPlayer || !bindingAction) return;
     
     keyBindings[bindingPlayer][bindingAction] = binding;
+    try { localStorage.setItem('tetrisKeyBindings', JSON.stringify(keyBindings)); }
+    catch (error) { console.error('Failed to save key binding:', error); }
     isBindingKey = false;
     bindingAction = null;
     const tabToReopen = bindingPlayer === 'p1' ? 'p1-keys' : 'p2-keys';
@@ -204,6 +206,9 @@ function populateKeyConfigTab(playerId) {
         btn.textContent = keyBindings[playerId][action].label;
         btn.onclick = () => {
             isBindingKey = true; bindingPlayer = playerId; bindingAction = action;
+            bindingGamepadBaseline = true;
+            players.forEach(player => { player.keys = {}; });
+            btn.focus();
             btn.textContent = 
 '入力待機中...';
             list.querySelectorAll('button').forEach(b => { if (b !== btn) b.disabled = true; });
