@@ -51,6 +51,7 @@
     let mode = 'light';
     try { if (localStorage.getItem(key) === 'dark') mode = 'dark'; } catch (_) { /* Private storage may be unavailable. */ }
     const appearance = window.LabAppearance = { colors: palettes[mode], drawMeter, drawPlacement };
+    appearance.setTheme = next => applyTheme(next);
     root.dataset.labTheme = mode;
 
     function applyTheme(next, save = false) {
@@ -128,6 +129,7 @@
         function set(name, value, target = main) { if (target.style.getPropertyValue(name) !== value) target.style.setProperty(name, value); }
         function fit() {
             frame = 0;
+            if (root.dataset.labVideoViewer === 'true') return;
             if (!editor.offsetWidth) {
                 if (viewer?.offsetWidth && viewerCanvas.width && viewerCanvas.height) {
                     root.dataset.labViewerFit = 'true';

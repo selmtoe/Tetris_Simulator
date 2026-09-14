@@ -82,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // breathing room. Do not shrink or shift the board to make the menu fit.
         const overlaps = left < board.right + 8 && left + width > board.left - 8 &&
             anchor.top < board.bottom + 8 && bottom > board.top - 8;
-        const next = !overlaps && bottom + 8 <= innerHeight;
+        const next = document.documentElement.dataset.labVideoViewer === 'true' || !overlaps && bottom + 8 <= innerHeight;
         const changed = controls.dataset.presentation !== (next ? 'persistent' : 'compact');
         persistent = next;
         controls.dataset.presentation = next ? 'persistent' : 'compact';
