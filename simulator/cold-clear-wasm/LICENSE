@@ -1,18 +1,3 @@
-Licensing scope
-===============
-Cold Clear by MinusKelvin and contributors is used in this project, including
-its Rust search, evaluation, board and opening-book code and modifications in
-third_party/cold-clear-reference/. That code, the integration source in
-simulator/cold-clear-wasm/, and the JavaScript port
-simulator/workers/cold-clear-core.js are provided under MPL-2.0 below.
-This also applies to Cold Clear covered code used by local KASANE/Lab tools.
-
-sfinder-cpp by knewjade is separately licensed under MIT; its full copyright
-and permission notice is in third_party/sfinder-cpp-master/LICENSE and
-licenses/sfinder-MIT.txt. See THIRD_PARTY_NOTICES.md for attribution, source
-access and distribution details. This scope notice does not place unrelated
-project files under MPL-2.0 or change the licenses of other dependencies.
-
 Mozilla Public License Version 2.0
 ==================================
 

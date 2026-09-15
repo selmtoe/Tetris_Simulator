@@ -37,14 +37,14 @@ tools/serve.ps1         依存なしのローカル静的サーバー
 
 ## Credits
 
-This project uses AI parameters from [Cold Clear](https://github.com/MinusKelvin/cold-clear) by MinusKelvin, provided under the terms of the [Mozilla Public License 2.0](https://www.mozilla.org/MPL/2.0/). The AI parameter portion follows MPL 2.0.
+This project uses [Cold Clear](https://github.com/MinusKelvin/cold-clear) by MinusKelvin and contributors under MPL-2.0, including modified Rust search, evaluation and board code, the Rust integration, and a JavaScript port. PC search uses [sfinder-cpp](https://github.com/knewjade/sfinder-cpp) by knewjade under MIT. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the public [license/source page](licenses/index.html) for the full notices, covered files and source downloads.
 
 ## Cold Clear implementation
 
-The simulator's AI is a simulator-owned JavaScript port of Cold Clear's
-normal/Standard mode, not a copy of the supplied Rust files. It keeps a
-long-lived search DAG between moves and uses the reference SRS, hold, 7-bag,
-Standard evaluation, and state-reuse design. See
+The simulator's active AI and viewer analysis compile the modified Cold Clear
+normal/Standard Rust core into WASM. The separate MPL-2.0 JavaScript port is
+also used by REN search and regression comparisons. Both include source
+access and attribution in the public distribution. See
 [simulator/COLD_CLEAR_PORT.md](simulator/COLD_CLEAR_PORT.md) for the source
 mapping, scope, licensing note, and test command.
 

@@ -65,3 +65,7 @@ if (-not (Test-Path -LiteralPath $outputJs) -or -not (Test-Path -LiteralPath $ou
 
 Write-Host "Built $outputJs"
 Write-Host "Built $outputWasm"
+
+# Keep the corresponding source and notices with every executable build.
+& python (Join-Path $root 'tools\package-ai-licenses.py') --component sfinder --emscripten-root (Split-Path -Parent $Empp)
+if ($LASTEXITCODE -ne 0) { throw 'License/source packaging failed.' }

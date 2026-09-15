@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const workerRoot = path.join(__dirname, '../simulator/workers');
 const context = vm.createContext({performance, console, setTimeout, TextEncoder, Uint16Array, Int8Array, Uint8Array});
 context.self = context;
-context.importScripts = (...files) => files.forEach(file => vm.runInContext(fs.readFileSync(path.join(workerRoot,file),'utf8'),context));
+context.importScripts = (...files) => files.forEach(file => vm.runInContext(fs.readFileSync(path.join(workerRoot,file.split('?')[0]),'utf8'),context));
 context.importScripts('route-search-worker.js');
 const {Board,findMoves} = context.ColdClearSimulatorCore;
 const solve = data => { context.input=data; return vm.runInContext('(() => { const iterator=renSearch(routeSnapshot(input)); let step; do { step=iterator.next(); } while (!step.done); return step.value; })()',context); };

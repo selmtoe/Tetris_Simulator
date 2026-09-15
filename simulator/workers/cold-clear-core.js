@@ -1,6 +1,11 @@
 /*
  * Cold Clear standard-mode port for this simulator.
  * SPDX-License-Identifier: MPL-2.0
+ * Based on Cold Clear by MinusKelvin and contributors.
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ * License and source access: ../../licenses/index.html
  *
  * This file is an independent JavaScript implementation.  It does not import,
  * modify, or bundle the reference archive.  Its data model and algorithms are

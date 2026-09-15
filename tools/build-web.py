@@ -14,6 +14,9 @@ from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlsplit, urlun
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('web_appearance', ROOT / 'tools/tetris-lab/preview_appearance.py')
+license_spec = importlib.util.spec_from_file_location('ai_licenses', ROOT / 'tools/package-ai-licenses.py')
+ai_licenses = importlib.util.module_from_spec(license_spec)
+license_spec.loader.exec_module(ai_licenses)
 appearance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(appearance)
 
@@ -97,6 +100,7 @@ def version_assets(output):
 
 
 def build(output):
+    ai_licenses.validate(ROOT)
     output = output.resolve()
     # Refuse to clean any directory other than this dedicated generated tree.
     expected = (ROOT / 'dist/pages').resolve()
@@ -106,7 +110,7 @@ def build(output):
     if output.exists():
         shutil.rmtree(output)
     output.mkdir(parents=True)
-    paths = set(FILES)
+    paths = set(FILES) | set(ai_licenses.LICENSE_FILES)
     for directory in DIRECTORIES:
         paths.update(path.relative_to(ROOT).as_posix() for path in (ROOT / directory).rglob('*')
                      if path.is_file() and path.suffix in EXTENSIONS)
@@ -138,6 +142,7 @@ def build(output):
             shutil.copyfile(source, destination)
     for source, target in [('preview-theme.css', 'appearance.css'), ('preview-appearance.js', 'appearance.js')]:
         shutil.copyfile(ROOT / 'tools/tetris-lab' / source, output / 'shared' / target)
+    ai_licenses.validate(output)
     version_assets(output)
     (output / '.nojekyll').write_text('', encoding='utf-8')
     manifest = {path.relative_to(output).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()

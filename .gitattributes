@@ -1,0 +1,8 @@
+# The source manifests identify exact distributed bytes on Windows and Pages.
+simulator/pc-solver/sfinder-pc.js text eol=lf
+licenses/*.txt text eol=lf
+licenses/*.json text eol=lf
+licenses/*.zip binary
+simulator/workers/*.wasm binary
+# Preserve original upstream notice formatting, including trailing whitespace.
+licenses/**/*.txt -whitespace

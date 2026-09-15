@@ -1,3 +1,7 @@
+/* Cold Clear by MinusKelvin and contributors; Rust/WASM covered code: MPL-2.0.
+ * Full license and corresponding modified source: ../../licenses/index.html
+ * Direct source download: ../../licenses/cold-clear-source.zip
+ */
 /* Raw WASM bridge for the reference Cold Clear Standard bot. */
 
 'use strict';

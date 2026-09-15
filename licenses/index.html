@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ライセンス・ソースコード</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 780px; margin: 0 auto; padding: 32px 20px; line-height: 1.8; }
+    h1 { font-size: 1.7rem; } h2 { margin-top: 2rem; font-size: 1.25rem; }
+    a { color: light-dark(#175bb4, #92bfff); } code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ライセンス・ソースコード</h1>
+    <p>シミュレータとビューワーの探索・AI分析には、以下のソフトウェアを使用しています。ライセンス本文と改変を含むソースコードを無償で取得できます。</p>
+    <h2>sfinder-cpp — PC探索</h2>
+    <p><a href="https://github.com/knewjade/sfinder-cpp">knewjade / sfinder-cpp</a> のC++探索コアを、ブラウザ用のWASMとして使用しています。Copyright (c) 2019 knewjade。MIT Licenseに従って配布しています。</p>
+    <ul>
+      <li><a href="./sfinder-MIT.txt">MIT License全文・著作権表示</a></li>
+      <li><a href="./sfinder-dependencies.txt">Emscripten・ランタイムのライセンス全文</a></li>
+      <li><a href="./sfinder-source.zip" download>ソースコードとビルド手順（ZIP）</a></li>
+      <li><a href="./sfinder-build.json">配布ファイルとソースZIPのSHA-256</a></li>
+    </ul>
+    <h2>Cold Clear — AI対戦・探索・分析</h2>
+    <p><a href="https://github.com/MinusKelvin/cold-clear">MinusKelvin / Cold Clear</a> とその貢献者によるRustの探索・評価・盤面処理を、変更を加えてWASMとして使用しています。参照ソース、変更箇所、Rustの接続部分はMozilla Public License 2.0（MPL-2.0）で提供します。</p>
+    <p>REN探索などで使うJavaScript移植版もMPL-2.0です。JavaScriptは配信ファイル自体が編集可能なソースです。</p>
+    <ul>
+      <li><a href="./cold-clear-MPL-2.0.txt">MPL-2.0全文</a></li>
+      <li><a href="./cold-clear-dependencies.txt">Rust依存ライブラリのライセンス全文</a></li>
+      <li><a href="./cold-clear-source.zip" download>配布WASMのソースコード・変更内容・ビルド手順（ZIP）</a></li>
+      <li><a href="../simulator/workers/cold-clear-core.js">現在のJavaScript移植版ソース</a></li>
+      <li><a href="./cold-clear-build.json">配布WASMとソースZIPのSHA-256</a></li>
+    </ul>
+    <p>ソースZIPはバイナリのビルド時に保存しています。リポジトリの開発中のソースとは異なる場合があります。ZIP内の各ビルドスクリプトを使って変更・再ビルドできます。Rust版にはCargo.lockを同梱しています。</p>
+    <p>MPLの対象となるソースコードに対する権利に、追加の制限は設けません。各ソフトウェアはそれぞれのライセンスに記載された無保証の条件で提供されます。</p>
+    <p><a href="../THIRD_PARTY_NOTICES.md">利用範囲と第三者表記</a> · <a href="https://github.com/selmtoe/Tetris_Simulator">プロジェクトのソースリポジトリ</a> · <a href="../hub/">ツールを開く</a></p>
+  </main>
+</body>
+</html>

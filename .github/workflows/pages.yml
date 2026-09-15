@@ -30,6 +30,11 @@ jobs:
       - name: Build public web tools
         run: python3 tools/build-web.py
 
+      - name: Verify licenses and public artifact
+        run: |
+          python3 tools/test-ai-licenses.py
+          python3 tools/test-web-build.py
+
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
