@@ -80,6 +80,38 @@
         return row;
     }
 
+    function licenseNotice() {
+        const notice = document.createElement('p');
+        notice.className = 'license-notice';
+        const link = document.createElement('a');
+        link.href = 'https://github.com/selmtoe/Tetris_Simulator/blob/main/THIRD_PARTY_NOTICES.md';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'ライセンス';
+        notice.append(link);
+        return notice;
+    }
+
+    // Chromium supplies cutout insets to the top-level frame only. Intersect
+    // them with this same-origin pane so a split view never adds them twice.
+    function safeArea() {
+        let owner = window, rect = {left: 0, top: 0, right: innerWidth, bottom: innerHeight};
+        try {
+            if (window.frameElement && parent.document.querySelector('#workspace-panes')) {
+                owner = parent;
+                rect = window.frameElement.getBoundingClientRect();
+            }
+        } catch (_) { /* Cross-origin embeds use their own viewport. */ }
+        const style = owner.getComputedStyle(owner.document.documentElement);
+        const inset = side => parseFloat(style.getPropertyValue('--viewport-safe-' + side)) || 0;
+        return {
+            top: Math.max(0, inset('top') - rect.top),
+            left: Math.max(0, inset('left') - rect.left),
+            right: Math.max(0, rect.right - (owner.innerWidth - inset('right'))),
+            bottom: Math.max(0, rect.bottom - (owner.innerHeight - inset('bottom')))
+        };
+    }
+
     function start() {
         const general = document.querySelector('#tab-content-general');
         if (general) {
@@ -100,7 +132,7 @@
             close.textContent = '閉じる';
             close.addEventListener('click', () => dialog.close());
             footer.append(close);
-            dialog.append(footer);
+            dialog.append(footer, licenseNotice());
             document.body.append(dialog);
             let opener;
             dialog.addEventListener('close', () => opener?.focus({ preventScroll: true }));
@@ -130,28 +162,32 @@
         function fit() {
             frame = 0;
             if (root.dataset.labVideoViewer === 'true') return;
+            const safe = safeArea();
+            for (const side of ['top', 'right', 'bottom', 'left']) set('--app-safe-' + side, safe[side] + 'px', root);
+            const availableWidth = Math.max(1, innerWidth - safe.left - safe.right);
+            const availableHeight = Math.max(1, innerHeight - safe.top - safe.bottom);
             if (!editor.offsetWidth) {
                 if (viewer?.offsetWidth && viewerCanvas.width && viewerCanvas.height) {
                     root.dataset.labViewerFit = 'true';
                     const top = viewerControls.getBoundingClientRect().bottom + 12;
-                    const height = Math.max(1, innerHeight - top - 10);
-                    const width = Math.min(Math.max(1, innerWidth - 20), height * viewerCanvas.width / viewerCanvas.height);
+                    const height = Math.max(1, innerHeight - safe.bottom - top - 10);
+                    const width = Math.min(Math.max(1, availableWidth - 20), height * viewerCanvas.width / viewerCanvas.height);
                     set('--lab-viewer-center', (top + height / 2) + 'px', root);
                     set('--lab-viewer-width', width + 'px', root);
                 } else delete root.dataset.labViewerFit;
                 if (gameControls?.offsetWidth && document.querySelector('#game-container')?.offsetWidth) {
                     root.dataset.labPlayFit = 'true';
                     const top = gameControls.getBoundingClientRect().bottom + 12;
-                    const height = Math.max(1, innerHeight - top - 10);
+                    const height = Math.max(1, innerHeight - safe.bottom - top - 10);
                     set('--lab-game-center', (top + height / 2) + 'px');
-                    set('--lab-game-scale', String(editorFit(Math.max(1, innerWidth - 20), height, main.offsetWidth, main.offsetHeight)));
+                    set('--lab-game-scale', String(editorFit(Math.max(1, availableWidth - 20), height, main.offsetWidth, main.offsetHeight)));
                 } else delete root.dataset.labPlayFit;
                 return;
             }
             delete root.dataset.labPlayFit;
             delete root.dataset.labViewerFit;
             const columns = [...editor.querySelectorAll('.editor-column')].filter(column => column.offsetWidth);
-            const viewWidth = Math.max(1, innerWidth - 20), viewHeight = Math.max(1, innerHeight - 20);
+            const viewWidth = Math.max(1, availableWidth - 20), viewHeight = Math.max(1, availableHeight - 20);
             const minWidth = columns.length > 1 ? 720 : (document.querySelector('#case-selector') ? 720 : 440);
             const previousWidth = columns.length > 1 || document.querySelector('#case-selector') ? 1160 : 720;
             const layoutWidth = Math.max(minWidth, Math.min(previousWidth, viewWidth));
@@ -175,6 +211,10 @@
             new MutationObserver(schedule).observe(viewerCanvas, { attributes: true, attributeFilter: ['width', 'height'] });
         }
         window.addEventListener('resize', schedule);
+        window.visualViewport?.addEventListener('resize', schedule);
+        window.addEventListener('pageshow', schedule);
+        screen.orientation?.addEventListener('change', schedule);
+        try { if (parent !== window) parent.visualViewport?.addEventListener('resize', schedule); } catch (_) { /* Cross-origin embed. */ }
         document.fonts?.ready.then(schedule);
         schedule();
     }

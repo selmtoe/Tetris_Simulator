@@ -381,3 +381,6 @@
     font-size: 12px !important;
     text-align: right;
 }
+
+.license-notice { margin: 14px 0 0; text-align: center; font-size: 12px; }
+.license-notice a { color: inherit; text-underline-offset: 3px; }

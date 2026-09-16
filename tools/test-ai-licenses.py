@@ -59,10 +59,14 @@ class LicenseDistribution(unittest.TestCase):
             self.assertTrue(resolved.startswith('/Tetris_Simulator/'))
             self.assertTrue((output / resolved.removeprefix('/Tetris_Simulator/')).is_file()
                             or (output / resolved.removeprefix('/Tetris_Simulator/') / 'index.html').is_file(), href)
-        for page, href in [('index.html', './licenses/index.html'), ('F/index.html', '../licenses/index.html')]:
-            links = Links()
-            links.feed((output / page).read_text(encoding='utf-8'))
-            self.assertIn(href, links.links)
+        github = 'https://github.com/selmtoe/Tetris_Simulator/blob/main/THIRD_PARTY_NOTICES.md'
+        links = Links()
+        links.feed((output / 'index.html').read_text(encoding='utf-8'))
+        self.assertIn(github, links.links)
+        self.assertIn(github, (output / 'shared/appearance.js').read_text(encoding='utf-8'))
+        for page in ('index.html', 'F/index.html'):
+            self.assertNotIn('href="./licenses/index.html"', (output / page).read_text(encoding='utf-8'))
+            self.assertNotIn('href="../licenses/index.html"', (output / page).read_text(encoding='utf-8'))
 
     def test_missing_notice_and_stale_binary_block_distribution(self):
         with tempfile.TemporaryDirectory() as directory:

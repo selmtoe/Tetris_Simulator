@@ -51,7 +51,9 @@ preserved when redistributing covered source or its modifications.
 
 The public [license page](licenses/index.html) links to the license texts and
 source packages on the same site. The simulator and viewer link to that page
-from their Share dialogs, also available when embedded in Hub or Lab.
+from the bottom of their Settings dialogs, also available when embedded in Hub
+or Lab. The Settings link opens this document directly on GitHub. The bundled
+license page remains available for existing source and executable notices.
 
 `licenses/*-build.json` records hashes of each binary and its build-time source
 ZIP. The ZIP is authoritative for that binary; the development checkout may

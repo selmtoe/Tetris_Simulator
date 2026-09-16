@@ -1,11 +1,11 @@
 /* Only the surrounding workspace. Native simulator/viewer styles are retained. */
-html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+html, body { width: 100%; height: 100%; height: 100dvh; margin: 0; padding: 0; overflow: hidden; }
 body { display: flex; flex-direction: column; background: var(--bg-color); color: var(--font-color); font-family: var(--font-ui); font-size: 14px; }
 [hidden] { display: none !important; }
 button, input { font: inherit; }
 button { padding: 5px 12px; cursor: pointer; }
 button:focus-visible, input:focus-visible, #workspace-divider:focus-visible { outline: 2px solid var(--lab-accent); outline-offset: 2px; }
-#workspace-panes { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
+#workspace-panes { position: fixed; inset: 0; display: flex; min-width: 0; min-height: 0; }
 .workspace-pane { flex: 0 0 100%; min-width: 0; min-height: 0; overflow: hidden; }
 .workspace-pane iframe { width: 100%; height: 100%; display: block; border: 0; }
 
