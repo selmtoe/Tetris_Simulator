@@ -92,6 +92,64 @@
         return notice;
     }
 
+    function fullscreenSetting() {
+        // Fullscreen the entire Hub so its other panes remain available.
+        let owner = window;
+        try {
+            if (window.frameElement && parent.document.querySelector('#workspace-panes')) owner = parent;
+        } catch (_) { /* Cross-origin embeds can only fullscreen themselves. */ }
+        const doc = owner.document;
+        const display = owner.matchMedia('(display-mode: fullscreen)');
+        const group = document.createElement('div');
+        group.className = 'lab-fullscreen-setting';
+        const row = document.createElement('div');
+        row.className = 'setting-item lab-appearance-setting';
+        const label = document.createElement('label');
+        label.htmlFor = 'lab-fullscreen-toggle';
+        label.textContent = '画面表示';
+        const button = document.createElement('button');
+        button.id = 'lab-fullscreen-toggle';
+        button.type = 'button';
+        button.className = 'button';
+        const status = document.createElement('p');
+        status.id = 'lab-fullscreen-status';
+        status.className = 'lab-fullscreen-status';
+        status.setAttribute('role', 'status');
+        button.setAttribute('aria-describedby', status.id);
+        let pending = false;
+        function update() {
+            const active = !!doc.fullscreenElement;
+            // A fullscreen PWA can have no Fullscreen API element to exit.
+            const installedFullscreen = display.matches && !active;
+            const supported = !!doc.documentElement.requestFullscreen && doc.fullscreenEnabled !== false;
+            button.textContent = active ? '全画面を解除' : installedFullscreen ? '全画面表示中' : '全画面表示';
+            button.disabled = pending || installedFullscreen || !supported;
+            if (!supported && !installedFullscreen) status.textContent = 'このブラウザでは全画面表示を利用できません。';
+        }
+        button.addEventListener('click', async () => {
+            pending = true;
+            status.textContent = '';
+            update();
+            try {
+                // Keep the request in the click's user activation, including
+                // when the control is inside a same-origin Hub iframe.
+                if (doc.fullscreenElement) await doc.exitFullscreen();
+                else await doc.documentElement.requestFullscreen({ navigationUI: 'hide' });
+            } catch (_) {
+                status.textContent = '全画面表示を切り替えられませんでした。もう一度お試しください。';
+            } finally {
+                pending = false;
+                update();
+            }
+        });
+        doc.addEventListener('fullscreenchange', update);
+        display.addEventListener('change', update);
+        row.append(label, button);
+        group.append(row, status);
+        update();
+        return group;
+    }
+
     // Chromium supplies cutout insets to the top-level frame only. Intersect
     // them with this same-origin pane so a split view never adds them twice.
     function safeArea() {
@@ -117,13 +175,13 @@
         if (general) {
             // The native settings list is rebuilt on every open; keep this
             // preference in its general tab, outside that transient list.
-            general.prepend(appearanceSetting());
+            general.prepend(appearanceSetting(), fullscreenSetting());
         } else {
             const dialog = document.createElement('dialog');
             dialog.className = 'lab-settings-dialog';
             dialog.setAttribute('aria-labelledby', 'lab-settings-heading');
             dialog.innerHTML = '<h2 id="lab-settings-heading">設定</h2><h3>一般</h3>';
-            dialog.append(appearanceSetting());
+            dialog.append(appearanceSetting(), fullscreenSetting());
             const footer = document.createElement('div');
             footer.className = 'lab-settings-footer';
             const close = document.createElement('button');
@@ -213,8 +271,14 @@
         window.addEventListener('resize', schedule);
         window.visualViewport?.addEventListener('resize', schedule);
         window.addEventListener('pageshow', schedule);
+        document.addEventListener('fullscreenchange', schedule);
         screen.orientation?.addEventListener('change', schedule);
-        try { if (parent !== window) parent.visualViewport?.addEventListener('resize', schedule); } catch (_) { /* Cross-origin embed. */ }
+        try {
+            if (parent !== window) {
+                parent.visualViewport?.addEventListener('resize', schedule);
+                parent.document.addEventListener('fullscreenchange', schedule);
+            }
+        } catch (_) { /* Cross-origin embed. */ }
         document.fonts?.ready.then(schedule);
         schedule();
     }

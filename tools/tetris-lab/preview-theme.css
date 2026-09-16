@@ -286,6 +286,8 @@ body { position: fixed; inset: 0; }
 .lab-appearance-setting { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 10px; }
 .lab-appearance-setting label { color: var(--font-color); font-size: 14px; }
 .lab-appearance-select { font: inherit; font-size: 14px; color: var(--font-color); background: var(--lab-surface); border: 1px solid var(--border-color); border-radius: 6px; padding: 7px 12px; min-width: 130px; }
+.lab-fullscreen-status { margin: 0 10px 12px; color: var(--lab-muted); font-size: 13px; }
+.lab-fullscreen-status:empty { display: none; }
 .lab-settings-dialog { box-sizing: border-box; width: min(440px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); margin: auto; padding: 24px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--lab-surface); color: var(--font-color); font-family: var(--font-ui); overflow: auto; }
 .lab-settings-dialog::backdrop { background: #00000077; }
 .lab-settings-dialog h2 { margin: 0 0 24px; font-size: 22px; text-align: left; }

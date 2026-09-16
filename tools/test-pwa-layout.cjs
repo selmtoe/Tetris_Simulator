@@ -42,7 +42,7 @@ async function settings(frame, viewer) {
         return notice === (el.matches('dialog') ? el : el.querySelector('#settings-close').parentElement).lastElementChild;
     }), 'license is at the bottom of Settings');
     check(await frame.locator('#share-modal .license-notice, #share-modal a[href*="licenses/"]').count() === 0, 'no license in Share');
-    await dialog.locator(viewer ? 'button' : '#settings-close').click();
+    await dialog.locator(viewer ? '.lab-settings-footer button' : '#settings-close').click();
 }
 (async () => {
     const browser = await chromium.launch({ headless: true });
