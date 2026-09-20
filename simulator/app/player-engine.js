@@ -13,7 +13,9 @@ class Player {
         this.aiSearchInitialized = false;
         
         if (this.isAi) {
-            this.aiWorker = new Worker('./simulator/workers/cold-clear-wasm-worker.js?v=search-draws-v4');
+            this.aiWorker = new Worker(this.aiModel === 'ga-v1'
+                ? './simulator/workers/ga-worker.js?v=ga-v1-pages'
+                : './simulator/workers/cold-clear-wasm-worker.js?v=search-draws-v4');
 
             this.aiWorker.onmessage = (e) => {
                 if (e.data && e.data.type === 'debug') {
@@ -160,7 +162,7 @@ this.gravityTimer = gameSettings.gravity; this.lockTimer = 0;
 
         // Initial previews are part of the first snapshot.  Every later
         // rolling preview is a real Cold Clear add_next_piece event.
-        if (this.isAi && this.aiModel === 'cold-clear' && this.aiSearchInitialized && this.aiWorker && ['I', 'O', 'T', 'L', 'J', 'S', 'Z'].includes(newMino)) {
+        if (this.isAi && this.aiSearchInitialized && this.aiWorker && ['I', 'O', 'T', 'L', 'J', 'S', 'Z'].includes(newMino)) {
             this.aiWorker.postMessage({ type: 'addNextPiece', piece: newMino });
         }
 
@@ -1198,6 +1200,12 @@ if (this.linesClearedLastLock > 0) { this.startPostLockDelay('lineClear', gameSe
             requestId,
             weights: currentWeights
         };
+        if (this.aiModel === 'ga-v1' && this.opponent) {
+            const nowMs = Math.max(0, performance.now() - gameStartTime);
+            aiWorkerStartPayload.opponent = this.aiPlayerSnapshot(this.opponent, nowMs);
+            aiWorkerStartPayload.opponent.incoming = this.opponent.pendingGarbage
+                + this.opponent.garbageQueue.reduce((sum, packet) => sum + packet.lines, 0);
+        }
         if (this.aiWorker) {
             this.aiSearchInitialized = true;
             this.aiWorker.postMessage(aiWorkerStartPayload);

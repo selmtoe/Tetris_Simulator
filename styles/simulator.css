@@ -261,8 +261,20 @@
     touch-action: manipulation;
 }
 
+.ai-start-block-notice {
+    color: var(--font-color);
+    background: rgba(210, 140, 20, 0.12);
+    border-left: 3px solid #b26a00;
+    padding: 10px 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    max-width: 36em;
+    margin: 10px auto;
+    text-align: center;
+}
+
 .ai-model-badge {
-    display: none;
+    display: inline-flex;
     margin-left: 2px;
     padding: 3px 7px;
     border: 1px solid #8585ff;

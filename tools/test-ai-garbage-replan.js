@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { performance } = require('perf_hooks');
 
 const assert = (condition, message) => {
     if (!condition) throw new Error(message);
@@ -12,6 +13,7 @@ const assert = (condition, message) => {
 
 const context = vm.createContext({
     console,
+    performance,
     setTimeout,
     clearTimeout,
     BOARD_WIDTH: 10,
@@ -38,6 +40,7 @@ function makeAi(aiModel = 'cold-clear') {
         isAi: true,
         isAiThinking: true,
         aiRequestId: 11,
+        aiRequestStartedAtMs: new Map([[11, 0]]),
         aiSearchInitialized: true,
         aiWorker: { postMessage: message => messages.push(message) },
         aiModel,
@@ -58,16 +61,16 @@ function makeAi(aiModel = 'cold-clear') {
     assert(risen.player.pendingGarbage === 0, 'Applied garbage was not consumed.');
     assert(risen.player.aiRequestId === 12, 'Garbage rise did not invalidate the current AI request.');
     assert(!risen.player.isAiThinking && !risen.player.aiSearchInitialized, 'Garbage rise retained stale AI state.');
+    assert(risen.player.aiRequestStartedAtMs.size === 0, 'Garbage rise retained stale request timing.');
     assert(risen.messages.some(message => message.type === 'reset'), 'Garbage rise did not reset the Cold Clear worker.');
     assert(risen.player.board.slice(-2).every(row => row[4] === null && row.filter(Boolean).length === 9), 'Garbage rows were not applied as expected.');
 
-    const kasaneRisen = makeAi('kasane-strategy');
-    kasaneRisen.player.pendingGarbage = 2;
-    kasaneRisen.player.riseGarbage();
-
-    assert(kasaneRisen.player.aiRequestId === 12, 'KASANE garbage rise did not invalidate the current AI request.');
-    assert(kasaneRisen.messages.some(message => message.type === 'invalidate'), 'KASANE garbage rise did not preserve strategy memory while invalidating search.');
-    assert(!kasaneRisen.messages.some(message => message.type === 'reset'), 'KASANE garbage rise reset strategy memory instead of only invalidating search.');
+    const gaRisen = makeAi('ga-v1');
+    gaRisen.player.pendingGarbage = 2;
+    gaRisen.player.riseGarbage();
+    assert(gaRisen.player.aiRequestId === 12, 'GA garbage rise did not invalidate the current request.');
+    assert(gaRisen.messages.some(message => message.type === 'reset'), 'GA retained a stale search after garbage rose.');
+    assert(gaRisen.player.aiRequestStartedAtMs.size === 0, 'GA retained stale request timing.');
 
     const unreachable = makeAi();
     unreachable.player.findShortestPath_forAI = () => null;

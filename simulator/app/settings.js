@@ -243,7 +243,7 @@ function populateAiSettingsTab() {
     labelType.textContent = 'AIモデル';
     const modelHint = document.createElement('span');
     modelHint.className = 'ai-settings-model-hint';
-    modelHint.textContent = 'Cold Clear';
+    modelHint.textContent = '各プレイヤーのAI横で選択（Cold Clear / GA v1・2P専用）';
     itemType.append(labelType, modelHint);
     list.appendChild(itemType);
 
@@ -301,7 +301,7 @@ banPcCheckbox.onchange = e => {
     gameSettings.banPC = e.target.checked;
 };
 const banPcSpan = document.createElement('span');
-banPcSpan.textContent = 'PC禁止';
+banPcSpan.textContent = 'PC抑制（Cold Clearの評価係数）';
 banPcLabel.append(banPcCheckbox, banPcSpan);
 banPcItem.appendChild(banPcLabel);
 
@@ -311,7 +311,7 @@ if (gameSettings.debugEnabled) {
         const weightHeader = document.createElement('div');
         weightHeader.className = 'setting-item';
         weightHeader.style.cssText = 'margin-top:20px; border-top:1px solid var(--primary-color); padding-top:15px; font-weight:bold; flex-direction: column; gap: 10px;';
-        weightHeader.innerHTML = '<span>AI重み設定 (Debug)</span>';
+        weightHeader.innerHTML = '<span>Cold Clear重み設定（GA v1は学習済み係数）</span>';
         
         const controlsDiv = document.createElement('div');
         controlsDiv.style.display = 'flex';

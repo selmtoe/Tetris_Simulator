@@ -58,10 +58,13 @@ check('save-replay-form' not in html and 'record-list' not in html, 'Hub must no
 for path in ('hub/js/workspace.js', 'hub/js/recovery.js'):
     check(not re.search(r'tetrisHub(?:Auto)?Data', (OUTPUT / path).read_text(encoding='utf-8')), 'Old saved records must remain untouched')
 check((OUTPUT / 'hub/js/recovery.js').is_file(), 'Recovery must be included')
-check(not any('kasane' in path or 'candidate/' in path or 'league-runner' in path for path in manifest), 'Other AI models and research runners must not be distributed')
+check(not any('kasane' in path or 'candidate/' in path or 'league-runner' in path or 'ai-lab/runs/' in path for path in manifest), 'Retired AI models and private training runs must not be distributed')
 # Scoring imports these dynamically, so HTML-only checks cannot catch omissions.
-for relative in ('F/app/84-ai-scoring-worker.js', 'simulator/workers/cold-clear-wasm-worker.js'):
-    for dependency in re.findall(r"importScripts\(['\"]([^'\"]+)['\"]\)", (OUTPUT / relative).read_text(encoding='utf-8')):
-        resolved = urlsplit(urljoin('/' + relative, dependency)).path.lstrip('/')
-        check((OUTPUT / resolved).is_file(), f'Missing worker dependency: {resolved}')
+for relative in ('F/app/84-ai-scoring-worker.js', 'simulator/workers/cold-clear-wasm-worker.js', 'simulator/workers/ga-worker.js'):
+    for arguments in re.findall(r'importScripts\(([^)]+)\)', (OUTPUT / relative).read_text(encoding='utf-8')):
+        for dependency in re.findall(r"['\"]([^'\"]+)['\"]", arguments):
+            resolved = urlsplit(urljoin('/' + relative, dependency)).path.lstrip('/')
+            check((OUTPUT / resolved).is_file(), f'Missing worker dependency: {resolved}')
+for relative in ('ai-lab/models/ga-v1.json', 'ai-lab/build/cold-clear.wasm'):
+    check((OUTPUT / relative).is_file(), f'Missing GA release asset: {relative}')
 print(json.dumps({'passed': True, 'checks': checks, 'files': len(manifest)}))

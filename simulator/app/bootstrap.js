@@ -7,12 +7,25 @@ document.addEventListener('DOMContentLoaded', () => {
     let recordedReplayEvents = [];
     let modelPickerPlayer = null;
 
+    function showAiStartBlockReason(reason) {
+        let notice = document.getElementById('ai-start-block-notice');
+        if (!reason) { notice?.remove(); return; }
+        if (!notice) {
+            notice = document.createElement('p');
+            notice.id = 'ai-start-block-notice';
+            notice.className = 'ai-start-block-notice';
+            notice.setAttribute('role', 'alert');
+            document.getElementById('startGameBtn').closest('.top-controls').insertAdjacentElement('afterend', notice);
+        }
+        notice.textContent = reason;
+    }
+
     function updateAiModelBadges() {
         ['p1', 'p2'].forEach(playerKey => {
             const badge = document.querySelector(`[data-ai-player="${playerKey}"] .ai-model-badge`);
             if (!badge) return;
             const model = AI_MODEL_CATALOG[playerAiModelId(playerKey)];
-            badge.textContent = `${model.shortName} · 長押しで変更`;
+            badge.textContent = `${model.shortName} ▾`;
             badge.title = `${model.name}: ${model.description}`;
         });
     }
@@ -32,11 +45,11 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         saveGameSettings();
         updateAiModelBadges();
+        showAiStartBlockReason('');
         closeAiModelPicker();
     }
 
     function openAiModelPicker(playerKey) {
-        if (!gameSettings.debugEnabled) return;
         modelPickerPlayer = playerKey;
         const modal = document.getElementById('ai-model-modal');
         const playerLabel = document.getElementById('ai-model-modal-player');
@@ -81,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
             timer = null;
         };
         label.addEventListener('pointerdown', event => {
-            if (!gameSettings.debugEnabled || (event.button !== undefined && event.button !== 0)) return;
+            if (event.button !== undefined && event.button !== 0) return;
             clearTimer();
             timer = setTimeout(() => {
                 timer = null;
@@ -100,19 +113,18 @@ document.addEventListener('DOMContentLoaded', () => {
             suppressClick = false;
         }, true);
         label.addEventListener('contextmenu', event => {
-            if (!gameSettings.debugEnabled) return;
             event.preventDefault();
             clearTimer();
             openAiModelPicker(playerKey);
         });
         badge.addEventListener('click', event => {
-            if (!gameSettings.debugEnabled || suppressClick) return;
+            if (suppressClick) return;
             event.preventDefault();
             event.stopPropagation();
             openAiModelPicker(playerKey);
         });
         badge.addEventListener('keydown', event => {
-            if ((event.key === 'Enter' || event.key === ' ') && gameSettings.debugEnabled) {
+            if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 openAiModelPicker(playerKey);
             }
@@ -392,6 +404,7 @@ document.getElementById('mode-1p').addEventListener('click', () => {
         setTimeout(updateScale, 0);
     });
 document.getElementById('mode-2p').addEventListener('click', () => { 
+        showAiStartBlockReason('');
         gameMode = '2P'; 
         document.getElementById('mode-2p').classList.add('active'); 
         document.getElementById('mode-1p').classList.remove('active'); 
@@ -417,6 +430,9 @@ document.getElementById('mode-2p').addEventListener('click', () => {
         document.getElementById(id).addEventListener('change', () => generateAndDisplayLink());
     }
 document.getElementById('startGameBtn').addEventListener('click', () => {
+        const aiBlockReason = aiStartBlockReason(gameMode, document.getElementById('p1-ai-toggle').checked, playerAiModelId('p1'));
+        showAiStartBlockReason(aiBlockReason);
+        if (aiBlockReason) return;
         gameHistoryLog = [];
         window.resetRecordedReplay?.();
         resetGarbageDeliveryBatch();
@@ -911,6 +927,9 @@ e.preventDefault();
     
 document.getElementById('retryBtn').addEventListener('click', () => {
         if (gameState !== 'PLAYING' || !players.length) return;
+        const aiBlockReason = aiStartBlockReason(gameMode, document.getElementById('p1-ai-toggle').checked, playerAiModelId('p1'));
+        showAiStartBlockReason(aiBlockReason);
+        if (aiBlockReason) return;
         
             players.forEach(p => {
             if (p.aiWorker) {

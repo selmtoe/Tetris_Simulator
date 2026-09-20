@@ -167,10 +167,26 @@ class ColdClearWasmBridge {
     }
 
     suggest(handle, incoming) {
+        return this.readMove(ptr => this.exports.cc_suggest(handle, Math.max(0, incoming | 0), ptr));
+    }
+
+    // Candidate indices are valid only until the next DAG mutation.
+    select(handle, index, incoming = 0) {
+        if (!this.exports.cc_select) throw new Error('Cold Clear WASM is missing cc_select; rebuild the candidate artifact.');
+        if (!Number.isInteger(index) || index < 0 || index > 0xffffffff) throw new RangeError('Invalid candidate index.');
+        return this.readMove(ptr => this.exports.cc_select(handle, index, Math.max(0, incoming | 0), ptr));
+    }
+
+    suggestLegal(handle, incoming = 0) {
+        if (!this.exports.cc_suggest_legal) throw new Error('Cold Clear WASM is missing cc_suggest_legal.');
+        return this.readMove(ptr => this.exports.cc_suggest_legal(handle, Math.max(0, incoming | 0), ptr));
+    }
+
+    readMove(write) {
         const ptr = this.exports.cc_alloc(this.moveSize);
         if (!ptr) throw new Error('Cold Clear WASM move allocation failed.');
         try {
-            if (!this.exports.cc_suggest(handle, Math.max(0, incoming | 0), ptr)) return null;
+            if (!write(ptr)) return null;
             const view = new DataView(this.memory.buffer, ptr, this.moveSize);
             const bytes = new Uint8Array(this.memory.buffer, ptr, this.moveSize);
             return {

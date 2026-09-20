@@ -1,0 +1,154 @@
+{
+  "schema": 1,
+  "name": "GA v1",
+  "genome": {
+    "schema": 1,
+    "origin": "genetic-crossover-mutation",
+    "weights": {
+      "tslot": [
+        -8,
+        189,
+        121,
+        461
+      ],
+      "well_column": [
+        -30,
+        53,
+        -14,
+        20,
+        -10,
+        3,
+        -4,
+        3,
+        2,
+        12
+      ],
+      "use_bag": true,
+      "timed_jeopardy": true,
+      "stack_pc_damage": false,
+      "back_to_back": 75,
+      "bumpiness": -36,
+      "bumpiness_sq": -13,
+      "row_transitions": -16,
+      "height": -35,
+      "top_half": -142,
+      "top_quarter": -574,
+      "jeopardy": -10,
+      "cavity_cells": -271,
+      "cavity_cells_sq": -10,
+      "overhang_cells": -71,
+      "overhang_cells_sq": -7,
+      "covered_cells": -21,
+      "covered_cells_sq": -3,
+      "well_depth": 87,
+      "max_well_depth": 18,
+      "b2b_clear": 147,
+      "clear1": -147,
+      "clear2": -53,
+      "clear3": -82,
+      "clear4": 541,
+      "tspin1": 166,
+      "tspin2": 404,
+      "tspin3": 626,
+      "mini_tspin1": -210,
+      "mini_tspin2": -68,
+      "perfect_clear": 1175,
+      "combo_garbage": 231,
+      "move_time": -7,
+      "wasted_t": -232
+    },
+    "opponent": {
+      "pressureAttack": 69,
+      "pressureHeight": 11,
+      "threatSafety": 44
+    }
+  },
+  "modelSha256": "880ded0208ae826e90546d4bb51c274f9f800068db3103a131fb7b5d367f49bd",
+  "training": {
+    "run": "ga-v1-d",
+    "generation": 0,
+    "method": "Genetic crossover/mutation; independent random founders; no KASANE or pretrained Cold Clear coefficients",
+    "training": {
+      "games": 6,
+      "wins": 4,
+      "draws": 2,
+      "losses": 0,
+      "winRate": 0.6666666666666666,
+      "score": 0.8333333333333334,
+      "score95PairedBootstrap": [
+        0.75,
+        1
+      ],
+      "simulatedMs": 1904000
+    },
+    "validation": {
+      "games": 16,
+      "wins": 5,
+      "draws": 10,
+      "losses": 1,
+      "winRate": 0.3125,
+      "score": 0.625,
+      "score95PairedBootstrap": [
+        0.53125,
+        0.71875
+      ],
+      "simulatedMs": 8243450
+    }
+  },
+  "evaluation": {
+    "opponent": "Cold Clear Standard",
+    "mode": "equal-fixed-added-node-budget",
+    "nodesPerDecision": 3000,
+    "secondsLimit": 600,
+    "seed": 92021001,
+    "games": 64,
+    "wins": 10,
+    "draws": 43,
+    "losses": 11,
+    "winRate": 0.15625,
+    "score": 0.4921875,
+    "score95PairedBootstrap": [
+      0.4296875,
+      0.5625
+    ],
+    "simulatedMs": 32167400,
+    "note": "Draws are not wins. This is not a win-rate claim for the browser's wall-clock/background-search setting."
+  },
+  "additionalEvaluation": {
+    "opponent": "Cold Clear Standard",
+    "mode": "equal-fixed-added-node-budget",
+    "nodesPerDecision": 3000,
+    "secondsLimit": 600,
+    "seed": 94021001,
+    "games": 64,
+    "wins": 8,
+    "draws": 49,
+    "losses": 7,
+    "score": 0.5078125,
+    "score95PairedBootstrap": [0.4609375, 0.5625]
+  },
+  "combinedEvaluation": {
+    "games": 128,
+    "wins": 18,
+    "draws": 92,
+    "losses": 18,
+    "score": 0.5,
+    "score95PairedBootstrap": [0.45703125, 0.54296875],
+    "note": "Two disjoint 32-seed paired evaluations of this same frozen genome. Fixed-node, same-bag experiments; not browser wall-clock win rates. The local-refinement candidate was rejected."
+  },
+  "provenance": {
+    "created": "2026-09-20T16:33:22.415Z",
+    "node": "v22.23.2",
+    "sourceHashes": {
+      "simulator/app/runtime-config.js": "55ff87457e2f8be1a9440af41aec802fb1b0491e058e215b0a7dff75593b7408",
+      "simulator/app/player-engine.js": "865f98dbc1d20ee5230e20a673d082f1db42d2f437696cf409aea0934815e7ba",
+      "simulator/workers/cold-clear-wasm.js": "efc4250c669c51ed5b3bbf0de9520acdba7c204cbb7be0920d9bd99db17b2263",
+      "ai-lab/build/cold-clear.wasm": "993f63a8866b663005b64687d8ff26274aad9337bc792bba608a764a1864ef39",
+      "ai-lab/simulator.cjs": "f1f287a69b6074f87063ec834d1aae76115430f895ca5724d4393e672ba7feb4",
+      "ai-lab/policy.js": "d21e9cf1c86a5b21d5f4f75e14f8b3fff17f2affcb2f7d6d26225bc49319b42a",
+      "ai-lab/genome.cjs": "dd5d877957b3e2bedbd12c8a1b8090a4710057e016861eac40d1db94bb054485",
+      "ai-lab/cli.cjs": "11a10dbb2e4ddc8c049e5bd0592483a6acc4ed80d0e6ec31236ac49875d2ee6a",
+      "ai-lab/pool.cjs": "46906801d56127ae678ccbf02e50c6fc91b84732e659085bbfbec7384e82a6d5"
+    }
+  }
+}

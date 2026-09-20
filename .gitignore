@@ -15,3 +15,11 @@ simulator/cold-clear-wasm/target/
 
 # Generated public web bundle.
 /dist/pages/
+
+# Training/reproduction output stays local; only the selected release is public.
+/ai-lab/runs/
+/ai-lab/build/*
+!/ai-lab/build/cold-clear.wasm
+
+# Python tool caches are generated, not source.
+__pycache__/

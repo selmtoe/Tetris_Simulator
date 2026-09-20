@@ -27,6 +27,14 @@ COMPONENTS = {
         'binaries': ['simulator/pc-solver/sfinder-pc.js', 'simulator/pc-solver/sfinder-pc.wasm'],
         'license': 'third_party/sfinder-cpp-master/LICENSE',
     },
+    'cold-clear-ga': {
+        'directories': ['third_party/cold-clear-reference', 'simulator/cold-clear-wasm', 'licenses/dependency-overrides'],
+        'files': ['simulator/COLD_CLEAR_PORT.md', 'ai-lab/build.ps1', 'ai-lab/policy.js',
+                  'simulator/workers/cold-clear-wasm.js', 'simulator/workers/ga-worker.js',
+                  'licenses/cold-clear-dependencies.txt'],
+        'binaries': ['ai-lab/build/cold-clear.wasm'],
+        'license': 'third_party/cold-clear-reference/LICENSE',
+    },
 }
 COMMON = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'tools/package-ai-licenses.py']
 SOURCE_EXTENSIONS = {'.rs', '.toml', '.lock', '.cpp', '.h', '.hpp', '.md', '.txt'}
@@ -93,7 +101,7 @@ def package(root, component, emscripten_root=None):
     spec = COMPONENTS[component]
     destination = root / 'licenses'
     destination.mkdir(exist_ok=True)
-    if component == 'cold-clear':
+    if component in ('cold-clear', 'cold-clear-ga'):
         cargo_notices(root)
     else:
         if emscripten_root is None:
@@ -165,7 +173,7 @@ def validate(root):
                     raise ValueError(f'Source archive member changed: {relative}')
             if bundle.read(spec['license']).replace(b'\r\n', b'\n') != (root / ('licenses/sfinder-MIT.txt' if component == 'sfinder' else 'licenses/cold-clear-MPL-2.0.txt')).read_bytes().replace(b'\r\n', b'\n'):
                 raise ValueError(f'License text mismatch: {component}')
-            dependency_notice = f'licenses/{component}-dependencies.txt'
+            dependency_notice = f'licenses/{"cold-clear" if component == "cold-clear-ga" else component}-dependencies.txt'
             if bundle.read(dependency_notice).replace(b'\r\n', b'\n') != (root / dependency_notice).read_bytes().replace(b'\r\n', b'\n'):
                 raise ValueError(f'Dependency notice mismatch: {component}')
     mit = (root / 'licenses/sfinder-MIT.txt').read_text(encoding='utf-8').strip()

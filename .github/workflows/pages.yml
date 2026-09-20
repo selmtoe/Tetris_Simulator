@@ -27,6 +27,17 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify GA policy and AI integration
+        run: |
+          node --test ai-lab/test-policy.cjs ai-lab/test-worker.cjs ai-lab/test-integration.cjs
+          node tools/test-ai-no-legal-move.js
+          node tools/test-ai-garbage-replan.js
+
       - name: Build public web tools
         run: python3 tools/build-web.py
 

@@ -38,13 +38,26 @@ async function runWorker(file, bridgeName, bridge, requestId) {
             thinkTimeMs: 1,
             nodeLimit: 1,
             incoming: 0,
-            snapshot: {}
+            // A blocked spawn/hold position is terminal, not an empty board
+            // whose legal root has simply not been expanded yet.
+            board: Array.from({ length: 40 }, () => Array(10).fill('G')),
+            currentPiece: 'T',
+            nextQueue: ['I', 'O', 'L', 'J', 'S', 'Z'],
+            holdPiece: null,
+            canHold: true,
+            isB2B: false,
+            ren: -1,
+            weights: {},
+            background: false
         }
     });
 
-    for (let attempt = 0; attempt < 20 && !messages.some(message => message.type === 'noLegalMove'); attempt++) {
+    for (let attempt = 0; attempt < 20 && !messages.some(message =>
+        ['noLegalMove', 'move', 'error'].includes(message.type)); attempt++) {
         await new Promise(resolve => setImmediate(resolve));
     }
+    const error = messages.find(message => message.type === 'error');
+    assert(!error, `Worker fixture failed: ${error?.message}`);
     return messages;
 }
 
@@ -56,9 +69,10 @@ function makePlayer(Player, requestId = 17) {
         isAi: true,
         isAiThinking: true,
         aiRequestId: requestId,
+        aiRequestStartedAtMs: new Map(),
         aiSearchInitialized: true,
         aiWorker: { postMessage: message => messages.push(message) },
-        aiModel: 'kasane-guard',
+        aiModel: 'cold-clear',
         gameOver: false,
         gameClear: false,
         opponent,
@@ -70,24 +84,14 @@ function makePlayer(Player, requestId = 17) {
 }
 
 (async () => {
-    const kasaneMessages = await runWorker(
-        'simulator/workers/kasane-wasm-worker.js',
-        'KasaneWasmBridge',
-        { choose: () => null },
-        31
-    );
-    const kasaneTerminal = kasaneMessages.find(message => message.type === 'noLegalMove');
-    assert(kasaneTerminal && kasaneTerminal.requestId === 31,
-        'KASANE did not return a typed noLegalMove response for the current request.');
-    assert(!kasaneMessages.some(message => message.type === 'move'),
-        'KASANE represented a terminal result as an empty move.');
-
     const coldClearMessages = await runWorker(
         'simulator/workers/cold-clear-wasm-worker.js',
         'ColdClearWasmBridge',
         {
             create: () => 1,
             destroy: () => {},
+            beginDecision: (_handle, budget) => budget,
+            // No root placement exists on the fully blocked board.
             think: () => ({ nodesAdded: 0 }),
             suggest: () => null,
             nodeCount: () => 0
@@ -162,8 +166,8 @@ function makePlayer(Player, requestId = 17) {
 
     console.log(JSON.stringify({
         passed: true,
-        workers: ['KASANE', 'Cold Clear'],
-        cases: 6
+        workers: ['Cold Clear'],
+        cases: 5
     }, null, 2));
 })().catch(error => {
     console.error(error.stack || error);

@@ -41,6 +41,11 @@ under MPL. Existing upstream notices remain intact.
 - [Source of the distributed WASM, including modifications and build scripts](licenses/cold-clear-source.zip), available without charge.
 - [Current JavaScript port, in editable source form](simulator/workers/cold-clear-core.js).
 - [Integration and modification notes](simulator/COLD_CLEAR_PORT.md).
+- [GA v1 WASM corresponding source and build script](licenses/cold-clear-ga-source.zip).
+  `ai-lab/build/cold-clear.wasm` reuses Cold Clear search and features with
+  additional candidate-selection APIs. GA v1 uses independently trained
+  coefficients plus opponent-state evaluation, not an independently invented
+  search algorithm. The original Cold Clear binary/source snapshot is unchanged.
 
 No additional restriction is imposed on recipients' MPL rights in the source.
 The upstream software is supplied subject to the warranty disclaimers and

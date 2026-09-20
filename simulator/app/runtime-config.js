@@ -21,6 +21,13 @@ const AI_MODEL_CATALOG = Object.freeze({
         name: 'Cold Clear',
         shortName: 'Cold Clear',
         description: 'Cold Clear Standard'
+    }),
+    'ga-v1': Object.freeze({
+        id: 'ga-v1',
+        name: 'GA v1（相手盤面・対戦用）',
+        shortName: 'GA v1',
+        description: '相手の盤面・HOLD・見えるNEXTを参照する学習個体。2P対戦専用。',
+        requiresOpponent: true
     })
 });
 
@@ -33,6 +40,12 @@ function normalizeAiModelId(modelId) {
 function playerAiModelId(playerId) {
     const key = String(playerId).toLowerCase().replace('player', 'p');
     return normalizeAiModelId(gameSettings.aiModels?.[key]);
+}
+
+function aiStartBlockReason(mode, playerOneIsAi, modelId) {
+    return mode === '1P' && playerOneIsAi && AI_MODEL_CATALOG[normalizeAiModelId(modelId)].requiresOpponent
+        ? 'GA v1は相手の盤面を評価する2P対戦専用AIです。MODEを2Pに切り替えるか、1PではCold Clearを選んでください。'
+        : '';
 }
 
 // The previous Worker exposed hand-written opening templates.  Cold Clear's

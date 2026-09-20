@@ -42,6 +42,9 @@ class LicenseDistribution(unittest.TestCase):
             'sfinder': ['third_party/sfinder-cpp-master/src/finder/perfect.cpp',
                         'third_party/sfinder-cpp-master/LICENSE', 'simulator/pc-solver/pc_solver_api.cpp',
                         'tools/build-pc-solver-wasm.ps1', 'licenses/sfinder-dependencies.txt'],
+            'cold-clear-ga': ['simulator/cold-clear-wasm/src/lib.rs', 'simulator/cold-clear-wasm/Cargo.lock',
+                              'third_party/cold-clear-reference/bot/src/evaluation/standard.rs',
+                              'ai-lab/build.ps1', 'ai-lab/policy.js', 'licenses/cold-clear-dependencies.txt'],
         }.items():
             with zipfile.ZipFile(ROOT / f'licenses/{component}-source.zip') as bundle:
                 self.assertTrue(set(required).issubset(bundle.namelist()))

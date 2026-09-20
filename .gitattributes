@@ -4,5 +4,6 @@ licenses/*.txt text eol=lf
 licenses/*.json text eol=lf
 licenses/*.zip binary
 simulator/workers/*.wasm binary
+ai-lab/build/*.wasm binary
 # Preserve original upstream notice formatting, including trailing whitespace.
 licenses/**/*.txt -whitespace

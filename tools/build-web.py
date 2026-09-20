@@ -30,6 +30,8 @@ FILES = (
     'simulator/pc-solver/sfinder-pc.js', 'simulator/pc-solver/sfinder-pc.wasm',
     'simulator/workers/cold-clear-wasm-worker.js', 'simulator/workers/cold-clear-wasm.js',
     'simulator/workers/cold-clear.wasm', 'simulator/workers/cold-clear-core.js',
+    'simulator/workers/ga-worker.js', 'ai-lab/policy.js',
+    'ai-lab/build/cold-clear.wasm', 'ai-lab/models/ga-v1.json',
     'simulator/workers/pc-finder-worker.js',
     'simulator/workers/route-search-worker.js', 'shared/search-menu.js', 'shared/search.css',
     'Load PPT/tetris.onnx', 'Load PPT/tetris.model.json',
