@@ -86,8 +86,8 @@
     .field-editor canvas { margin-bottom: 10px; cursor: crosshair; touch-action: none; }
     .field-controls { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;}
 
-    #startGameBtn { font-size: 24px; padding: 12px 25px; background-color: #00a000; }
-    #startGameBtn:hover { background-color: #00c000; }
+    #startGameBtn { font-size: 24px; padding: 12px 25px; background-color: #ffffff; color: #252527; }
+    #startGameBtn:hover { background-color: #e6e6e6; }
 
     #scan-instructions {
         position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
@@ -261,20 +261,9 @@
     touch-action: manipulation;
 }
 
-.ai-start-block-notice {
-    color: var(--font-color);
-    background: rgba(210, 140, 20, 0.12);
-    border-left: 3px solid #b26a00;
-    padding: 10px 14px;
-    font-size: 13px;
-    line-height: 1.5;
-    max-width: 36em;
-    margin: 10px auto;
-    text-align: center;
-}
-
 .ai-model-badge {
     display: inline-flex;
+    cursor: pointer;
     margin-left: 2px;
     padding: 3px 7px;
     border: 1px solid #8585ff;
