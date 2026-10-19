@@ -43,6 +43,17 @@ for (const colors of Object.values(palettes)) {
 }
 console.log('Uniform viewport fitting and incoming-meter state/bounds passed.');
 
+// The touch pad is a transparent overlay on the board, so light mode cannot
+// borrow the dark mode's white ring and letters.
+for (const key of ['padInk', 'padStroke', 'padFill', 'padTrack']) {
+    for (const colors of Object.values(palettes)) assert.equal(typeof colors[key], 'string', key);
+}
+assert.equal(palettes.light.padInk, '#000000');
+assert.equal(palettes.dark.padInk, '#ffffff');
+assert(!palettes.light.padStroke.includes('255'), 'Light mode rings must not stay white');
+assert(palettes.dark.padStroke.includes('255'), 'Dark mode keeps the approved white ring');
+console.log('Virtual pad palette (dark ink in light mode) passed.');
+
 // The placement is a plain white light over the cell, bounded and state-safe.
 for (const size of [28, 50]) {
     const fills = [], stack = [];

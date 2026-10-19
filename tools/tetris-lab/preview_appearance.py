@@ -1,8 +1,9 @@
 """Local appearance variants. Native application files are never rewritten.
 
-Only the seven explicitly listed script URLs opt in. Rendering literals,
-display palettes, garbage-meter paint and outer canvas allowance change. Board
-cells, piece positions, native input handlers and analysis stay intact.
+Only the eight explicitly listed script URLs opt in. Rendering literals,
+display palettes, garbage-meter paint, virtual-pad paint and outer canvas
+allowance change. Board cells, piece positions, native input handlers and
+analysis stay intact.
 """
 import re
 from urllib.parse import urljoin, urlsplit
@@ -36,6 +37,21 @@ RENDER_LITERALS = {
         "if (!useCustomBG) ctx.fillText('NEXT', layout.next[0].x, layout.next[0].y - bSize);":
             ("if (!useCustomBG) { ctx.fillStyle = window.LabAppearance.colors.muted; ctx.fillText('NEXT', layout.next[0].x, layout.next[0].y - bSize); }", 1),
         "const charSpacing = bSize * 0.6;": ("ctx.fillStyle = window.LabAppearance.colors.muted; const charSpacing = bSize * 0.6;", 1)},
+    # The touch pad is a transparent overlay: its white ring and letters are
+    # invisible on the light board, so both modes take the active palette.
+    '/simulator/app/virtual-controller.js': {
+        "ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';":
+            ("ctx.strokeStyle = window.LabAppearance.colors.padStroke;", 1),
+        "ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';":
+            ("ctx.fillStyle = window.LabAppearance.colors.padFill;", 1),
+        "ctx.fillStyle = 'white';": ("ctx.fillStyle = window.LabAppearance.colors.padInk;", 2),
+        "ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';":
+            ("ctx.strokeStyle = window.LabAppearance.colors.padTrack;", 1),
+        # This source mixes its first two CRLF lines with LF later on, so the
+        # repaint hook is registered from single-line anchors only.
+        "const virtualController = (() => {":
+            ("const virtualController = window.LabVirtualPad = (() => {", 1),
+        "        init,": ("        init,\n        redraw: draw,", 1)},
 }
 SCRIPT_PATHS = frozenset(RENDER_LITERALS) | {'/F/app/10-state.js', '/simulator/app/runtime-config.js'}
 

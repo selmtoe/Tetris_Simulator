@@ -53,7 +53,7 @@ class AppearanceTests(unittest.TestCase):
             self.assertIn('/lab-appearance.js', live)
             scripts = [html.unescape(url) for url in re.findall(r'<script[^>]+src="([^"]+)"', live)]
             variants = [url for url in scripts if 'labTheme=lab' in url]
-            self.assertEqual(len(variants), 4 if path.startswith('/F/') else 3)
+            self.assertEqual(len(variants), 4)
 
     def test_recognition_and_non_theme_scripts_are_byte_identical(self):
         for path in ('/F/app/50-scanner.js', '/F/app/84-ai-scoring-worker.js',
@@ -83,6 +83,22 @@ class AppearanceTests(unittest.TestCase):
             self.assertEqual(appearance.script_variant(path, original), expected)
         with self.assertRaises(ValueError):
             appearance.script_variant('/F/app/20-editor.js', 'new rendering code')
+
+    def test_virtual_pad_keeps_native_inputs_and_takes_the_palette(self):
+        """The touch pad's ring, ink and slider follow the active appearance."""
+        path = '/simulator/app/virtual-controller.js'
+        native = (server.ROOT / path.lstrip('/')).read_text(encoding='utf-8')
+        themed = appearance.script_variant(path, native)
+        self.assertNotIn("'white'", themed)
+        self.assertNotIn('rgba(255, 255, 255', themed)
+        for token in ('padInk', 'padStroke', 'padFill', 'padTrack'):
+            self.assertIn(f'window.LabAppearance.colors.{token}', themed)
+        # Without the override, the pad would keep a stale palette after a switch.
+        self.assertIn('window.LabVirtualPad = (() => {', themed)
+        self.assertIn('redraw: draw,', themed)
+        # Hit testing, layout persistence and the pressed state stay native.
+        for kept in ('function getButtonAt(', 'function saveLayouts(', 'tetrisVirtualPadLayouts'):
+            self.assertIn(kept, themed)
 
     def test_palette_matches_the_comparison_board(self):
         lab_css = (server.DEFAULT_LAB / 'lab-enhancements.css').read_text(encoding='utf-8')

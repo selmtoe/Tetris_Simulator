@@ -2,8 +2,12 @@
 (() => {
     'use strict';
     const palettes = {
-        light: { muted: '#717171', track: '#d3d5d5', tick: '#b3b8b6', pending: '#c97e77', queued: '#c4ab71' },
-        dark: { muted: '#aaaab1', track: '#414347', tick: '#61676b', pending: '#d9958c', queued: '#ccb77f' }
+        // The virtual pad paints on its own transparent canvas over the board:
+        // light mode needs dark ink on the light background, dark mode keeps white.
+        light: { muted: '#717171', track: '#d3d5d5', tick: '#b3b8b6', pending: '#c97e77', queued: '#c4ab71',
+            padStroke: 'rgba(0, 0, 0, 0.7)', padFill: 'rgba(0, 0, 0, 0.28)', padInk: '#000000', padTrack: 'rgba(0, 0, 0, 0.45)' },
+        dark: { muted: '#aaaab1', track: '#414347', tick: '#61676b', pending: '#d9958c', queued: '#ccb77f',
+            padStroke: 'rgba(255, 255, 255, 0.7)', padFill: 'rgba(255, 255, 255, 0.4)', padInk: '#ffffff', padTrack: 'rgba(255, 255, 255, 0.5)' }
     };
 
     function editorFit(viewWidth, viewHeight, layoutWidth, layoutHeight) {
@@ -51,7 +55,6 @@
     let mode = 'light';
     try { if (localStorage.getItem(key) === 'dark') mode = 'dark'; } catch (_) { /* Private storage may be unavailable. */ }
     const appearance = window.LabAppearance = { colors: palettes[mode], drawMeter, drawPlacement };
-    appearance.setTheme = next => applyTheme(next);
     root.dataset.labTheme = mode;
 
     function applyTheme(next, save = false) {
@@ -62,7 +65,10 @@
         if (save) { try { localStorage.setItem(key, mode); } catch (_) { /* The current tab still switches. */ } }
         // F's viewer is event-driven; the simulator already draws every frame.
         if (document.querySelector('#viewer-container')?.offsetWidth && typeof window.drawViewer === 'function') window.drawViewer();
+        // The virtual pad only repaints on interaction; give it the new palette now.
+        window.LabVirtualPad?.redraw?.();
     }
+    appearance.setTheme = next => applyTheme(next);
 
     function appearanceSetting() {
         const row = document.createElement('div');
