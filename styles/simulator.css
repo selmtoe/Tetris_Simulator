@@ -262,7 +262,9 @@
 }
 
 .ai-model-badge {
-    display: inline-flex;
+    /* AI is Cold Clear only outside debug mode, so the model picker badge
+       stays hidden until body.debug-mode-enabled is set. */
+    display: none;
     cursor: pointer;
     margin-left: 2px;
     padding: 3px 7px;
