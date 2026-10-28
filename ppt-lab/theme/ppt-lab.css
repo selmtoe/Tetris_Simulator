@@ -1092,3 +1092,6 @@ html[data-readonly] .lab-save-menu,
 html[data-readonly] .ppt-tetofu-card .lab-inline-actions,
 html[data-readonly] form.lab-inline-actions,
 html[data-readonly] .lab-replay-navigation { display: none !important; }
+.ppt-row-actions { display: flex; gap: 6px; }
+.ppt-setting-value { font-size: 13px; color: var(--text-muted); }
+.ppt-settings-body { display: flex; flex-direction: column; gap: 12px; }
