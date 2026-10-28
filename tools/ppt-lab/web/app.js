@@ -30,6 +30,7 @@
         matchFailed: new Set(),
         pendingMatch: 0,
         featureList: [],
+        feature: { segments: [], index: -1 },
         featureIndex: -1,
         searchTimer: null,
         tetofuQuery: '',
@@ -665,20 +666,93 @@
     }
 
     // 連続再生: 絞り込み結果の先頭の試合から再生し、あとは同期に任せる
+    async function buildFeatureSegments(videos) {
+        const segments = [];
+        for (const video of videos) {
+            let rows = [];
+            try {
+                const body = await api('/api/videos/' + video.id + '/matches?light=1');
+                rows = body.matches || [];
+            } catch (error) {
+                rows = [];
+            }
+            rows.forEach(row => {
+                const start = Number(row.start) || 0;
+                const end = Number(row.end) || (start + 60);
+                if (end > start + 1) {
+                    segments.push({ videoId: video.id, matchIndex: row.index, start, end });
+                }
+            });
+        }
+        segments.sort((a, b) => a.start - b.start);
+        return segments;
+    }
+
+    // 連続再生: 絞り込み結果の試合だけを、特集動画のように続けて再生する
     async function playSequentially() {
-        const videos = sortEntries(filterVideos(state.videos));
-        const target = videos.find(video => (video.matchCount || 0) > 0);
-        if (!target) {
+        const videos = sortEntries(filterVideos(state.videos)).filter(video => (video.matchCount || 0) > 0);
+        if (!videos.length) {
             toast('再生できる試合がありません。');
             return;
         }
-        state.featureList = videos.filter(video => (video.matchCount || 0) > 0).map(video => video.id);
-        state.featureIndex = state.featureList.indexOf(target.id);
-        state.videoId = target.id;
-        state.pendingMatch = 1;
+        toast('再生リストを作っています…');
+        const segments = await buildFeatureSegments(videos);
+        if (!segments.length) {
+            toast('再生できる試合がありません。');
+            return;
+        }
+        state.feature = { segments, index: 0 };
+        state.featureList = videos.map(video => video.id);
+        const first = segments[0];
+        state.videoId = first.videoId;
+        state.pendingMatch = first.matchIndex;
         state.follow = true;
-        location.hash = '#video/' + target.id;
-        toast('絞り込み結果の' + state.featureList.length + '本を続けて再生します。');
+        location.hash = '#video/' + first.videoId;
+        toast('絞り込み結果の' + segments.length + '試合を続けて再生します。');
+    }
+
+    // 現在の試合が終わったら次の試合へ（試合の間は飛ばす）
+    function advanceFeature() {
+        if (!state.feature || !state.feature.segments.length) return false;
+        const next = state.feature.index + 1;
+        if (next >= state.feature.segments.length) {
+            toast('連続再生が終わりました。');
+            state.feature = { segments: [], index: -1 };
+            state.featureList = [];
+            return true;
+        }
+        const segment = state.feature.segments[next];
+        state.feature.index = next;
+        if (segment.videoId === state.videoId) {
+            const row = (state.matches || []).find(item => item.index === segment.matchIndex);
+            if (row) {
+                state.pendingMatch = segment.matchIndex;
+                showMatch(row, { fromSync: false });
+                seekVideoTo(segment.start, { pause: false });
+            }
+        } else {
+            state.pendingMatch = segment.matchIndex;
+            state.videoId = segment.videoId;
+            location.hash = '#video/' + segment.videoId;
+        }
+        return true;
+    }
+
+    function featureTick() {
+        const segment = state.feature.segments[state.feature.index];
+        if (!segment || segment.videoId !== state.videoId) return;
+        const seconds = videoTime();
+        if (!Number.isFinite(seconds)) return;
+        if (seconds >= segment.end - 0.25) {
+            advanceFeature();
+            return;
+        }
+        if (seconds < segment.start - 0.5) {
+            seekVideoTo(segment.start, { pause: false });
+            return;
+        }
+        const page = pageIndexAt(state.pages, seconds - segment.start);
+        if (page !== state.pageIndex) showPage(page, { seek: false });
     }
     // ---- テト譜のプレビュー -------------------------------------------------
     const BOARD_COLORS = {
@@ -1848,7 +1922,7 @@
                         state.ytReady = true;
                     },
                     onStateChange: event => {
-                        if (event.data === 0) playNextFeature();
+                        if (event.data === 0 && !advanceFeature()) playNextFeature();
                     }
                 }
             });
@@ -1895,6 +1969,10 @@
         if (Date.now() - state.lastSeekAt < SEEK_MUTE_MS) return;
         const status = videoState();
         if (status === -1 || status === 3) return;
+        if (state.feature && state.feature.segments.length) {
+            featureTick();
+            return;
+        }
         let seconds = videoTime();
         if (!Number.isFinite(seconds)) return;
         if (state.preferred && !videoPlaying() && Math.abs(seconds - state.preferred.seconds) < 1) {
@@ -2040,7 +2118,7 @@
             const media = node('video', null, null);
             media.id = 'detail-video';
             media.controls = true;
-            media.addEventListener('ended', () => playNextFeature());
+            media.addEventListener('ended', () => { if (!advanceFeature()) playNextFeature(); });
             media.preload = 'metadata';
             media.src = '/api/videos/' + video.id + '/media';
             wrapper.append(media);
@@ -2315,6 +2393,12 @@
         container.append(comparison);
         mainView.replaceChildren(container);
         if (state.ytVideoId) mountYouTubePlayer(state.ytVideoId);
+        if (state.feature && state.feature.segments.length) {
+            const startSegment = state.feature.segments[state.feature.index];
+            if (startSegment && startSegment.videoId === state.videoId) {
+                setTimeout(() => seekVideoTo(startSegment.start, { pause: false }), 350);
+            }
+        }
 
         if (matches.length) {
             const wanted = Number(state.pendingMatch) || 0;
