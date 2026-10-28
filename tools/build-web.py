@@ -67,7 +67,7 @@ def approved_labels(html):
 def version_assets(output):
     """The themed scripts must never reuse a native app's cached URL."""
     precache = set()
-    for page in ('index.html', 'F/index.html', 'hub/index.html'):
+    for page in ('index.html', 'F/index.html', 'hub/index.html', 'ppt-lab/index.html'):
         precache.add(page)
         def version(match):
             raw = match[2].replace('&amp;', '&')
