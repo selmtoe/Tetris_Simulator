@@ -29,6 +29,8 @@
         matchLoading: false,
         matchFailed: new Set(),
         pendingMatch: 0,
+        featureList: [],
+        featureIndex: -1,
         searchTimer: null,
         tetofuQuery: '',
         tagQuery: '',
@@ -670,11 +672,13 @@
             toast('再生できる試合がありません。');
             return;
         }
+        state.featureList = videos.filter(video => (video.matchCount || 0) > 0).map(video => video.id);
+        state.featureIndex = state.featureList.indexOf(target.id);
         state.videoId = target.id;
         state.pendingMatch = 1;
         state.follow = true;
         location.hash = '#video/' + target.id;
-        toast('先頭の試合から連続再生します。');
+        toast('絞り込み結果の' + state.featureList.length + '本を続けて再生します。');
     }
     // ---- テト譜のプレビュー -------------------------------------------------
     const BOARD_COLORS = {
@@ -1842,12 +1846,33 @@
                     onReady: event => {
                         state.ytPlayer = event.target;
                         state.ytReady = true;
+                    },
+                    onStateChange: event => {
+                        if (event.data === 0) playNextFeature();
                     }
                 }
             });
         } catch (error) {
             /* API が使えなくても動画自体は再生できる */
         }
+    }
+
+
+    // 連続再生: 終わったら絞り込み結果の次の動画へ
+    function playNextFeature() {
+        if (!state.featureList || !state.featureList.length) return;
+        const next = state.featureIndex + 1;
+        if (next >= state.featureList.length) {
+            toast('連続再生が終わりました。');
+            state.featureList = [];
+            state.featureIndex = -1;
+            return;
+        }
+        state.featureIndex = next;
+        state.videoId = state.featureList[next];
+        state.pendingMatch = 1;
+        state.follow = true;
+        location.hash = '#video/' + state.videoId;
     }
 
     function startSync() {
@@ -2015,6 +2040,7 @@
             const media = node('video', null, null);
             media.id = 'detail-video';
             media.controls = true;
+            media.addEventListener('ended', () => playNextFeature());
             media.preload = 'metadata';
             media.src = '/api/videos/' + video.id + '/media';
             wrapper.append(media);
@@ -2851,6 +2877,10 @@
                     await loadVideos();
                 } else {
                     state.videoId = videoId;
+                    if (state.featureList.length && !state.featureList.includes(videoId)) {
+                        state.featureList = [];
+                        state.featureIndex = -1;
+                    }
                     await loadVideos();
                     await loadMatches(videoId);
                 }
