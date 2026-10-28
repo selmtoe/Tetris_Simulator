@@ -646,21 +646,21 @@ dialog.lab-dialog h2 {
 /* 公開Lab と同じ質感のカード（枠は細く、角丸は大きめ） */
 .card {
     background: var(--surface-color);
-    border: 1px solid #d3dfe3;
-    box-shadow: 0 1px 3px rgba(16, 40, 35, 0.05);
+    border: 1px solid #b9c7c9;
+    box-shadow: 0 2px 8px rgba(16, 40, 35, 0.08);
 }
 
 .card:hover {
-    border-color: #b9c7c9;
-    box-shadow: 0 4px 12px rgba(16, 40, 35, 0.08);
+    border-color: #93a7aa;
+    box-shadow: 0 6px 18px rgba(16, 40, 35, 0.14);
 }
 
-.card .card-meta { color: #66787b; }
-/* タグを読めるようにする（白いカード上で薄すぎる対策） */
+.card .card-meta { color: var(--text-muted); }
+/* タグは公開Lab と同じ見た目（薄いグレーのピル） */
 .tag {
-    background-color: #e9efee;
-    color: #3c5457;
-    border: 1px solid #d2dedd;
+    background-color: #f0f0f0;
+    color: var(--text-muted);
+    border: 0;
     font-weight: 500;
 }
 
@@ -711,7 +711,7 @@ dialog.lab-dialog h2 {
 .ppt-name-group-matches {
   margin: 0;
   font-size: 12px;
-  color: #6b7c7e;
+  color: var(--text-muted);
   line-height: 1.6;
 }
 .ppt-name-details {
