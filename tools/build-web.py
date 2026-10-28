@@ -20,7 +20,7 @@ license_spec.loader.exec_module(ai_licenses)
 appearance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(appearance)
 
-DIRECTORIES = ('F/app', 'F/styles', 'styles', 'simulator/app', 'icons')
+DIRECTORIES = ('F/app', 'F/styles', 'styles', 'simulator/app', 'icons', 'ppt-lab/theme', 'ppt-lab/vendor')
 FILES = (
     'index.html', 'F/index.html', 'manifest.webmanifest', 'sw.js',
     'hub/index.html', 'hub/workspace.css', 'hub/js/workspace.js', 'hub/js/workflow.js', 'hub/js/recovery.js',
@@ -35,7 +35,11 @@ FILES = (
     'simulator/workers/pc-finder-worker.js',
     'simulator/workers/route-search-worker.js', 'shared/search-menu.js', 'shared/search.css',
     'Load PPT/tetris.onnx', 'Load PPT/tetris.model.json',
+    'ppt-lab/index.html', 'ppt-lab/app.js', 'ppt-lab/static-api.js', 'ppt-lab/manifest.webmanifest',
+    'ppt-lab/icon-192.png', 'ppt-lab/icon-512.png', 'ppt-lab/favicon.ico', 'ppt-lab/favicon.png',
 )
+# 閲覧専用 PPT Lab のデータ（tools/ppt-lab/webdata → ppt-lab/data）
+PPTLAB_DATA = ROOT / 'tools/ppt-lab/webdata'
 EXTENSIONS = {'.html', '.css', '.js', '.wasm', '.png', '.jpg', '.svg', '.webp', '.ico'}
 EXCLUDED = {'simulator/app/league-runner.js'}  # Local training and model comparisons.
 
@@ -144,6 +148,17 @@ def build(output):
             shutil.copyfile(source, destination)
     for source, target in [('preview-theme.css', 'appearance.css'), ('preview-appearance.js', 'appearance.js')]:
         shutil.copyfile(ROOT / 'tools/tetris-lab' / source, output / 'shared' / target)
+    # 閲覧専用 PPT Lab のデータ（JSON・名前画像）
+    if PPTLAB_DATA.is_dir():
+        shutil.copytree(PPTLAB_DATA, output / 'ppt-lab' / 'data')
+    # 閲覧専用モードの目印を index.html に入れる
+    ppt_index = output / 'ppt-lab' / 'index.html'
+    if ppt_index.is_file():
+        html = ppt_index.read_text(encoding='utf-8')
+        marker = '<script>window.PPT_STATIC=true;</script>'
+        if marker not in html:
+            html = html.replace('<head>', '<head>\n' + marker, 1)
+            ppt_index.write_text(html, encoding='utf-8')
     ai_licenses.validate(output)
     version_assets(output)
     (output / '.nojekyll').write_text('', encoding='utf-8')

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PPT Lab</title>
+<link rel="icon" href="favicon.ico?v=3" sizes="any">
+<link rel="icon" type="image/png" href="favicon.png?v=3">
+<link rel="apple-touch-icon" href="icon-192.png?v=3">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f9f9f9">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="theme/base.css">
+<link rel="stylesheet" href="theme/lab-enhancements.css">
+<link rel="stylesheet" href="theme/ppt-lab.css?v=1793149419">
+</head>
+<body>
+<header>
+    <div class="header-inner">
+        <a class="logo" href="#videos" id="app-logo">PPT Lab</a>
+        <div class="nav-wrapper">
+            <nav class="nav-links" aria-label="表示の切り替え">
+                <a class="nav-item active" href="#videos" data-view="videos">Videos</a>
+                <a class="nav-item" href="#tetofu" data-view="tetofu">Tetofu</a>
+                <a class="nav-item" href="#tags" data-view="tags">Tags</a>
+            <a class="nav-item" href="#settings" data-view="settings">Settings</a>
+            </nav>
+        </div>
+        <div class="search-box">
+            <svg class="search-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.6"></circle>
+                <path d="M11 11l3.4 3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+            </svg>
+            <input class="search-input" id="global-search" type="search" placeholder="Search..." aria-label="検索">
+        </div>
+    </div>
+</header>
+<p class="lab-status" id="lab-status" role="status"></p>
+<main id="main-view" class="container"></main>
+
+<dialog class="lab-dialog" id="entry-dialog" aria-labelledby="entry-dialog-title">
+    <form method="dialog" id="entry-form">
+        <h2 id="entry-dialog-title">登録</h2>
+        <p class="lab-dialog-note" id="entry-dialog-note"></p>
+        <label class="lab-field">
+            <span>タイトル</span>
+            <input id="entry-title" type="text" autocomplete="off">
+        </label>
+        <label class="lab-field">
+            <span>URL</span>
+            <input id="entry-url" type="text" autocomplete="off" inputmode="url">
+        </label>
+        <div class="lab-inline-actions">
+            <button type="submit" value="ok" class="lab-primary" id="entry-submit">登録する</button>
+            <button type="button" class="btn-outline" id="entry-cancel">キャンセル</button>
+        </div>
+    </form>
+</dialog>
+
+<dialog class="lab-dialog" id="tag-dialog" aria-labelledby="tag-dialog-title">
+    <form method="dialog" id="tag-form">
+        <h2 id="tag-dialog-title">タグ</h2>
+        <p class="lab-dialog-note" id="tag-dialog-note"></p>
+        <div class="ppt-tag-picker" id="tag-picker"></div>
+        <label class="lab-field">
+            <span>新しいタグ（カンマ区切りで追加）</span>
+            <input id="tag-new" type="text" autocomplete="off" placeholder="例: 開幕, T-spin">
+        </label>
+        <div class="lab-inline-actions">
+            <button type="submit" value="ok" class="lab-primary" id="tag-save">保存する</button>
+            <button type="button" class="btn-outline" id="tag-cancel">キャンセル</button>
+        </div>
+    </form>
+</dialog>
+
+<script src="vendor/tetris-event-codec.js"></script>
+<iframe id="detail-viewer" class="lab-replay-viewer" title="盤面ビューワー" hidden
+        src="https://selmtoe.github.io/Tetris_Simulator/F/?labViewer=1"></iframe>
+<script src="vendor/viewer-render.js"></script>
+<script src="static-api.js"></script>
+<script src="app.js?v=1793149419"></script>
+</body>
+</html>
