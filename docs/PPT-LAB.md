@@ -312,3 +312,38 @@ TR_BATCH_RELEASE_DELAY_SECONDS=5
 
 ### 注意
 - PS1 は **UTF-8 BOM 必須**（BOM を落とすと PowerShell 5.1 が文字化けして構文エラーになる）。
+## 30. 設定タブの全面実装（2026-10-29）
+
+### 構造
+Settings は **5タブ**: 一般 / 表示 / 解析 / 名前とタグ / データ管理。
+`#settings/データ管理` のようにタブをURLで指定できる。
+
+### 設定の器
+- `SETTINGS_SCHEMA`（server.py）に19項目の型・既定値・選択肢・注意書きを定義
+- `GET /api/settings/schema` を画面が読んで描画（設定追加時にJSを触らない）
+- 値は JSON で保存（bool/int/enum/path）。`GET/POST /api/settings` は既定値マージ＋型変換
+- 保存失敗時は画面の値を元に戻す（`saveSetting` のロールバック）
+
+### 配線済み
+| 設定 | 反映先 |
+|---|---|
+| theme | `html[data-theme]` |
+| pageSize | 一覧のページ件数 |
+| playbackRate | 動画の既定再生速度 |
+| sortOrder | 一覧の既定並び順 |
+| startView | 起動時に開く画面（`pptLastView` を localStorage に保存） |
+| autoTags | `/api/videos` の自動タグ付与を止める |
+| downloadQuality | yt-dlp の `-f`（1080/720/480/320） |
+| analysisDevice=cpu | PS1 `-ForceCpu`（`TR_BATCH_CPU_MODE=1`） |
+| useRamDisk | PS1 `-UseRamDisk` |
+| detailedLog | PS1 `-DetailedLog` |
+| analysisProfile | `profiles.json` のモデルパスを PS1 へ |
+
+### データ管理タブ
+- プレイヤーネームの対応: 検索・名前変更・統合・解除（`/api/names/rename`・`/api/names/merge`）
+- 動画の保存: `videoStorage` / `missingVideoAction` / 合計サイズ
+- キャッシュ: 名前画像・解析キャッシュのサイズ表示と削除（`/api/data/cache`）
+- このアプリについて: 版・データの場所・DBサイズ・動画/試合数（`/api/data/info`）
+
+### 未配線（値は保存されるが動作に未反映）
+`tagPromptOnSave` / `downloadDir` / `analysisOutputDir` / `videoStorage` / `missingVideoAction`

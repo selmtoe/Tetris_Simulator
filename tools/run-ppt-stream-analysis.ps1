@@ -3,6 +3,7 @@
     [switch]$DetailedLog,
     [switch]$MachineReadable,
     [switch]$ForceReanalysis,
+    [switch]$ForceCpu,
     # Internal test seams. Normal users and TetrisStudy.exe do not pass these.
     [string]$BatchExecutable = '',
     [string]$OutputDirectory = '',
@@ -459,6 +460,7 @@ try {
         # Keep consuming them so the real native exit code and saved log remain available.
         $ErrorActionPreference = 'Continue'
         # 8GB GPU で 3 ワーカーを常時動かすための予算（実測の最適点）
+        if ($ForceCpu) { $env:TR_BATCH_CPU_MODE = '1' }
         $env:TR_BATCH_WORKERS = '3'
         $env:TR_BOARD_WORKERS = '2'
         $env:TR_BATCH_WORKER_RAM_MB = '1536'

@@ -54,6 +54,8 @@
         editsVideoId: '',
         nameGroups: new Map(),
         settings: {},
+        settingsTab: '一般',
+        settingsSchema: [],
         groups: new Set()
     };
 
@@ -534,7 +536,9 @@
         bind('相手', 'opponent', [['', 'すべて'], ...players.map(name => [name, name])]);
         bind('タグ', 'tag', [['', 'すべて'], ...tagChoices.map(name => [name, name])]);
         bind('勝敗', 'result', [['', 'すべて'], ['win', '勝ち'], ['lost', '負け'], ['review', '未確定']]);
-        bind('並び順', 'sort', [['newest', '新しい順'], ['oldest', '古い順'], ['title', 'タイトル順']]);
+        const sortOptions = [['newest', '新しい順'], ['oldest', '古い順'], ['title', 'タイトル順'], ['matches', '試合数順']];
+        const sortDefault = String(setting('sortOrder') || 'new');
+        bind('並び順', 'sort', sortOptions, ['newest', 'oldest', 'title', 'matches'].includes(sortDefault) ? sortDefault : 'newest');
 
         const clear = node('button', '絞り込みを解除', 'btn-outline');
         clear.type = 'button';
@@ -584,7 +588,7 @@
         const list = node('div', null, 'ppt-tile-grid');
         root.append(list);
 
-        const pageSize = 40;
+        const pageSize = Math.max(5, Number(setting('pageSize')) || 40);
         const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
         state.page = Math.min(state.page, pageCount - 1);
         const visible = rows.slice(state.page * pageSize, (state.page + 1) * pageSize);
@@ -1025,6 +1029,7 @@
     }
 
     async function saveSetting(key, value) {
+        const previous = state.settings ? state.settings[key] : undefined;
         state.settings = Object.assign({}, state.settings, { [key]: value });
         if (key === 'theme') applyTheme();
         try {
@@ -1035,116 +1040,138 @@
             });
             notify('設定を保存しました。');
         } catch (error) {
+            state.settings = Object.assign({}, state.settings, { [key]: previous });
+            if (key === 'theme') applyTheme();
             toast(error.message);
         }
+    }
+
+    const SETTINGS_TABS = ['一般', '表示', '解析', '名前とタグ', 'データ管理'];
+
+    function settingsTab() {
+        return state.settingsTab && SETTINGS_TABS.includes(state.settingsTab) ? state.settingsTab : '一般';
+    }
+
+    function settingControl(item) {
+        const value = setting(item.key);
+        if (item.type === 'bool') {
+            const box = node('input');
+            box.type = 'checkbox';
+            box.checked = Boolean(value);
+            box.addEventListener('change', () => saveSetting(item.key, box.checked));
+            return box;
+        }
+        if (item.options && item.options.length) {
+            const select = node('select');
+            item.options.forEach(option => {
+                const element = node('option', option[1]);
+                element.value = String(option[0]);
+                select.append(element);
+            });
+            select.value = String(value);
+            select.addEventListener('change', () => {
+                saveSetting(item.key, item.type === 'int' ? Number(select.value) : select.value);
+            });
+            return select;
+        }
+        const input = node('input');
+        input.type = 'text';
+        input.value = value == null ? '' : String(value);
+        input.placeholder = '（既定）';
+        input.addEventListener('change', () => saveSetting(item.key, input.value.trim()));
+        return input;
     }
 
     function renderSettings() {
         const root = node('section', null, 'lab-video-library');
         mainView.replaceChildren(root);
-
         const header = node('div', null, 'lab-video-library-heading');
         header.append(node('h2', '設定', 'section-title'));
         root.append(header);
 
-        const field = (label, control, note) => {
-            const wrap = node('label', null, 'ppt-setting-row');
-            wrap.append(node('span', label, 'ppt-setting-label'));
-            wrap.append(control);
-            if (note) wrap.append(node('span', note, 'ppt-setting-note'));
-            return wrap;
+        const tabs = node('div', null, 'lab-video-tabs');
+        SETTINGS_TABS.forEach(name => {
+            const button = node('button', name, 'btn-outline');
+            button.type = 'button';
+            button.setAttribute('aria-pressed', String(name === settingsTab()));
+            button.addEventListener('click', () => { state.settingsTab = name; renderSettings(); });
+            tabs.append(button);
+        });
+        root.append(tabs);
+
+        const body = node('div', null, 'ppt-settings-body');
+        root.append(body);
+
+        if (settingsTab() === 'データ管理') {
+            renderDataTab(body);
+            return;
+        }
+
+        (async () => {
+            let schema = state.settingsSchema || [];
+            if (!schema.length) {
+                try {
+                    const result = await api('/api/settings/schema');
+                    schema = result.schema || [];
+                    state.settingsSchema = schema;
+                } catch (error) {
+                    schema = [];
+                }
+            }
+            const group = settingsTab();
+            schema.filter(item => item.group === group).forEach(item => {
+                const row = node('label', null, 'ppt-setting-row');
+                row.append(node('span', item.label, 'ppt-setting-label'));
+                row.append(settingControl(item));
+                if (item.note) row.append(node('span', item.note, 'ppt-setting-note'));
+                body.append(row);
+            });
+        })();
+    }
+
+    function renderDataTab(body) {
+        const card = (title) => {
+            const box = node('div', null, 'card ppt-setting-card');
+            box.append(node('h3', title, 'card-title'));
+            body.append(box);
+            return box;
         };
 
-        // 表示
-        const display = node('div', null, 'card ppt-setting-card');
-        display.append(node('h3', '表示', 'card-title'));
-        const themeSelect = node('select');
-        [['light', 'ライト'], ['dark', 'ダーク']].forEach(([value, text]) => {
-            const option = node('option', text);
-            option.value = value;
-            themeSelect.append(option);
-        });
-        themeSelect.value = setting('theme');
-        themeSelect.addEventListener('change', () => saveSetting('theme', themeSelect.value));
-        display.append(field('テーマ', themeSelect));
-        root.append(display);
-
-        // シミュレータ・エディタ
-        const tools = node('div', null, 'card ppt-setting-card');
-        tools.append(node('h3', 'シミュレータ・エディタ', 'card-title'));
-        const baseInput = node('input');
-        baseInput.type = 'url';
-        baseInput.value = setting('simulatorBase');
-        baseInput.addEventListener('change', () => saveSetting('simulatorBase', baseInput.value.trim()));
-        tools.append(field('既定のURL', baseInput));
-
-        const openSelect = node('select');
-        [['newTab', '新しいタブ'], ['sameTab', '同じタブ']].forEach(([value, text]) => {
-            const option = node('option', text);
-            option.value = value;
-            openSelect.append(option);
-        });
-        openSelect.value = setting('openLinks');
-        openSelect.addEventListener('change', () => saveSetting('openLinks', openSelect.value));
-        tools.append(field('外部リンクの開き方', openSelect));
-        root.append(tools);
-
-        // 解析
-        const analysis = node('div', null, 'card ppt-setting-card');
-        analysis.append(node('h3', '解析', 'card-title'));
-        const workersSelect = node('select');
-        [['1', '1本'], ['2', '2本'], ['3', '3本']].forEach(([value, text]) => {
-            const option = node('option', text);
-            option.value = value;
-            workersSelect.append(option);
-        });
-        workersSelect.value = setting('analysisWorkers');
-        workersSelect.addEventListener('change', () => saveSetting('analysisWorkers', workersSelect.value));
-        analysis.append(field('同時に解析する本数', workersSelect));
-        root.append(analysis);
-
-        // プレイヤーネームの対応
-        const names = node('div', null, 'card ppt-setting-card');
-        const nameHead = node('div', null, 'lab-video-library-heading');
-        nameHead.append(node('h3', 'プレイヤーネームの対応', 'card-title'));
-        const reload = node('button', '再読み込み', 'btn-outline');
-        reload.type = 'button';
-        reload.addEventListener('click', () => renderSettings());
-        nameHead.append(reload);
-        names.append(nameHead);
-
+        // --- プレイヤーネームの対応 ---
+        const names = card('プレイヤーネームの対応');
+        const search = node('input');
+        search.type = 'search';
+        search.placeholder = '名前で検索';
+        search.addEventListener('input', () => renderRows(search.value.trim()));
+        names.append(search);
         const table = node('table', null, 'ppt-name-table ppt-mapping-table');
         const head = node('thead');
         const headRow = node('tr');
         ['画像', '名前', '使用', '更新', ''].forEach(label => headRow.append(node('th', label)));
         head.append(headRow);
         table.append(head);
-        const body = node('tbody');
-        table.append(body);
+        const tbody = node('tbody');
+        table.append(tbody);
         names.append(table);
-        root.append(names);
 
-        (async () => {
-            let mappings = [];
-            try {
-                const result = await api('/api/names/mappings');
-                mappings = result.mappings || [];
-            } catch (error) {
-                return;
-            }
-            if (!mappings.length) {
+        let mappings = [];
+        const renderRows = (query) => {
+            tbody.replaceChildren();
+            const filtered = mappings.filter(item => !query || String(item.name).includes(query));
+            if (!filtered.length) {
                 const row = node('tr');
-                const cell = node('td', 'まだ対応がありません。プレイヤー名を登録すると、ここに貯まります。', 'lab-help-text');
+                const cell = node('td', '対応がありません。', 'lab-help-text');
                 cell.colSpan = 5;
                 row.append(cell);
-                body.append(row);
+                tbody.append(row);
+                return;
             }
-            mappings.forEach(mapping => {
+            filtered.forEach(item => {
                 const row = node('tr');
                 const imageCell = node('td');
-                if (mapping.image) {
+                if (item.image) {
                     const image = node('img', null, 'ppt-mapping-image');
-                    image.src = mapping.image;
+                    image.src = item.image;
                     image.alt = '';
                     image.loading = 'lazy';
                     imageCell.append(image);
@@ -1152,30 +1179,128 @@
                     imageCell.append(node('span', '—', 'ppt-muted'));
                 }
                 row.append(imageCell);
-                row.append(node('td', mapping.name));
-                row.append(node('td', String(mapping.hits || 0) + ' 回 / ' + (mapping.fingerprints ? mapping.fingerprints.length : 1) + ' 画像'));
-                row.append(node('td', String(mapping.updatedAt || '').slice(0, 16).replace('T', ' ')));
-                const actionCell = node('td');
+                row.append(node('td', item.name));
+                row.append(node('td', String(item.hits || 0) + ' 回 / ' + (item.fingerprints ? item.fingerprints.length : 1) + ' 画像'));
+                row.append(node('td', String(item.updatedAt || '').slice(0, 16).replace('T', ' ')));
+                const actions = node('td', null, 'ppt-row-actions');
+                const rename = node('button', '名前を変更', 'btn-outline');
+                rename.type = 'button';
+                rename.addEventListener('click', async () => {
+                    const next = window.prompt('新しい名前', item.name);
+                    if (!next || next === item.name) return;
+                    try {
+                        await api('/api/names/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ from: item.name, to: next }) });
+                        notify('名前を変更しました。');
+                        load();
+                    } catch (error) { toast(error.message); }
+                });
+                const merge = node('button', '統合', 'btn-outline');
+                merge.type = 'button';
+                merge.addEventListener('click', async () => {
+                    const target = window.prompt('統合先の名前', item.name);
+                    if (!target || target === item.name) return;
+                    try {
+                        await api('/api/names/merge', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ from: item.name, to: target }) });
+                        notify('統合しました。');
+                        load();
+                    } catch (error) { toast(error.message); }
+                });
                 const unlink = node('button', '解除', 'btn-outline');
                 unlink.type = 'button';
                 unlink.addEventListener('click', async () => {
-                    if (!window.confirm('「' + mapping.name + '」の紐づけを解除しますか？')) return;
+                    if (!window.confirm('「' + item.name + '」の紐づけを解除しますか？')) return;
                     try {
-                        await api('/api/names/mappings', {
-                            method: 'DELETE',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ name: mapping.name })
-                        });
+                        await api('/api/names/mappings', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: item.name }) });
                         notify('紐づけを解除しました。');
-                        renderSettings();
-                    } catch (error) {
-                        toast(error.message);
-                    }
+                        load();
+                    } catch (error) { toast(error.message); }
                 });
-                actionCell.append(unlink);
-                row.append(actionCell);
-                body.append(row);
+                actions.append(rename, merge, unlink);
+                row.append(actions);
+                tbody.append(row);
             });
+        };
+        const load = async () => {
+            try {
+                const result = await api('/api/names/mappings');
+                mappings = result.mappings || [];
+            } catch (error) {
+                mappings = [];
+            }
+            renderRows(search.value.trim());
+        };
+        load();
+
+        // --- 動画の保存 ---
+        const storage = card('動画の保存');
+        (async () => {
+            let schema = state.settingsSchema || [];
+            if (!schema.length) {
+                try {
+                    const result = await api('/api/settings/schema');
+                    schema = result.schema || [];
+                    state.settingsSchema = schema;
+                } catch (error) { schema = []; }
+            }
+            schema.filter(item => item.group === 'データ管理').forEach(item => {
+                const row = node('label', null, 'ppt-setting-row');
+                row.append(node('span', item.label, 'ppt-setting-label'));
+                row.append(settingControl(item));
+                storage.append(row);
+            });
+            const info = await api('/api/data/info').catch(() => null);
+            if (info) {
+                const row = node('div', null, 'ppt-setting-row');
+                row.append(node('span', '動画の合計サイズ', 'ppt-setting-label'));
+                row.append(node('span', (info.mediaSize / 1024 / 1024 / 1024).toFixed(1) + ' GB', 'ppt-setting-value'));
+                storage.append(row);
+            }
+        })();
+
+        // --- キャッシュ ---
+        const cache = card('キャッシュ');
+        const cacheRow = (label, kind, sizeText) => {
+            const row = node('div', null, 'ppt-setting-row');
+            row.append(node('span', label, 'ppt-setting-label'));
+            row.append(node('span', sizeText, 'ppt-setting-value'));
+            const button = node('button', '削除', 'btn-outline');
+            button.type = 'button';
+            button.addEventListener('click', async () => {
+                if (!window.confirm(label + 'を削除しますか？')) return;
+                try {
+                    const result = await api('/api/data/cache', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ kind }) });
+                    notify((result.freed / 1024 / 1024).toFixed(1) + ' MB 削除しました。');
+                    renderSettings();
+                } catch (error) { toast(error.message); }
+            });
+            row.append(button);
+            cache.append(row);
+        };
+        (async () => {
+            const info = await api('/api/data/info').catch(() => null);
+            cacheRow('名前画像', 'crops', info ? (info.cropSize / 1024).toFixed(0) + ' KB' : '—');
+            cacheRow('解析キャッシュ', 'analysis', info ? (info.analysisCacheSize / 1024 / 1024).toFixed(1) + ' MB（' + info.analysisCacheCount + '件）' : '—');
+        })();
+
+        // --- このアプリについて ---
+        const about = card('このアプリについて');
+        (async () => {
+            const info = await api('/api/data/info').catch(() => null);
+            if (!info) return;
+            const line = (label, value) => {
+                const row = node('div', null, 'ppt-setting-row');
+                row.append(node('span', label, 'ppt-setting-label'));
+                row.append(node('span', value, 'ppt-setting-value'));
+                about.append(row);
+            };
+            line('バージョン', info.version);
+            line('データの場所', info.dataDir);
+            line('DBサイズ', (info.dbSize / 1024 / 1024).toFixed(1) + ' MB');
+            line('動画 / 試合', info.videos + '本 / ' + info.matches + '試合');
         })();
     }
 
@@ -1193,8 +1318,13 @@
         else if (state.view === 'names') renderNames();
         else if (state.view === 'tetofu') renderTetofu();
         else if (state.view === 'tags') renderTags();
-        else if (state.view === 'settings') renderSettings();
+        else if (state.view === 'settings') {
+            const parts = String(location.hash || '').replace(/^#/, '').split('/');
+            if (parts[1]) state.settingsTab = decodeURIComponent(parts[1]);
+            renderSettings();
+        }
         else renderVideos();
+        try { localStorage.setItem('pptLastView', String(location.hash || '#videos')); } catch (error) { /* 保存できなくてもよい */ }
         syncPolling();
     }
 
@@ -1851,7 +1981,7 @@
                 controls.querySelectorAll('.rate-btn').forEach(item => item.classList.remove('active'));
                 button.classList.add('active');
                 const media = document.getElementById('detail-video');
-                if (media) media.playbackRate = rate;
+                if (media) media.playbackRate = Number(rate) || Number(setting('playbackRate')) || 1;
             });
             controls.append(button);
         });
@@ -2744,6 +2874,11 @@
         await loadEnvironment();
         try { await loadTags(); } catch (error) { /* 起動時の失敗は無視 */ }
         await loadSettings();
+        if (!location.hash) {
+            const last = localStorage.getItem('pptLastView');
+            const useLast = String(setting('startView') || 'videos') === 'last' && last;
+            location.hash = useLast ? last : '#videos';
+        }
         await route();
     })();
 })();

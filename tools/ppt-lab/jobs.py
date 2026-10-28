@@ -45,6 +45,12 @@ class JobError(Exception):
     """利用者に見せる失敗（日本語の理由つき）。"""
 
 
+def _quality_format(quality: str = '1080') -> str:
+    """設定の画質上限から yt-dlp の書式を作る。"""
+    height = {'1080': 1080, '720': 720, '480': 480, '320': 320}.get(str(quality), 1080)
+    return f'bv*[height<={height}]+ba/b[height<={height}]/b'
+
+
 def _decode(raw: bytes) -> str:
     for encoding in ('utf-8', 'cp932'):
         try:
@@ -157,7 +163,7 @@ class JobManager:
         target.mkdir(parents=True, exist_ok=True)
         command = [yt_dlp, '--newline', '--no-playlist', '--no-warnings',
                    '--merge-output-format', 'mkv',
-                   '-f', 'bv*+ba/b',
+                   '-f', _quality_format(self.store.settings().get('downloadQuality', '1080')),
                    '-o', str(target / '%(title)s [%(id)s].%(ext)s')]
         ffmpeg = self.runtime / 'bin' / 'ffmpeg.exe'
         if ffmpeg.is_file():
@@ -196,6 +202,16 @@ class JobManager:
             raise JobError('解析エンジンが見つかりません（runtime\\bin\\TetrisVideoRecovery_stream.exe）。')
         command = ['powershell.exe', '-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass',
                    '-File', str(script), '-VideoPath', str(video), '-MachineReadable']
+        try:
+            _s = self.store.settings()
+            if _s.get('useRamDisk'):
+                command.append('-UseRamDisk')
+            if _s.get('detailedLog'):
+                command.append('-DetailedLog')
+            if str(_s.get('analysisDevice') or 'gpu') == 'cpu':
+                command += ['-ForceCpu']
+        except Exception:
+            pass
         # 解析プロファイル（モデルの切り替え）。未指定なら従来どおり。
         try:
             profile = load_profile(self.store.settings().get('analysisProfile', 'standard'))

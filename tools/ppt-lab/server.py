@@ -21,6 +21,77 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+
+
+def _dir_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    total = 0
+    for item in path.rglob('*'):
+        if item.is_file():
+            try:
+                total += item.stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def data_info() -> dict:
+    """データ管理タブに出す情報。"""
+    data_dir = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'PPTLab'
+    db = data_dir / 'pptlab.sqlite3'
+    batches = ROOT_RUNTIME / 'data' / 'batches'
+    caches = list(batches.rglob('analysis-cache.v1.json')) if batches.exists() else []
+    return {
+        'version': VERSION,
+        'dataDir': str(data_dir),
+        'dbSize': db.stat().st_size if db and db.is_file() else 0,
+        'mediaSize': _dir_size(data_dir / 'media'),
+        'cropSize': _dir_size(CROP_DIR),
+        'analysisCacheSize': sum(item.stat().st_size for item in caches if item.is_file()),
+        'analysisCacheCount': len(caches),
+        'videos': len(STORE.videos()),
+        'matches': sum(int(item.get('matchCount') or 0) for item in STORE.videos()),
+    }
+
+SETTINGS_SCHEMA = [
+    {'key': 'startView', 'group': '一般', 'label': '起動時に開く画面', 'type': 'enum',
+     'default': 'videos', 'options': [['videos', '動画一覧'], ['last', '前回の画面']]},
+    {'key': 'openLinks', 'group': '一般', 'label': 'リンクの開き方', 'type': 'enum',
+     'default': 'newTab', 'options': [['newTab', '新しいブラウザ'], ['sameWindow', 'このウィンドウ内']],
+     'note': '「このウィンドウ内」は準備中です（選んでも新しいタブで開きます）'},
+    {'key': 'notifyAnalysis', 'group': '一般', 'label': '解析完了の通知', 'type': 'bool', 'default': True},
+    {'key': 'tagPromptOnSave', 'group': '一般', 'label': '保存時にタグ選択を出す', 'type': 'bool', 'default': True},
+    {'key': 'theme', 'group': '表示', 'label': 'テーマ', 'type': 'enum', 'default': 'light',
+     'options': [['light', 'ライト'], ['dark', 'ダーク']]},
+    {'key': 'pageSize', 'group': '表示', 'label': '1ページの件数', 'type': 'int', 'default': 40,
+     'options': [[20, '20'], [40, '40'], [60, '60'], [100, '100']]},
+    {'key': 'playbackRate', 'group': '表示', 'label': '既定の再生速度', 'type': 'enum', 'default': '1',
+     'options': [['0.25', 'x0.25'], ['0.5', 'x0.5'], ['1', 'x1.0'], ['1.5', 'x1.5']]},
+    {'key': 'sortOrder', 'group': '表示', 'label': '既定の並び順', 'type': 'enum', 'default': 'new',
+     'options': [['new', '新しい順'], ['old', '古い順'], ['matches', '試合数が多い順'], ['title', '名前順']]},
+    {'key': 'downloadQuality', 'group': '解析', 'label': '画質の上限', 'type': 'enum', 'default': '1080',
+     'options': [['1080', '1080p'], ['720', '720p'], ['480', '480p'], ['320', '320p']]},
+    {'key': 'downloadDir', 'group': '解析', 'label': '動画の保存先', 'type': 'path', 'default': ''},
+    {'key': 'analysisProfile', 'group': '解析', 'label': '解析モデル', 'type': 'enum', 'default': 'standard',
+     'options': [['standard', '標準 (1080p)'], ['fast320', '高速 (320p)'], ['other-game', 'ぷよテト以外']],
+     'note': '変えると次回の解析は最初からやり直しになります'},
+    {'key': 'analysisDevice', 'group': '解析', 'label': '精度モード', 'type': 'enum', 'default': 'gpu',
+     'options': [['gpu', 'GPU'], ['cpu', 'CPU'], ['auto', '自動']],
+     'note': '変えると次回の解析は最初からやり直しになります'},
+    {'key': 'analysisOutputDir', 'group': '解析', 'label': '解析の出力先', 'type': 'path', 'default': ''},
+    {'key': 'useRamDisk', 'group': '解析', 'label': 'RAMディスクを使う', 'type': 'bool', 'default': False},
+    {'key': 'detailedLog', 'group': '解析', 'label': '詳細ログを残す', 'type': 'bool', 'default': False},
+    {'key': 'autoApplyNames', 'group': '名前とタグ', 'label': 'プレイヤー名の記憶を自動適用', 'type': 'bool', 'default': True},
+    {'key': 'autoTags', 'group': '名前とタグ', 'label': '自動タグを付ける', 'type': 'bool', 'default': True},
+    {'key': 'videoStorage', 'group': 'データ管理', 'label': '動画ファイルの扱い', 'type': 'enum', 'default': 'reference',
+     'options': [['reference', '元の場所を参照'], ['copy', 'アプリ内にコピー']]},
+    {'key': 'missingVideoAction', 'group': 'データ管理', 'label': '元ファイルが見つからないとき', 'type': 'enum',
+     'default': 'warn', 'options': [['warn', '警告を出す'], ['refetch', '自動で再取得'], ['ignore', '無視']]},
+]
+SETTING_DEFAULTS = {item['key']: item['default'] for item in SETTINGS_SCHEMA}
+SETTING_TYPES = {item['key']: item['type'] for item in SETTINGS_SCHEMA}
+
 PROFILES = []
 try:
     PROFILES = json.loads((Path(__file__).with_name('profiles.json')).read_text(encoding='utf-8')).get('profiles') or []
@@ -28,6 +99,8 @@ except (OSError, json.JSONDecodeError):
     PROFILES = []
 
 
+ROOT_RUNTIME = Path(__file__).resolve().parents[1] / 'video-recovery-runtime'
+VERSION = '0.1.0'
 CROP_DIR = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'PPTLab' / 'name-crops'
 
 VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.webm', '.mov', '.avi', '.ts', '.m4v', '.flv'}
@@ -362,7 +435,8 @@ class Handler(BaseHTTPRequestHandler):
                 auto = ['動画解析'] + [name for name in players if name]
                 stored = STORE.tags_for(video['id'])
                 # 自動タグは必ず付く。手動タグはその後ろに足す。
-                STORE.materialize_tags(video['id'], auto)
+                if bool(STORE.settings().get('autoTags', True)):
+                    STORE.materialize_tags(video['id'], auto)
                 merged = list(auto)
                 for name in stored:
                     if name not in merged:
@@ -378,10 +452,55 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({'videos': videos})
         if path == '/api/tetofu':
             return self.send_json({'tetofu': STORE.tetofu()})
+        if path == '/api/names/rename':
+            body = self.read_json() or {}
+            old = str(body.get('from') or '').strip()
+            new = str(body.get('to') or '').strip()
+            if not old or not new:
+                raise ValueError('変更前と変更後の名前を入れてください')
+            changed = STORE.rename_name(old, new)
+            return self.send_json({'ok': True, 'changed': changed})
+        if path == '/api/names/merge':
+            body = self.read_json() or {}
+            source = str(body.get('from') or '').strip()
+            target = str(body.get('to') or '').strip()
+            if not source or not target:
+                raise ValueError('統合する名前を2つ選んでください')
+            changed = STORE.rename_name(source, target)
+            return self.send_json({'ok': True, 'changed': changed})
+        if path == '/api/data/info':
+            return self.send_json(data_info())
+        if path == '/api/settings/schema':
+            return self.send_json({'schema': SETTINGS_SCHEMA})
         if path == '/api/settings':
-            return self.send_json({'settings': STORE.settings()})
+            values = dict(SETTING_DEFAULTS)
+            values.update({k: v for k, v in STORE.settings().items() if k in SETTING_TYPES})
+            return self.send_json({'settings': values})
         if path == '/api/analysis/profiles':
             return self.send_json({'profiles': PROFILES, 'active': STORE.settings().get('analysisProfile', 'standard')})
+        if path == '/api/data/cache':
+            body = self.read_json() or {}
+            kind = str(body.get('kind') or '')
+            freed = 0
+            if kind == 'crops':
+                if CROP_DIR.exists():
+                    for item in CROP_DIR.glob('*.png'):
+                        try:
+                            freed += item.stat().st_size
+                            item.unlink()
+                        except OSError:
+                            pass
+            elif kind == 'analysis':
+                batches = ROOT_RUNTIME / 'data' / 'batches'
+                for item in list(batches.rglob('analysis-cache.v1.json')) if batches.exists() else []:
+                    try:
+                        freed += item.stat().st_size
+                        item.unlink()
+                    except OSError:
+                        pass
+            else:
+                raise ValueError('対象の指定が正しくありません')
+            return self.send_json({'ok': True, 'freed': freed})
         if path == '/api/names/mappings':
             rows = STORE.name_mappings()
             grouped = {}
@@ -502,10 +621,21 @@ class Handler(BaseHTTPRequestHandler):
     def api_post(self, path: str) -> None:
         assert STORE is not None
         if path == '/api/settings':
-            body = self.read_json()
-            for key, value in (body or {}).items():
-                STORE.set_setting(str(key), str(value))
-            return self.send_json({'ok': True, 'settings': STORE.settings()})
+            body = self.read_json() or {}
+            for key, value in body.items():
+                kind = SETTING_TYPES.get(str(key))
+                if kind is None:
+                    continue
+                if kind == 'bool':
+                    value = bool(value)
+                elif kind == 'int':
+                    value = int(value)
+                else:
+                    value = str(value)
+                STORE.set_setting(str(key), value)
+            values = dict(SETTING_DEFAULTS)
+            values.update({k: v for k, v in STORE.settings().items() if k in SETTING_TYPES})
+            return self.send_json({'ok': True, 'settings': values})
         if path == '/api/tags':
             body = self.read_json()
             return self.send_json(STORE.add_tag(str(body.get('name', ''))))

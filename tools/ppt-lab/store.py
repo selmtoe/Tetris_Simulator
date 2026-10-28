@@ -170,13 +170,19 @@ class Store:
     def settings(self) -> dict:
         with self.connect() as db:
             rows = db.execute('SELECT key, value FROM settings').fetchall()
-        return {row['key']: row['value'] for row in rows}
+        result = {}
+        for row in rows:
+            try:
+                result[row['key']] = json.loads(row['value'])
+            except (TypeError, json.JSONDecodeError):
+                result[row['key']] = row['value']
+        return result
 
-    def set_setting(self, key: str, value: str) -> None:
+    def set_setting(self, key: str, value) -> None:
         with self.connect() as db:
             db.execute('INSERT INTO settings(key, value, updated_at) VALUES(?,?,?) '
                        'ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at',
-                       (key, value, now()))
+                       (key, json.dumps(value, ensure_ascii=False), now()))
 
     # ---- 名前の対応 -------------------------------------------------------
     def name_mappings(self) -> list[dict]:
@@ -300,6 +306,27 @@ class Store:
                 db.execute('INSERT OR IGNORE INTO tag_links(tag,target,created_at) VALUES(?,?,?)',
                            (name, target, now()))
         return clean
+
+    def rename_name(self, old: str, new: str) -> int:
+        """名前の記憶を付け替える（統合にも使う）。"""
+        with self.connect() as db:
+            changed = db.execute('UPDATE name_memory SET name=? WHERE name=?', (new, old)).rowcount
+            db.execute('INSERT OR IGNORE INTO tags(name,created_at) VALUES(?,?)', (new, now()))
+            db.execute('UPDATE OR IGNORE tag_links SET tag=? WHERE tag=?', (new, old))
+            db.execute('DELETE FROM tag_links WHERE tag=? AND EXISTS '
+                       '(SELECT 1 FROM tag_links t2 WHERE t2.tag=? AND t2.target=tag_links.target)', (old, new))
+            db.execute('DELETE FROM tags WHERE name=?', (old,))
+        return int(changed or 0)
+
+    def remove_tag_link(self, target: str, name: str) -> None:
+        with self.connect() as db:
+            db.execute('DELETE FROM tag_links WHERE target=? AND tag=?', (target, name))
+
+    def prune_tags(self) -> int:
+        """どの対象にも付いていないタグを消す。"""
+        with self.connect() as db:
+            removed = db.execute('DELETE FROM tags WHERE name NOT IN (SELECT DISTINCT tag FROM tag_links)').rowcount
+        return int(removed or 0)
 
     def set_tags(self, target: str, names: list[str]) -> list[str]:
         clean = []
