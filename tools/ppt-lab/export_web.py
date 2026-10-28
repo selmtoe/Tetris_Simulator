@@ -26,6 +26,12 @@ def youtube_of(source: str, title: str) -> str:
         return source.split('watch?v=')[-1][:11]
     if 'youtu.be/' in source:
         return source.split('youtu.be/')[-1][:11]
+    for marker in ('/live/', '/shorts/', '/embed/'):
+        if marker in source:
+            tail = source.split(marker)[-1]
+            candidate = ''.join(ch for ch in tail[:11] if ch.isalnum() or ch in '-_')
+            if len(candidate) == 11:
+                return candidate
     for token in str(title or '').replace(']', '[').split('['):
         token = token.strip()
         if len(token) == 11 and all(ch.isalnum() or ch in '-_' for ch in token):
@@ -82,6 +88,17 @@ def main() -> int:
                 names = item.get('player_names') or {}
                 p1 = str((names.get('p1') or {}).get('text') or '')
                 p2 = str((names.get('p2') or {}).get('text') or '')
+                # 名前を確認済みなら autosave の確定名を優先する
+                autosave = Path(str(item.get('autosave') or ''))
+                if not autosave.is_absolute():
+                    autosave = manifest.parent / autosave
+                if autosave.is_file():
+                    try:
+                        saved = read_player_names(autosave)
+                        p1 = str(saved.get('p1') or p1)
+                        p2 = str(saved.get('p2') or p2)
+                    except Exception:
+                        pass
                 winner = winners.get(index) or {}
                 matches.append({
                     'index': index,
