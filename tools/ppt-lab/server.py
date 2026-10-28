@@ -299,10 +299,12 @@ def replay_file(manifest: Path, index: int) -> Path | None:
         if int(item.get('index', 0)) != index:
             continue
         combined = str((item.get('simulator') or {}).get('combined', ''))
-        folder = Path(combined).parent
-        if not folder.is_dir():
+        if not combined:
             return None
-        files = sorted(folder.glob('*.json'))
+        folder = Path(combined).parent
+        if not folder.is_dir() or folder.name != 'simulator':
+            return None
+        files = [f for f in sorted(folder.glob('*.json')) if f.name != 'profiles.json']
         return files[0] if files else None
     return None
 

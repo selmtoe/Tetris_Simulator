@@ -1723,13 +1723,23 @@
                 pages = [];
             }
         }
-        if (!pages.length && window.TetrisEventCodec?.isEventReplay(replay?.simulatorData)) {
+        if (!pages.length && window.TetrisEventCodec && replay?.simulatorData && (replay.simulatorData.cases || window.TetrisEventCodec.isEventReplay?.(replay.simulatorData))) {
             try {
                 const decoded = window.TetrisEventCodec.decodeCollection(replay.simulatorData, { compactBoards: true });
                 pages = decoded?.cases?.[decoded.currentCase || 0]?.pages || [];
             } catch (error) {
                 pages = [];
             }
+        }
+        if (!pages.length && urls.combined && urls.combined.includes('#') && window.TetrisEventCodec) {
+            // 取り込み動画: URLのハッシュからページを復号する
+            try {
+                const hash = urls.combined.split('#')[1] || '';
+                const binary = atob(hash.replace(/-/g, '+').replace(/_/g, '/'));
+                const json = JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, ch => ch.charCodeAt(0))));
+                const decoded = window.TetrisEventCodec.decodeCollection(json, { compactBoards: true });
+                pages = decoded?.cases?.[decoded.currentCase || 0]?.pages || [];
+            } catch (error) { pages = pages || []; }
         }
         const value = {
             combined: urls.combined || '',
@@ -1799,6 +1809,47 @@
         frame.classList.add('ppt-fading');
         setTimeout(() => frame.classList.remove('ppt-fading'), 260);
     }
+
+    let youtubeApiPromise = null;
+    function loadYouTubeApi() {
+        if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+        if (youtubeApiPromise) return youtubeApiPromise;
+        youtubeApiPromise = new Promise(resolve => {
+            const previous = window.onYouTubeIframeAPIReady;
+            window.onYouTubeIframeAPIReady = () => {
+                if (typeof previous === 'function') previous();
+                resolve(window.YT);
+            };
+            const script = document.createElement('script');
+            script.src = 'https://www.youtube.com/iframe_api';
+            document.head.append(script);
+        });
+        return youtubeApiPromise;
+    }
+
+    async function mountYouTubePlayer(videoId) {
+        if (!videoId) return;
+        try {
+            const YT = await loadYouTubeApi();
+            if (state.ytPlayer && state.ytPlayer.destroy) {
+                try { state.ytPlayer.destroy(); } catch (error) { /* 破棄できなくてもよい */ }
+            }
+            state.ytReady = false;
+            state.ytPlayer = new YT.Player('detail-frame', {
+                videoId,
+                playerVars: { rel: 0, modestbranding: 1 },
+                events: {
+                    onReady: event => {
+                        state.ytPlayer = event.target;
+                        state.ytReady = true;
+                    }
+                }
+            });
+        } catch (error) {
+            /* API が使えなくても動画自体は再生できる */
+        }
+    }
+
     function startSync() {
         stopSync();
         state.syncTimer = setInterval(syncTick, SYNC_MS);
@@ -1954,13 +2005,10 @@
         const wrapper = node('div', null, 'video-wrapper');
         const id = youtubeId(video && video.source);
         if (id) {
-            const frame = node('iframe', null, null);
-            frame.id = 'detail-frame';
-            frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
-            frame.src = 'https://www.youtube.com/embed/' + id;
-            frame.dataset.base = 'https://www.youtube.com/embed/' + id;
-            frame.title = '動画';
-            wrapper.append(frame);
+            const holder = node('div', null, 'ppt-yt-holder');
+            holder.id = 'detail-frame';
+            wrapper.append(holder);
+            state.ytVideoId = id;
         } else if (video && video.source && !video.source.includes('://')) {
             const media = node('video', null, null);
             media.id = 'detail-video';
@@ -2238,6 +2286,7 @@
         comparison.append(left, work);
         container.append(comparison);
         mainView.replaceChildren(container);
+        if (state.ytVideoId) mountYouTubePlayer(state.ytVideoId);
 
         if (matches.length) {
             const wanted = Number(state.pendingMatch) || 0;

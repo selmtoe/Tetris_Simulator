@@ -1095,3 +1095,6 @@ html[data-readonly] .lab-replay-navigation { display: none !important; }
 .ppt-row-actions { display: flex; gap: 6px; }
 .ppt-setting-value { font-size: 13px; color: var(--text-muted); }
 .ppt-settings-body { display: flex; flex-direction: column; gap: 12px; }
+
+.ppt-yt-holder { width: 100%; aspect-ratio: 16 / 9; background: #000; }
+.ppt-yt-holder iframe { width: 100%; height: 100%; border: 0; }

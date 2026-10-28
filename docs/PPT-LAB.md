@@ -353,3 +353,28 @@ Settings は **5タブ**: 一般 / 表示 / 解析 / 名前とタグ / データ
 - `videoStorage=copy`: ローカル動画を追加したとき `media\pending-xxxx\` へ複製してから登録。
 - `analysisDevice=cpu`: PS1 `-ForceCpu` → `TR_BATCH_CPU_MODE=1`。
 - 全ビュー（videos / settings 5タブ / tags / tetofu）でコンソールエラーなしを確認。
+## 31. 盤面ビューワーの不具合修正（2026-10-29）
+
+### 症状
+- 盤面が「1 / 1」になり、動画を再生しても局面が進まない
+- 症状が進むと盤面自体が表示されない
+
+### 原因
+`replay_file()` が `simulator.combined` の**親フォルダにある最初のJSON**をリプレイとして返していた。
+取り込み動画は `combined` が空なので `Path('').parent` = カレント（`tools\ppt-lab`）になり、
+同日に追加した `profiles.json` をリプレイとして読んでいた。
+
+### 修正
+- `combined` が空なら `None`
+- フォルダ名が `simulator` のときだけ返す
+- `profiles.json` は除外
+
+### 併せて
+- YouTube 動画は `iframe` 埋め込みだけで再生時間が取れず同期できなかったため、**YouTube IFrame API** でプレイヤーを作るようにした（`loadYouTubeApi` / `mountYouTubePlayer`）。
+
+### 確認
+| 動画 | 局面 |
+|---|---|
+| ローカル（145試合） | 1 / 106 |
+| ローカル（186試合） | 1 / 34（選択中の試合） |
+| 取り込み | 1 / 57・1 / 170 |
