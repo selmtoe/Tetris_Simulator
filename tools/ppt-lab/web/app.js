@@ -318,7 +318,7 @@
     }
 
     // 動画もテト譜と同じ「正方形タイル」で並べる
-    function renderLabCard(container, video) {
+    function renderLabCard(container, video, matchCount) {
         const card = node('article', null, 'card ppt-tile ppt-video-tile');
         const thumb = node('div', null, 'ppt-tile-preview');
         const image = node('img', null, 'ppt-tile-thumb');
@@ -353,8 +353,9 @@
         if (allTags.length > 8) tagRow.append(node('span', '+' + (allTags.length - 8), 'ppt-tile-more'));
         card.append(tagRow);
 
+        const shown = Number.isFinite(matchCount) ? matchCount : (video.matchCount || 0);
         const note = video.status === 'failed' ? '解析に失敗'
-            : (video.matchCount || 0) + '試合';
+            : shown + '試合';
         card.append(node('div', note, 'lab-analysis-count'));
 
         card.addEventListener('click', event => {
@@ -376,9 +377,26 @@
             if (!hasAllTags(tags, wanted)) return false;
             if (f.player && !players.includes(f.player)) return false;
             if (f.opponent && !players.includes(f.opponent)) return false;
+            // 名前が動画に居るだけでは足りない。その2人が同じ試合で対戦している動画だけ残す。
+            if ((f.player || f.opponent) && !videoHasPairMatch(video)) return false;
             if (f.tag && !tags.includes(f.tag)) return false;
             return true;
         });
+    }
+
+    // 読み込み前は残しておき、読み込んだら試合単位で判定し直す
+    function videoHasPairMatch(video) {
+        const cached = state.matchCache.get(video.id);
+        if (!cached) return true;
+        return cached.some(row => pairOk(row));
+    }
+
+    // 動画カードに出す試合数。プレイヤーで絞っているときは条件に合う試合だけ数える
+    function videoMatchCount(video, pairWanted) {
+        if (!pairWanted) return video.matchCount || 0;
+        const cached = state.matchCache.get(video.id);
+        if (!cached) return video.matchCount || 0;   // 読み込み前は暫定値
+        return cached.filter(row => matchFilterOk(row)).length;
     }
 
     function sortEntries(entries) {
@@ -395,6 +413,19 @@
         return n >= 1 && n <= 20 ? table[n - 1] : String(n);
     }
 
+    // 「プレイヤー1」「プレイヤー2」は、その2人が同じ試合に居るときだけ通す。
+    // P1/P2 の左右は問わない（同じ名前を両方に選んだときだけ両側一致を要求）。
+    function pairOk(row) {
+        const one = state.filters.player;
+        const two = state.filters.opponent;
+        if (!one && !two) return true;
+        if (one && two && one === two) return row.p1 === one && row.p2 === two;
+        const names = [row.p1, row.p2].filter(Boolean);
+        if (one && !names.includes(one)) return false;
+        if (two && !names.includes(two)) return false;
+        return true;
+    }
+
     // Lab と同じ勝敗判定: プレイヤー未指定なら素通し、未確定は winner 無し or status !== ok
     function resultOk(row) {
         const want = state.filters.result;
@@ -406,6 +437,11 @@
         if (want === 'review') return !row.winner || row.winnerStatus !== 'ok';
         const won = row.winner === side;
         return want === 'win' ? won : !won;
+    }
+
+    // 試合一覧と連続再生で同じ絞り込みを使う（件数がずれないように）
+    function matchFilterOk(row) {
+        return pairOk(row) && resultOk(row);
     }
 
     function renderMatchCard(container, video, row, order) {
@@ -540,8 +576,8 @@
             return input;
         };
         bind('検索', 'query', null, 'search');
-        bind('プレイヤー', 'player', [['', 'すべて'], ...players.map(name => [name, name])]);
-        bind('相手', 'opponent', [['', 'すべて'], ...players.map(name => [name, name])]);
+        bind('プレイヤー1', 'player', [['', 'すべて'], ...players.map(name => [name, name])]);
+        bind('プレイヤー2', 'opponent', [['', 'すべて'], ...players.map(name => [name, name])]);
         bind('タグ', 'tag', [['', 'すべて'], ...tagChoices.map(name => [name, name])]);
         bind('勝敗', 'result', [['', 'すべて'], ['win', '勝ち'], ['lost', '負け'], ['review', '未確定']]);
         const sortOptions = [['newest', '新しい順'], ['oldest', '古い順'], ['title', 'タイトル順'], ['matches', '試合数順']];
@@ -567,6 +603,8 @@
         root.append(featureBar);
 
         const entries = sortEntries(filterVideos(state.videos));
+        // プレイヤーで絞るときは、動画一覧でも試合データが要る
+        const pairWanted = Boolean(state.filters.player || state.filters.opponent);
 
         // 試合一覧は全動画を横断してフラットに並べる
         let rows;
@@ -576,11 +614,7 @@
                 const cached = state.matchCache.get(video.id);
                 if (!cached) return;
                 cached.forEach(row => {
-                    const wanted = state.filters.player;
-                    if (wanted && row.p1 !== wanted && row.p2 !== wanted) return;
-                    if (state.filters.opponent
-                        && ![row.p1, row.p2].includes(state.filters.opponent)) return;
-                    if (!resultOk(row)) return;
+                    if (!matchFilterOk(row)) return;
                     rows.push({ video, row });
                 });
             });
@@ -590,7 +624,7 @@
 
         const matchTotal = state.mode === 'matches'
             ? rows.length
-            : entries.reduce((sum, video) => sum + (video.matchCount || 0), 0);
+            : entries.reduce((sum, video) => sum + videoMatchCount(video, pairWanted), 0);
         root.append(node('p', entries.length + '動画 · ' + matchTotal + '試合', 'lab-video-count'));
 
         const list = node('div', null, 'ppt-tile-grid');
@@ -601,26 +635,33 @@
         state.page = Math.min(state.page, pageCount - 1);
         const visible = rows.slice(state.page * pageSize, (state.page + 1) * pageSize);
 
-        if (state.mode === 'matches') {
-            const need = entries.filter(video => video.matchCount && !state.matchCache.has(video.id));
-            if (need.length && !state.matchLoading) {
-                state.matchLoading = true;
-                list.append(node('p', '試合一覧を読み込んでいます…', 'lab-help-text'));
-                (async () => {
-                    for (const video of need) {
-                        try {
-                            const body = await api('/api/videos/' + video.id + '/matches?light=1');
-                            state.matchCache.set(video.id, body.matches || []);
-                        } catch (error) {
-                            state.matchFailed = state.matchFailed || new Set();
-                            state.matchFailed.add(video.id);
-                            state.matchCache.set(video.id, []);
-                        }
+        // 試合一覧・プレイヤー絞り込みのどちらでも、足りない試合データを読む
+        const need = (state.mode === 'matches' || pairWanted)
+            ? entries.filter(video => video.matchCount && !state.matchCache.has(video.id))
+            : [];
+        if (need.length && !state.matchLoading) {
+            state.matchLoading = true;
+            list.append(node('p', state.mode === 'matches'
+                ? '試合一覧を読み込んでいます…'
+                : 'プレイヤーで絞り込んでいます…', 'lab-help-text'));
+            (async () => {
+                for (const video of need) {
+                    try {
+                        const body = await api('/api/videos/' + video.id + '/matches?light=1');
+                        state.matchCache.set(video.id, body.matches || []);
+                    } catch (error) {
+                        state.matchFailed = state.matchFailed || new Set();
+                        state.matchFailed.add(video.id);
+                        state.matchCache.set(video.id, []);
                     }
-                    state.matchLoading = false;
-                    if (state.mode === 'matches') renderVideos();
-                })();
-            } else if (!rows.length && !state.matchLoading) {
+                }
+                state.matchLoading = false;
+                if (state.view === 'videos') renderVideos();
+            })();
+        }
+
+        if (state.mode === 'matches') {
+            if (!rows.length && !state.matchLoading && !need.length) {
                 list.append(node('p', entries.length
                     ? '条件に合う試合はありません。'
                     : '動画はまだありません。', 'lab-help-text'));
@@ -631,12 +672,12 @@
             });
             visible.forEach(({ video, row }) => renderMatchCard(list, video, row, order.get(video.id)));
         } else {
-            if (!entries.length) {
+            if (!entries.length && !state.matchLoading) {
                 list.append(node('p', state.videos.length
                     ? '条件に合う動画はありません。'
                     : 'まだ動画がありません。上のボタンから追加してください。', 'lab-help-text'));
             }
-            visible.forEach(({ video }) => renderLabCard(list, video));
+            visible.forEach(({ video }) => renderLabCard(list, video, videoMatchCount(video, pairWanted)));
         }
 
         if (pageCount > 1) {
@@ -678,13 +719,16 @@
             try {
                 const body = await api('/api/videos/' + video.id + '/matches?light=1');
                 rows = body.matches || [];
+                state.matchCache.set(video.id, rows);
             } catch (error) {
                 rows = [];
             }
             // 動画をまたいで start で並べ替えると、別の動画の試合が混ざる。
             // 動画の順は絞り込み結果のまま、同じ動画の中だけ試合番号順にする。
+            // 試合一覧と同じ条件（プレイヤー1/2・勝敗）で絞るので件数も一致する。
             rows.slice().sort((a, b) => (Number(a.index) || 0) - (Number(b.index) || 0))
                 .forEach(row => {
+                    if (!matchFilterOk(row)) return;
                     const start = Number(row.start) || 0;
                     const end = Number(row.end) || (start + 60);
                     if (end > start + 1) {
