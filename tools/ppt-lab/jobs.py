@@ -45,6 +45,25 @@ class JobError(Exception):
     """利用者に見せる失敗（日本語の理由つき）。"""
 
 
+def _target_dir(default: Path) -> Path:
+    """動画の保存先（設定があればそこへ）。"""
+    try:
+        value = STORE_REF.get().settings().get('downloadDir') if STORE_REF.get() else ''
+    except Exception:
+        value = ''
+    if value:
+        path = Path(str(value))
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+        except OSError:
+            return default
+    return default
+
+
+STORE_REF = [None]
+
+
 def _quality_format(quality: str = '1080') -> str:
     """設定の画質上限から yt-dlp の書式を作る。"""
     height = {'1080': 1080, '720': 720, '480': 480, '320': 320}.get(str(quality), 1080)
@@ -63,6 +82,7 @@ def _decode(raw: bytes) -> str:
 class JobManager:
     def __init__(self, store, data_dir: Path, tools_dir: Path, runtime_dir: Path):
         self.store = store
+        STORE_REF[0] = store
         self.data = Path(data_dir)
         self.tools = Path(tools_dir)
         self.runtime = Path(runtime_dir)
@@ -164,7 +184,7 @@ class JobManager:
         command = [yt_dlp, '--newline', '--no-playlist', '--no-warnings',
                    '--merge-output-format', 'mkv',
                    '-f', _quality_format(self.store.settings().get('downloadQuality', '1080')),
-                   '-o', str(target / '%(title)s [%(id)s].%(ext)s')]
+                   '-o', str(_target_dir(target) / '%(title)s [%(id)s].%(ext)s')]
         ffmpeg = self.runtime / 'bin' / 'ffmpeg.exe'
         if ffmpeg.is_file():
             command += ['--ffmpeg-location', str(ffmpeg.parent)]
@@ -202,6 +222,12 @@ class JobManager:
             raise JobError('解析エンジンが見つかりません（runtime\\bin\\TetrisVideoRecovery_stream.exe）。')
         command = ['powershell.exe', '-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass',
                    '-File', str(script), '-VideoPath', str(video), '-MachineReadable']
+        try:
+            _out = self.store.settings().get('analysisOutputDir')
+            if _out:
+                command += ['-OutputDirectory', str(_out)]
+        except Exception:
+            pass
         try:
             _s = self.store.settings()
             if _s.get('useRamDisk'):

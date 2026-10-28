@@ -347,3 +347,9 @@ Settings は **5タブ**: 一般 / 表示 / 解析 / 名前とタグ / データ
 
 ### 未配線（値は保存されるが動作に未反映）
 `tagPromptOnSave` / `downloadDir` / `analysisOutputDir` / `videoStorage` / `missingVideoAction`
+### 追加配線（同日）
+- `downloadDir`: yt-dlp の出力先（`_target_dir()`）。未設定なら従来のデータフォルダ。
+- `analysisOutputDir`: PS1 へ `-OutputDirectory` を渡す。
+- `videoStorage=copy`: ローカル動画を追加したとき `media\pending-xxxx\` へ複製してから登録。
+- `analysisDevice=cpu`: PS1 `-ForceCpu` → `TR_BATCH_CPU_MODE=1`。
+- 全ビュー（videos / settings 5タブ / tags / tetofu）でコンソールエラーなしを確認。

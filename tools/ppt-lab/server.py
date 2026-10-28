@@ -17,6 +17,7 @@ import sys
 import threading
 import unicodedata
 import time
+import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
