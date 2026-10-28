@@ -277,13 +277,17 @@ def lab_replay(video: dict, index: int) -> dict | None:
     if not match:
         return None
     simulator = match.get('labSimulator') or {}
+    # Lab は試合ごとに3つのURLを持つ。p1 / p2 は片側だけの1Pコレクションで、
+    # 両者の盤面が入っているのは combined（2P）だけ。盤面ビューワーには
+    # combined を渡さないと P1 しか表示されない。
+    combined = str(simulator.get('combined') or '')
     p1 = str(simulator.get('p1') or '')
     p2 = str(simulator.get('p2') or '')
-    if not p1 and not p2:
+    if not combined and not p1 and not p2:
         return None
-    state = decode_state_hash(p1 or p2)
+    state = decode_state_hash(combined) or decode_state_hash(p1) or decode_state_hash(p2)
     return {
-        'urls': {'combined': p1 or p2, 'p1': p1, 'p2': p2},
+        'urls': {'combined': combined or p1 or p2, 'p1': p1, 'p2': p2},
         'simulatorData': state or {},
         'imported': True
     }

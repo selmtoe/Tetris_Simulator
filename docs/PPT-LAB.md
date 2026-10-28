@@ -393,3 +393,43 @@ Settings は **5タブ**: 一般 / 表示 / 解析 / 名前とタグ / データ
 - 動画が変わるときは `#video/<id>` へ移動して先頭試合から続ける。
 - 動画の終了（local の `ended` / YouTube の状態0）でも次の試合へ。
 - 試合が尽きたら「連続再生が終わりました。」で解除。
+## 34. 盤面がP1だけになる件と連続再生が進まない件（2026-10-29）
+
+### 1) 盤面が P1 だけになる
+**原因（データ）**: 公開Lab は試合ごとに `p1` / `p2` / `combined` の3つのURLを持つ。
+`p1` と `p2` は**片側だけの1Pコレクション**（`m:1`）で、両者の盤面が入っているのは `combined`（`m:2`）だけ。
+`lab_replay()` が `p1 or p2` を使っていたため、取り込み動画は P1 の盤面しか届いていなかった。
+
+**修正**:
+- `server.py` `lab_replay()`: `combined` を優先（`decode_state_hash(combined) or p1 or p2`）、`urls.combined` も `combined`。
+- `export_web.py`: 閲覧専用版の状態ハッシュも `labSimulator.combined` を優先。
+- 既存の `tools/ppt-lab/webdata/replays/*.json`（17本）を combined のハッシュへ更新。
+
+**確認**（Edge ヘッドレスで実測）:
+| 対象 | 局面 | P2 のある局面 |
+|---|---|---|
+| ローカル（`/api`） | 157 | 157 / 157 |
+| 閲覧専用版（`dist/pages`） | 157 | 157 / 157 |
+| 全19動画の `/api/.../replay/{1,2}` | 38件 | 38 / 38 が `m:2` |
+
+### 2) 連続再生が動かない
+**原因（コード）は4つ**:
+1. `videoTime()` が `pendingSeek` を**握ったまま解除しない**。
+   YouTube プレイヤーの準備前にシークすると `pendingSeek` が入り、以後ずっとその秒を返すため、
+   同期も連続再生も同じ局面で止まっていた。
+2. `seekVideoTo()` が**プレイヤー準備前のシークを捨てていた**（`onReady` で反映されない）。
+3. `buildFeatureSegments()` が**動画をまたいで `start` で並べ替え**ていたため、別の動画の試合が混ざっていた。
+4. 次の試合・動画の読み込み中も `featureTick` が古い `pages` で動いていた／手動で試合を選んでも連続再生が解除されなかった。
+
+**修正**:
+- `pendingSeek` は「シーク前の位置から動いた」「目標に追いついた」「4秒経過」のいずれかで必ず解除（`pendingSeekFrom` / `pendingSeekAt`）。
+- 準備前のシークは `onReady` で一度だけ反映（`pendingSeekPaused` も保持）。
+- セグメントは**絞り込み結果の動画順**のまま、同じ動画の中だけ試合番号順に並べる。
+- `state.featurePending`（読み込み待ち）で `featureTick` を止め、`showMatch` が読み終えたら解除。
+- 手動で試合を選ぶ／前後ボタン／動画一覧へ戻る／対象外の動画を開く → `stopFeature()` で解除。
+- `showMatch` は読み込み前に `state.pages` を空にし、読み込み中に動画が変わっていたら破棄。
+
+**確認**（Edge ヘッドレス + YouTube プレイヤーだけ差し替え）:
+- 試合の終わりで次の試合へ進む（`feature.index` 0 → 1、`currentMatch` 1 → 2）
+- 186試合ぶん送っても**動画をまたいで続く**（`video-5802f…` → `video-lab-4f650…`、移動先も P2 つき 105局面）
+- `window.__pptDebug()` に連続再生・同期の状態（`pagesWithP2` / `feature.index` / `videoTime` / `pendingSeek` など）を追加

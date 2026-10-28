@@ -32,6 +32,8 @@
         featureList: [],
         feature: { segments: [], index: -1 },
         featureIndex: -1,
+        featurePending: null,
+        lastFeatureSeekAt: 0,
         searchTimer: null,
         tetofuQuery: '',
         tagQuery: '',
@@ -45,6 +47,9 @@
         lastSeekAt: 0,
         preferred: null,
         pendingSeek: null,
+        pendingSeekAt: 0,
+        pendingSeekFrom: NaN,
+        pendingSeekPaused: false,
         syncing: false,
         follow: true,
         ytPlayer: null,
@@ -676,15 +681,17 @@
             } catch (error) {
                 rows = [];
             }
-            rows.forEach(row => {
-                const start = Number(row.start) || 0;
-                const end = Number(row.end) || (start + 60);
-                if (end > start + 1) {
-                    segments.push({ videoId: video.id, matchIndex: row.index, start, end });
-                }
-            });
+            // 動画をまたいで start で並べ替えると、別の動画の試合が混ざる。
+            // 動画の順は絞り込み結果のまま、同じ動画の中だけ試合番号順にする。
+            rows.slice().sort((a, b) => (Number(a.index) || 0) - (Number(b.index) || 0))
+                .forEach(row => {
+                    const start = Number(row.start) || 0;
+                    const end = Number(row.end) || (start + 60);
+                    if (end > start + 1) {
+                        segments.push({ videoId: video.id, matchIndex: row.index, start, end });
+                    }
+                });
         }
-        segments.sort((a, b) => a.start - b.start);
         return segments;
     }
 
@@ -703,12 +710,25 @@
         }
         state.feature = { segments, index: 0 };
         state.featureList = videos.map(video => video.id);
+        state.featureIndex = -1;
+        state.featurePending = null;
+        state.lastFeatureSeekAt = 0;
         const first = segments[0];
         state.videoId = first.videoId;
         state.pendingMatch = first.matchIndex;
         state.follow = true;
-        location.hash = '#video/' + first.videoId;
+        if (location.hash === '#video/' + first.videoId) route();
+        else location.hash = '#video/' + first.videoId;
         toast('絞り込み結果の' + segments.length + '試合を続けて再生します。');
+    }
+
+    // 連続再生をやめる（手動で試合を選び直したときなど）
+    function stopFeature() {
+        state.feature = { segments: [], index: -1 };
+        state.featureList = [];
+        state.featureIndex = -1;
+        state.featurePending = null;
+        state.lastFeatureSeekAt = 0;
     }
 
     // 現在の試合が終わったら次の試合へ（試合の間は飛ばす）
@@ -717,30 +737,38 @@
         const next = state.feature.index + 1;
         if (next >= state.feature.segments.length) {
             toast('連続再生が終わりました。');
-            state.feature = { segments: [], index: -1 };
-            state.featureList = [];
+            stopFeature();
             return true;
         }
         const segment = state.feature.segments[next];
         state.feature.index = next;
+        state.lastFeatureSeekAt = 0;
+        state.featurePending = { videoId: segment.videoId, matchIndex: segment.matchIndex };
         if (segment.videoId === state.videoId) {
             const row = (state.matches || []).find(item => item.index === segment.matchIndex);
             if (row) {
-                state.pendingMatch = segment.matchIndex;
-                showMatch(row, { fromSync: false });
+                showMatch(row, { fromSync: true })
+                    .catch(() => {
+                        state.featurePending = null;
+                    });
                 seekVideoTo(segment.start, { pause: false });
+                return true;
             }
-        } else {
-            state.pendingMatch = segment.matchIndex;
-            state.videoId = segment.videoId;
-            location.hash = '#video/' + segment.videoId;
+            // 解析結果から試合が消えている → 次のセグメントへ送る
+            return advanceFeature();
         }
+        state.pendingMatch = segment.matchIndex;
+        state.videoId = segment.videoId;
+        location.hash = '#video/' + segment.videoId;
         return true;
     }
 
     function featureTick() {
+        if (state.featurePending) return;          // 次の試合・動画の読み込み待ち
         const segment = state.feature.segments[state.feature.index];
         if (!segment || segment.videoId !== state.videoId) return;
+        if (!state.pages.length) return;
+        if (!state.currentMatch || state.currentMatch.index !== segment.matchIndex) return;
         const seconds = videoTime();
         if (!Number.isFinite(seconds)) return;
         if (seconds >= segment.end - 0.25) {
@@ -748,11 +776,15 @@
             return;
         }
         if (seconds < segment.start - 0.5) {
-            seekVideoTo(segment.start, { pause: false });
+            // シークが効かないときに 250ms ごと投げ直さないよう間隔をあける
+            if (Date.now() - (state.lastFeatureSeekAt || 0) > 2000) {
+                state.lastFeatureSeekAt = Date.now();
+                seekVideoTo(segment.start, { pause: false });
+            }
             return;
         }
         const page = pageIndexAt(state.pages, seconds - segment.start);
-        if (page !== state.pageIndex) showPage(page, { seek: false });
+        if (page >= 0 && page !== state.pageIndex) showPage(page, { seek: false });
     }
     // ---- テト譜のプレビュー -------------------------------------------------
     const BOARD_COLORS = {
@@ -1391,6 +1423,7 @@
         });
         if (state.view !== 'video') {
             stopSync();
+            stopFeature();
         }
         if (state.view === 'video') renderVideoDetail();
         else if (state.view === 'names') renderNames();
@@ -1693,8 +1726,8 @@
         return best;
     }
 
-    function videoTime() {
-        if (Number.isFinite(state.pendingSeek)) return state.pendingSeek;
+    // プレイヤーが実際に再生している位置（まだ読めていなければ NaN）
+    function playerTime() {
         const media = document.getElementById('detail-video');
         if (media) return media.readyState ? media.currentTime : NaN;
         if (state.ytReady && state.ytPlayer?.getCurrentTime) {
@@ -1702,6 +1735,25 @@
             return Number.isFinite(value) ? value : NaN;
         }
         return NaN;
+    }
+
+    // シーク直後はプレイヤーが古い位置を返すことがあるので、
+    // 追いつくまで（最大 4 秒）だけシーク先を再生位置として扱う。
+    // 握り続けると同期が固まるので、必ず解除する。
+    function videoTime() {
+        const seconds = playerTime();
+        if (Number.isFinite(state.pendingSeek)) {
+            const target = state.pendingSeek;
+            const from = Number.isFinite(state.pendingSeekFrom) ? state.pendingSeekFrom : null;
+            const age = Date.now() - (state.pendingSeekAt || 0);
+            if (age > 4000) state.pendingSeek = null;
+            else if (!Number.isFinite(seconds)) return target;
+            else if (Math.abs(seconds - target) <= 1.5) state.pendingSeek = null;
+            // シーク前の位置から動き出した＝シークが効いていないので実際の値に任せる
+            else if (from !== null && Math.abs(seconds - from) > 2) state.pendingSeek = null;
+            else return target;
+        }
+        return seconds;
     }
 
     function videoState() {
@@ -1722,6 +1774,7 @@
         const target = Math.max(0, seconds);
         const media = document.getElementById('detail-video');
         if (media) {
+            state.pendingSeek = null;
             const apply = () => {
                 try {
                     media.currentTime = target;
@@ -1735,10 +1788,17 @@
             else media.play().catch(() => {});
             return;
         }
+        // シーク先を覚えておく（追いつくまでの再生位置として使う）
+        const remember = () => {
+            state.pendingSeek = target;
+            state.pendingSeekAt = state.lastSeekAt;
+            state.pendingSeekPaused = Boolean(opts.pause);
+            state.pendingSeekFrom = playerTime();
+        };
         if (state.ytReady && state.ytPlayer?.seekTo) {
+            remember();
             const status = state.ytPlayer.getPlayerState?.();
             if (status === -1 || status === 5) {
-                state.pendingSeek = target;
                 if (!opts.pause) state.ytPlayer.playVideo();
                 return;
             }
@@ -1747,6 +1807,8 @@
             else state.ytPlayer.playVideo();
             return;
         }
+        // プレイヤーの準備待ち。用意できたら onReady がシークする。
+        remember();
         const frame = document.getElementById('detail-frame');
         if (frame && frame.dataset.base) {
             frame.src = frame.dataset.base + '?start=' + Math.round(target) + '&autoplay=' + (opts.pause ? 0 : 1);
@@ -1920,6 +1982,18 @@
                     onReady: event => {
                         state.ytPlayer = event.target;
                         state.ytReady = true;
+                        // 準備前に来ていたシークを取りこぼさずに反映する
+                        if (Number.isFinite(state.pendingSeek)) {
+                            const target = state.pendingSeek;
+                            state.pendingSeekAt = Date.now();
+                            try {
+                                state.ytPlayer.seekTo(target, true);
+                                if (state.pendingSeekPaused) state.ytPlayer.pauseVideo?.();
+                                else state.ytPlayer.playVideo();
+                            } catch (error) {
+                                /* シークできなくても再生はできる */
+                            }
+                        }
                     },
                     onStateChange: event => {
                         if (event.data === 0 && !advanceFeature()) playNextFeature();
@@ -2013,11 +2087,20 @@
         viewer.dataset.status = 'loading';
         viewer.dataset.page = '';
         state.lastReloadAt = 0;
+        // 読み込むまでの間、前の試合のページで同期しないように空にしておく
+        state.pages = [];
+        const videoId = state.videoId;
         const urls = await replayUrls(row.index);
+        // 読み込んでいる間に別の動画へ移っていたら、そちらの表示を壊さない
+        if (state.videoId !== videoId) return;
         state.currentUrls = urls;
         state.pages = urls.pages || [];
         state.pageIndex = -1;
         state.pageIndex = 0;
+        if (state.featurePending && state.featurePending.videoId === state.videoId
+            && state.featurePending.matchIndex === row.index) {
+            state.featurePending = null;
+        }
         const slider = document.getElementById('position-slider');
         if (slider) {
             slider.max = String(Math.max(0, state.pages.length - 1));
@@ -2260,6 +2343,12 @@
             item.addEventListener('click', () => {
                 railList.querySelectorAll('.lab-match-row').forEach(other => other.classList.remove('active'));
                 item.classList.add('active');
+                // 手動で別の試合を選んだら連続再生はやめる
+                const segment = state.feature.segments[state.feature.index];
+                if (state.feature.segments.length
+                    && (!segment || segment.videoId !== state.videoId || segment.matchIndex !== row.index)) {
+                    stopFeature();
+                }
                 showMatch(row);
             });
             railList.append(item);
@@ -2373,6 +2462,7 @@
             });
             const activeRow = railList.querySelector('.lab-match-row.active');
             if (activeRow) activeRow.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            stopFeature();
             showMatch(target);
         };
         prev.addEventListener('click', () => step(-1));
@@ -2409,7 +2499,13 @@
                 railList.querySelectorAll('.lab-match-row').forEach(other => other.classList.remove('active'));
                 target.classList.add('active');
             }
-            showMatch(first);
+            showMatch(first).catch(() => {
+                state.featurePending = null;
+            });
+        } else if (state.feature && state.feature.segments.length) {
+            // この動画に試合が無い → 次の試合へ送る（止まったままにしない）
+            state.featurePending = null;
+            advanceFeature();
         }
         startSync();
     }
@@ -2962,8 +3058,7 @@
                 } else {
                     state.videoId = videoId;
                     if (state.featureList.length && !state.featureList.includes(videoId)) {
-                        state.featureList = [];
-                        state.featureIndex = -1;
+                        stopFeature();
                     }
                     await loadVideos();
                     await loadMatches(videoId);
@@ -3009,7 +3104,31 @@
         render();
     });
     window.addEventListener('hashchange', route);
-    window.__pptDebug = () => ({ edits: state.edits.size, matches: state.matches.length, view: state.view, nameGroups: state.nameGroups ? state.nameGroups.size : -1 });
+    // 動作確認用: 連続再生と盤面同期の状態をまとめて見る
+    window.__pptDebug = () => ({
+        view: state.view,
+        videoId: state.videoId,
+        matches: state.matches.length,
+        currentMatch: state.currentMatch ? state.currentMatch.index : 0,
+        currentStart: state.currentMatch ? Number(state.currentMatch.start) || 0 : 0,
+        currentEnd: state.currentMatch ? Number(state.currentMatch.end) || 0 : 0,
+        pages: state.pages.length,
+        pagesWithP2: state.pages.filter(page => page && page.p2).length,
+        pageIndex: state.pageIndex,
+        follow: state.follow,
+        syncing: Boolean(state.syncing),
+        ytReady: Boolean(state.ytReady),
+        videoTime: videoTime(),
+        pendingSeek: state.pendingSeek,
+        feature: {
+            index: state.feature.index,
+            segments: state.feature.segments.length,
+            pending: state.featurePending ? state.featurePending.matchIndex : 0,
+            current: state.feature.segments[state.feature.index] || null
+        },
+        edits: state.edits.size,
+        nameGroups: state.nameGroups ? state.nameGroups.size : -1
+    });
     window.__pptApply = (index, side, value) => { try { applyName(state.matches.find(r => r.index === index), side, value); return JSON.stringify({ edits: state.edits.size }); } catch (error) { return 'ERR ' + error.message + ' | ' + error.stack; } };
     // メニューの外をクリックしたら閉じる
     document.addEventListener('click', event => {

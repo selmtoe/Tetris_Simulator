@@ -137,7 +137,9 @@ def main() -> int:
                 for item in simulator:
                     if int(item.get('index', 0)) == index:
                         lab = item.get('labSimulator') or {}
-                        url = str(lab.get('p1') or lab.get('p2') or '')
+                        # p1 / p2 は片側だけの1Pコレクション。両者の盤面が
+                        # 入っている combined を優先する（P1だけになる不具合の修正）。
+                        url = str(lab.get('combined') or lab.get('p1') or lab.get('p2') or '')
                         break
             if '#' in url:
                 hashes[str(index)] = url.split('#', 1)[1]
