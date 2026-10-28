@@ -11,6 +11,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from namereview import read_player_names  # noqa: E402
+import server  # noqa: E402
+
+replay_file = server.replay_file
 
 DB = Path.home() / 'AppData/Local/PPTLab/pptlab.sqlite3'
 CROPS = Path.home() / 'AppData/Local/PPTLab/name-crops'
@@ -38,6 +41,7 @@ def main() -> int:
         shutil.rmtree(OUT)
     (OUT / 'matches').mkdir(parents=True)
     (OUT / 'name-crops').mkdir(parents=True)
+    (OUT / 'replays').mkdir(parents=True)
 
     db = sqlite3.connect(str(DB))
     db.row_factory = sqlite3.Row
@@ -99,6 +103,31 @@ def main() -> int:
         (OUT / 'matches' / f'{row["id"]}.json').write_text(
             json.dumps({'matches': matches, 'warning': ''}, ensure_ascii=False),
             encoding='utf-8')
+        # 盤面ビューワー用: 試合ごとの状態ハッシュ（F/ のURLの # 以降）
+        hashes = {}
+        for match in matches:
+            index = match['index']
+            url = ''
+            replay = replay_file(manifest, index) if manifest else None
+            if replay and replay.is_file():
+                try:
+                    payload = json.loads(replay.read_text(encoding='utf-8-sig'))
+                    url = str((payload.get('urls') or {}).get('combined') or '')
+                except (OSError, json.JSONDecodeError):
+                    url = ''
+            if not url:
+                simulator = (data.get('matches') or [])
+                for item in simulator:
+                    if int(item.get('index', 0)) == index:
+                        lab = item.get('labSimulator') or {}
+                        url = str(lab.get('p1') or lab.get('p2') or '')
+                        break
+            if '#' in url:
+                hashes[str(index)] = url.split('#', 1)[1]
+        if hashes:
+            (OUT / 'replays' / f'{row["id"]}.json').write_text(
+                json.dumps(hashes, ensure_ascii=False), encoding='utf-8')
+
         videos.append({
             'id': row['id'], 'title': row['title'], 'status': row['status'],
             'source': f'https://www.youtube.com/watch?v={youtube}' if youtube else '',

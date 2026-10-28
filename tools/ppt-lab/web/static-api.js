@@ -19,10 +19,30 @@
         return null;
     };
 
+    const replayTarget = url => {
+        const match = url.split('?')[0].match(/^\/api\/videos\/([^/]+)\/replay\/(\d+)$/);
+        return match ? { id: match[1], index: match[2] } : null;
+    };
+    const viewerUrl = hash => 'F/index.html?page=1#' + hash;
+
     const original = window.fetch.bind(window);
     window.fetch = async (input, init) => {
         const url = typeof input === 'string' ? input : input.url;
         if (!url.startsWith('/api/')) return original(input, init);
+        const replay = replayTarget(url);
+        if (replay) {
+            const response = await original('data/replays/' + replay.id + '.json', init);
+            if (!response.ok) return response;
+            const hashes = await response.json();
+            const hash = hashes[replay.index] || '';
+            const body = hash
+                ? { urls: { combined: viewerUrl(hash), p1: viewerUrl(hash), p2: viewerUrl(hash) }, hash, imported: true }
+                : { error: 'リプレイがありません' };
+            return new Response(JSON.stringify(body), {
+                status: hash ? 200 : 404,
+                headers: { 'Content-Type': 'application/json; charset=utf-8' }
+            });
+        }
         const target = routes(url);
         if (!target) {
             return new Response(JSON.stringify({ error: '閲覧専用のため変更できません' }), {

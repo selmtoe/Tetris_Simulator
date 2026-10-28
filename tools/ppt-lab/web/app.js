@@ -1582,6 +1582,17 @@
         const replay = await response.json();
         const urls = replay.urls || {};
         let pages = replay?.simulatorData?.cases?.[0]?.pages || [];
+        if (!pages.length && replay?.hash && window.TetrisEventCodec) {
+            // 閲覧専用版: 状態ハッシュからページを復号する
+            try {
+                const binary = atob(String(replay.hash).replace(/-/g, '+').replace(/_/g, '/'));
+                const json = JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, ch => ch.charCodeAt(0))));
+                const decoded = window.TetrisEventCodec.decodeCollection(json, { compactBoards: true });
+                pages = decoded?.cases?.[decoded.currentCase || 0]?.pages || [];
+            } catch (error) {
+                pages = [];
+            }
+        }
         if (!pages.length && window.TetrisEventCodec?.isEventReplay(replay?.simulatorData)) {
             try {
                 const decoded = window.TetrisEventCodec.decodeCollection(replay.simulatorData, { compactBoards: true });
