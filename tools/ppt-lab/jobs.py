@@ -20,6 +20,23 @@ DOWNLOAD_SHARE = 30          # 取得が全体の何%か
 ANALYSIS_SHARE = 70
 
 DOWNLOAD_PROGRESS = re.compile(r'\[download\]\s+([0-9.]+)%')
+PROFILES_FILE = Path(__file__).with_name('profiles.json')
+
+
+def load_profile(profile_id: str) -> dict | None:
+    """profiles.json から解析プロファイルを読む（標準は空＝従来どおり）。"""
+    try:
+        data = json.loads(PROFILES_FILE.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return None
+    for item in data.get('profiles') or []:
+        if str(item.get('id')) == str(profile_id):
+            if not any(item.get(key) for key in ('sceneModel', 'boardModel', 'settings')):
+                return None
+            return item
+    return None
+
+
 STUDY_PROGRESS = re.compile(r'study_progress=(\d+)\s+status=(.*)')
 STUDY_MANIFEST = re.compile(r'study_manifest=(.+)')
 
@@ -179,6 +196,18 @@ class JobManager:
             raise JobError('解析エンジンが見つかりません（runtime\\bin\\TetrisVideoRecovery_stream.exe）。')
         command = ['powershell.exe', '-NoLogo', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass',
                    '-File', str(script), '-VideoPath', str(video), '-MachineReadable']
+        # 解析プロファイル（モデルの切り替え）。未指定なら従来どおり。
+        try:
+            profile = load_profile(self.store.settings().get('analysisProfile', 'standard'))
+        except Exception:
+            profile = None
+        if profile:
+            if profile.get('sceneModel'):
+                command += ['-SceneModelPath', str(profile['sceneModel'])]
+            if profile.get('boardModel'):
+                command += ['-BoardModelPath', str(profile['boardModel'])]
+            if profile.get('settings'):
+                command += ['-SettingsPath', str(profile['settings'])]
         self._update(job_id, progress=DOWNLOAD_SHARE, message='配信を解析しています…')
         process = subprocess.Popen(command, cwd=str(self.tools), stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT,

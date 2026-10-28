@@ -1,0 +1,31 @@
+{
+  "profiles": [
+    {
+      "id": "standard",
+      "label": "標準 (1080p)",
+      "note": "今までのモデル。品質優先。",
+      "sceneModel": "",
+      "boardModel": "",
+      "settings": "",
+      "env": {}
+    },
+    {
+      "id": "fast320",
+      "label": "高速 (320p)",
+      "note": "軽量モデル。モデルを置くと選べます。",
+      "sceneModel": "",
+      "boardModel": "",
+      "settings": "",
+      "env": {}
+    },
+    {
+      "id": "other-game",
+      "label": "ぷよテト以外",
+      "note": "別ゲーム用のモデルを指定します。",
+      "sceneModel": "",
+      "boardModel": "",
+      "settings": "",
+      "env": {}
+    }
+  ]
+}

@@ -279,3 +279,36 @@ python tools\ppt-lab\export_web.py
 python tools\build-web.py
 git add tools/ppt-lab/webdata && git commit && git push
 ```
+## 28. 名前の変更と自動タグの連動（2026-10-29）
+
+- プレイヤー名を保存すると、**その動画の自動タグも付け替える**。
+  - 変更前のプレイヤー名（`video_players`）と変更後を比べ、消えた名前のタグリンクを外し、増えた名前のタグを付ける。
+  - どの動画・テト譜にも付かなくなったタグは**自動で削除**（`STORE.prune_tags()`）。
+- 名前を戻すとタグも元に戻る（テストで往復確認済み: `いんたい` → `テスト名前` → `いんたい`）。
+- 実装: `server.py` の `/names` ハンドラ、`store.py` の `remove_tag_link` / `prune_tags`。
+## 29. 解析エンジンの差し替えとモデル切替の土台（2026-10-29）
+
+### エンジン
+- `runtime\bin\TetrisVideoRecovery_stream.exe` を **onepass_b**（SHA256 339290F4…）へ差し替え。旧版は削除済み。
+- 実測（145試合・同一動画）: **752.7秒**（旧 1688.0秒）＝約2.24倍高速。試合数145・失敗0で一致。
+  - 内訳: 解析 724.7秒（旧1254.0）、シーン検出 741.2秒（旧434.0）。検出と解析が重なるため合計が大幅に短縮。
+- `analysisContractVersion` は変更していない（キャッシュは有効なまま）。
+
+### 起動時の環境変数（8GB GPUで3ワーカー常時）
+`run-ppt-stream-analysis.ps1` と `tools\tetris-lab\server.py` の両方で設定:
+```
+TR_BATCH_WORKERS=3 / TR_BOARD_WORKERS=2
+TR_BATCH_WORKER_RAM_MB=1536 / TR_BATCH_RAM_RESERVE_MB=2048
+TR_BATCH_WORKER_VRAM_MB=1024 / TR_BATCH_VRAM_RESERVE_MB=512
+TR_BATCH_RELEASE_DELAY_SECONDS=5
+```
+
+### モデル切替の土台
+- `tools\ppt-lab\profiles.json` に解析プロファイル（standard / fast320 / other-game）。
+  `sceneModel` / `boardModel` / `settings` を書くと、そのモデルで解析する。
+- 設定キー `analysisProfile`（既定 `standard`＝従来どおり）。
+- API: `GET /api/analysis/profiles`。
+- `jobs.py` が `-SceneModelPath` / `-BoardModelPath` / `-SettingsPath` を PS1 に渡す。
+
+### 注意
+- PS1 は **UTF-8 BOM 必須**（BOM を落とすと PowerShell 5.1 が文字化けして構文エラーになる）。

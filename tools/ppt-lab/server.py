@@ -21,6 +21,13 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+PROFILES = []
+try:
+    PROFILES = json.loads((Path(__file__).with_name('profiles.json')).read_text(encoding='utf-8')).get('profiles') or []
+except (OSError, json.JSONDecodeError):
+    PROFILES = []
+
+
 CROP_DIR = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'PPTLab' / 'name-crops'
 
 VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.webm', '.mov', '.avi', '.ts', '.m4v', '.flv'}
@@ -373,6 +380,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({'tetofu': STORE.tetofu()})
         if path == '/api/settings':
             return self.send_json({'settings': STORE.settings()})
+        if path == '/api/analysis/profiles':
+            return self.send_json({'profiles': PROFILES, 'active': STORE.settings().get('analysisProfile', 'standard')})
         if path == '/api/names/mappings':
             rows = STORE.name_mappings()
             grouped = {}
@@ -578,10 +587,20 @@ class Handler(BaseHTTPRequestHandler):
                     if len(value) > 40:
                         raise ValueError('名前は40文字までです')
                 cleaned.append({'index': index, 'p1': update.get('p1'), 'p2': update.get('p2')})
+            players_before = set(video_players(str(video['manifest']))) if cleaned else set()
+            result = apply_names(Path(video['manifest']), cleaned) if cleaned else {'changed': 0}
+            # 名前が変わったら自動タグも付け替える（0件になったタグは消す）
             if cleaned:
-                result = apply_names(Path(video['manifest']), cleaned)
-            else:
-                result = {'changed': 0}
+                try:
+                    _PLAYER_CACHE.pop(str(video['manifest']), None)
+                    players_after = set(video_players(str(video['manifest'])))
+                    for name in players_before - players_after:
+                        STORE.remove_tag_link(video_id, name)
+                    for name in players_after - players_before:
+                        STORE.materialize_tags(video_id, [name])
+                    STORE.prune_tags()
+                except Exception:
+                    pass
             for override in (body.get('overrides') or []):
                 fingerprint = str(override.get('fingerprint') or '').strip()
                 name = str(override.get('name') or '').strip()
