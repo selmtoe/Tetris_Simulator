@@ -35,7 +35,7 @@
         tagSelected: new Set(),
         tetofuTag: '',
         pages: [],
-        pageIndex: 0,
+        pageIndex: -1,
         currentUrls: null,
         syncTimer: null,
         bridge: null,
@@ -1886,7 +1886,8 @@
                 });
             return;
         }
-        showPage(pageIndexAt(state.pages, seconds - match.start), { seek: false });
+        const next = pageIndexAt(state.pages, seconds - match.start);
+        if (next !== state.pageIndex) showPage(next, { seek: false });
     }
 
     async function showMatch(row, options) {
@@ -1912,6 +1913,7 @@
         const urls = await replayUrls(row.index);
         state.currentUrls = urls;
         state.pages = urls.pages || [];
+        state.pageIndex = -1;
         state.pageIndex = 0;
         const slider = document.getElementById('position-slider');
         if (slider) {
