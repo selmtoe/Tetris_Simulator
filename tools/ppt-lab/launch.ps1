@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$url = "http://127.0.0.1:$Port/"
+$url = "http://127.0.0.1:$Port/ppt-lab/"
 
 function Show-Message([string]$text) {
     try {

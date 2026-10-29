@@ -112,8 +112,10 @@ TOOLS_ROOT = APP_ROOT.parent
 RUNTIME = TOOLS_ROOT / 'video-recovery-runtime'
 WEB_ROOT = APP_ROOT / 'web'
 # 画面は公開版と同じ /ppt-lab/ に置き、盤面ビューワー（F/）とシミュレータは
-# リポジトリ直下のもの（＝ネットに取りに行かない）を同じサイトから配信する。
+# 同じサイトのもの（＝ネットに取りに行かない）を配信する。
+# ルート側は GitHub Pages と同じビルド（dist/pages）を優先して使う。
 SITE_ROOT = APP_ROOT.parents[1]
+SITE_BUILD = SITE_ROOT / 'dist' / 'pages'
 LAB_PREFIX = '/ppt-lab'
 SITE_DIRS = ('F', 'hub', 'simulator', 'shared', 'styles', 'icons', 'ai-lab', 'Load PPT')
 SITE_FILES = ('index.html', 'manifest.webmanifest', 'sw.js')
@@ -137,6 +139,60 @@ REVIEW: NameReview | None = None
 
 def engine_path() -> Path:
     return RUNTIME / 'bin' / 'TetrisVideoRecovery_stream.exe'
+
+
+def site_root() -> Path:
+    """公開版（GitHub Pages）と同じビルドがあればそれを使う。無ければリポジトリ直下。"""
+    if (SITE_BUILD / 'index.html').is_file():
+        return SITE_BUILD.resolve()
+    return SITE_ROOT.resolve()
+
+
+def site_build_stale(marker: Path) -> bool:
+    try:
+        stamp = marker.stat().st_mtime
+    except OSError:
+        return True
+    for name in ('index.html', 'F/index.html', 'hub/index.html', 'manifest.webmanifest'):
+        path = SITE_ROOT / name
+        try:
+            if path.is_file() and path.stat().st_mtime > stamp:
+                return True
+        except OSError:
+            continue
+    for folder in ('F/app', 'simulator/app', 'shared', 'styles', 'hub/js'):
+        base = SITE_ROOT / folder
+        if not base.is_dir():
+            continue
+        for path in base.rglob('*'):
+            try:
+                if path.is_file() and path.stat().st_mtime > stamp:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def ensure_site_build() -> None:
+    """dist/pages が無い／本体より古いときに、公開版と同じビルドを作り直す。
+
+    ビルドは appearance / motion / ラベルの差し込みを含むので、これが無いと
+    ローカルのシミュレータだけ古い見た目になる。失敗しても配信は続ける。
+    """
+    if os.environ.get('PPT_LAB_SKIP_BUILD'):
+        return
+    script = TOOLS_ROOT / 'build-web.py'
+    if not script.is_file():
+        return
+    marker = SITE_BUILD / 'index.html'
+    if marker.is_file() and not site_build_stale(marker):
+        return
+    try:
+        subprocess.run([sys.executable, str(script)], cwd=str(SITE_ROOT), timeout=600,
+                       capture_output=True,
+                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 _ENV_CACHE: dict = {'at': 0.0, 'value': None}
@@ -410,10 +466,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path.startswith('/api/'):
                 return self.api_get(path)
-            if path in ('', '/'):
-                # 画面は /ppt-lab/ に置いた（相対パスが公開版と同じになる）
-                return self.redirect(LAB_PREFIX + '/')
             if path == LAB_PREFIX:
+                # 画面は /ppt-lab/ に置いた（相対パスが公開版と同じになる）
                 return self.redirect(LAB_PREFIX + '/')
             if path.startswith(LAB_PREFIX + '/'):
                 return self.serve_static(path[len(LAB_PREFIX):])
@@ -861,17 +915,22 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- 本体（ビューワー / シミュレータ）----------------------------------
     def serve_site(self, path: str) -> None:
-        """リポジトリ直下の Tetris_Simulator 本体を配信する（許可した場所だけ）。"""
+        """シミュレータ / ビューワー / ハブを配信する（公開版と同じビルドを優先）。"""
         relative = path.lstrip('/') or 'index.html'
         if relative.endswith('/'):
             relative += 'index.html'
         first = relative.split('/', 1)[0]
         if relative not in SITE_FILES and relative not in SITE_EXTRA and first not in SITE_DIRS:
             return self.send_error_json('ファイルがありません', 404)
-        root = SITE_ROOT.resolve()
+        root = site_root()
         target = (root / relative).resolve()
         if root not in target.parents:
             return self.send_error_json('参照先が不正です', 403)
+        if not target.is_file() and root is not SITE_ROOT.resolve():
+            # ビルドに無いものはリポジトリ直下から拾う
+            fallback = (SITE_ROOT.resolve() / relative).resolve()
+            if SITE_ROOT.resolve() in fallback.parents and fallback.is_file():
+                target = fallback
         if not target.is_file():
             return self.send_error_json('ファイルがありません', 404)
         body = target.read_bytes()
@@ -898,8 +957,9 @@ def main() -> int:
     STORE.reset_stuck_videos()
     JOBS = JobManager(STORE, args.data, TOOLS_ROOT, RUNTIME)
     REVIEW = NameReview(args.data / 'cache', find_ffmpeg(), STORE.recall_name)
+    ensure_site_build()
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
-    url = f'http://127.0.0.1:{server.server_port}/'
+    url = f'http://127.0.0.1:{server.server_port}/ppt-lab/'
     print(url, flush=True)
     if args.open:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
