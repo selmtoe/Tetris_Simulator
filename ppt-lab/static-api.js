@@ -23,7 +23,7 @@
         const match = url.split('?')[0].match(/^\/api\/videos\/([^/]+)\/replay\/(\d+)$/);
         return match ? { id: match[1], index: match[2] } : null;
     };
-    const viewerUrl = hash => 'F/index.html?page=1#' + hash;
+    const viewerUrl = hash => new URL('../F/index.html?page=1#' + hash, location.href).href;
 
     const original = window.fetch.bind(window);
     window.fetch = async (input, init) => {

@@ -1,16 +1,17 @@
-# PPT Lab 引き継ぎメモ（2026-10-29 04:45）
+# PPT Lab 引き継ぎメモ（2026-10-29 14:00）
 
 次のセッションはこのファイルから始めてください。
 
 ## 今の状態
 
 - ローカル版: `tools\ppt-lab`（server.py / jobs.py / namereview.py / store.py / web/app.js）
+- **画面のURLは `http://127.0.0.1:8765/ppt-lab/`**（`/` は302で誘導。公開版と同じ相対パスにするため）
 - 公開版: https://selmtoe.github.io/Tetris_Simulator/ppt-lab/（`ppt-lab/` + `tools/ppt-lab/webdata` をビルドして配信）
 - デスクトップの「PPT Lab」ショートカットから起動（launch.ps1 → server → Edge アプリモード）
 - ローカルサーバーは 8765 で起動中（`server.py` を直したので再起動済み。`web/*` は `Cache-Control: no-store` なので再読み込みで反映）
-- 直前のコミット: `cff0ed2`（盤面がP1だけ／連続再生が進まない）→ 今回の絞り込み修正を次のコミットにまとめる
+- 直前のコミット: `1520a7f`（プレイヤー1/2の絞り込み）→ 今回の修正を次のコミットにまとめる
 
-## 今回直したこと（2026-10-29 早朝）
+## 今回直したこと（2026-10-29）
 
 | 項目 | 状態 |
 |---|---|
@@ -20,8 +21,9 @@
 | デバッグフック | ○ `window.__pptDebug()` に同期・連続再生の状態を追加 |
 | プレイヤーの絞り込み | ○ 「プレイヤー1 / プレイヤー2」に改名。**2人が同じ試合で対戦している動画だけ**に |
 | 試合一覧と連続再生の件数 | ○ 同じ `matchFilterOk()` を使うので一致（72 = 72） |
+| ビューワー/シミュレータ | ○ ネットではなく**ローカルの `F/` `hub/` `simulator/`** を同じサーバーから配信 |
 
-詳細は `docs/PPT-LAB.md` §34〜§35。
+詳細は `docs/PPT-LAB.md` §34〜§36。
 
 ## 検証済み（Edge ヘッドレス + YouTube プレイヤー差し替え）
 
@@ -29,6 +31,7 @@
 - 閲覧専用版（`dist/pages/ppt-lab`）: 同じく 157/157
 - 連続再生: 試合の終わりで次へ（index 0→1）、186試合送っても動画をまたいで継続、移動先も P2 つき105局面
 - いんたい / syakegohan: 動画一覧 1動画・72試合、試合一覧 72、連続再生 72（左右を入れ替えても同じ）
+- ビューワー: `http://127.0.0.1:8765/F/?labViewer=1` を開いて 157局面・2400x1148 で描画、ページ送りも追従
 
 検証スクリプトは `C:\Users\hirom\Documents\AI-Agent-Workspace\ppt-lab-fix\`
 （`check-feature.mjs`＝app.jsのロジック単体、`e2e.py`＝ブラウザ、`e2e-static-build.py`＝配信物、`cdp.py`＝DevTools Protocol の最小クライアント）。

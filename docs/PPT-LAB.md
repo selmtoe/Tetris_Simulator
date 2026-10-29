@@ -461,3 +461,25 @@ Settings は **5タブ**: 一般 / 表示 / 解析 / 名前とタグ / データ
 | 連続再生のセグメント | 172 | **72** |
 | P1/P2 を入れ替え | — | 同じ 1動画 · 72試合 |
 | 片方だけ指定（いんたい） | — | 15動画 · 860試合（従来どおり） |
+## 36. 盤面ビューワーとシミュレータをローカルから開く（2026-10-29）
+
+### 変更
+- 画面のURLを `http://127.0.0.1:8765/` → **`http://127.0.0.1:8765/ppt-lab/`** に移した（`/` は302で誘導）。
+  これで相対パス（`../F/`）が公開版と同じ意味になり、ローカルと公開で同じ組み立てになる。
+- 盤面ビューワー（`F/`）・シミュレータ（`simulator/`）・ハブ（`hub/`）・共有部品（`shared/` `styles/` `icons/` `ai-lab/` `Load PPT/`）を
+  **リポジトリ直下から同じサーバーで配信**（`serve_site()`）。ネットワークには取りに行かない。
+- `app.js`:
+  - `SITE_BASE = new URL('../', location.href)`、`SIMULATOR_BASE` / `VIEWER_BASE` / `VIEWER_ORIGIN` もそこから導出
+  - 保存済みの公開URL（`https://selmtoe.github.io/Tetris_Simulator/...`）は `siteUrl()` でローカルの同じ場所へ置換
+  - ビューワーの iframe は `index.html` の固定srcをやめ、起動時に `F/?labViewer=1` を開く
+  - `?page=N` の組み立てを `withPage()` に統一（`?page=1?page=2` のような壊れたURLを防ぐ）
+- 配信してよい場所は `SITE_DIRS` / `SITE_FILES` / `SITE_EXTRA` の許可制（`tools/` や `docs/` は404）。
+
+### 確認（Edge ヘッドレス）
+| 項目 | 結果 |
+|---|---|
+| 画面 | `http://127.0.0.1:8765/ppt-lab/#videos`（`/` から302） |
+| ビューワー | `http://127.0.0.1:8765/F/?labViewer=1` を開き、157局面・canvas 2400x1148 で描画 |
+| 局面送り | 親の再生位置に合わせてビューワーのページが 0 → 129 へ（postMessage は同一オリジン） |
+| シミュレータのリンク | `http://127.0.0.1:8765/hub/?entry=simulator#...` |
+| ビューワーのリンク | `http://127.0.0.1:8765/F/index.html#...` |

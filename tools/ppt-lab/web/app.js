@@ -880,11 +880,12 @@
 
     // 保存したURLを、そのままビューワーで開ける形にする（操作は無効）
     function viewerThumbUrl(url) {
-        if (!url) return 'about:blank';
-        const parts = String(url).split('#');
-        if (parts.length < 2) return url;
+        const value = siteUrl(url);
+        if (!value) return 'about:blank';
+        const parts = String(value).split('#');
+        if (parts.length < 2) return value;
         const base = parts[0].replace(/\?.*$/, '');
-        const page = (String(url).match(/[?&]page=(\d+)/) || [])[1] || '1';
+        const page = (String(value).match(/[?&]page=(\d+)/) || [])[1] || '1';
         return base + '?page=' + page + '&labViewer=1#' + parts[1];
     }
 
@@ -1635,12 +1636,24 @@
         }
     }
 
-    const SIMULATOR_BASE = 'https://selmtoe.github.io/Tetris_Simulator/';
-    const VIEWER_BASE = SIMULATOR_BASE + 'F/';
+    // 画面は <サイト>/ppt-lab/ に置き、盤面ビューワー（F/）とシミュレータは
+    // 同じサイトのものを使う。ローカル版はネットに取りに行かず、
+    // リポジトリ直下の本体をそのまま開く。
+    const SITE_BASE = new URL('../', location.href).href;
+    const SIMULATOR_BASE = SITE_BASE;
+    const VIEWER_BASE = SITE_BASE + 'F/';
+    const PUBLIC_BASE = 'https://selmtoe.github.io/Tetris_Simulator/';
     // ビューワーとは postMessage でやり取りする（?labViewer=1 で有効）
     // 応答が無い環境では自動で URL 再読み込み方式に切り替える。
-    const VIEWER_ORIGIN = 'https://selmtoe.github.io';
+    const VIEWER_ORIGIN = location.origin;
     const VIEWER_MESSAGE = 'labViewerRequest';
+
+    // 保存してある公開URLを、いま開いているサイトの同じ場所へ置き換える
+    function siteUrl(url) {
+        const value = String(url || '');
+        if (!value || !value.startsWith(PUBLIC_BASE)) return value;
+        return SITE_BASE + value.slice(PUBLIC_BASE.length);
+    }
 
     function createViewerBridge(frame) {
         let ready = false;
@@ -1941,6 +1954,13 @@
         return value;
     }
 
+    // 「?page=N」だけ差し替える（ほかのクエリと #ハッシュは残す）
+    function withPage(url, page) {
+        const [base, hash] = String(url).split('#');
+        const clean = base.replace(/([?&])page=\d+&?/g, '$1').replace(/[?&]$/, '');
+        return clean + (clean.includes('?') ? '&' : '?') + 'page=' + page + (hash !== undefined ? '#' + hash : '');
+    }
+
     function setViewerPage(page) {
         const viewer = document.getElementById('detail-viewer');
         if (!viewer || !state.currentUrls || !state.currentUrls.combined) return;
@@ -1951,8 +1971,7 @@
         if (now - (state.lastReloadAt || 0) < 700) return;   // 連続リロードを避ける
         state.lastReloadAt = now;
         viewer.dataset.page = String(page);
-        const parts = state.currentUrls.combined.split('#');
-        viewer.src = parts[0] + '?page=' + (page + 1) + '#' + (parts[1] || '');
+        viewer.src = withPage(siteUrl(state.currentUrls.combined), page + 1);
     }
 
     function showPage(index, options) {
@@ -1979,8 +1998,7 @@
         }
         const viewer = document.getElementById('detail-viewer');
         if (viewer && state.currentUrls && state.currentUrls.combined) {
-            const parts = state.currentUrls.combined.split('#');
-            viewer.src = parts[0] + '?page=' + (page + 1) + '#' + (parts[1] || '');
+            viewer.src = withPage(siteUrl(state.currentUrls.combined), page + 1);
         }
     }
 
@@ -2153,7 +2171,7 @@
         }
         const links = document.querySelectorAll('.lab-match-tools > a.btn-outline');
         if (links[0]) links[0].href = simulatorLink(urls.combined) || '#';
-        if (links[1]) links[1].href = urls.combined || '#';
+        if (links[1]) links[1].href = siteUrl(urls.combined) || '#';
         if (state.bridge) state.bridge.show(row, state.pages, 0);
         setTimeout(() => {
             const frame = document.getElementById('detail-viewer');
@@ -3197,6 +3215,10 @@
     (async function start() {
         if (!location.hash) location.hash = '#videos';
         const initialFrame = document.getElementById('detail-viewer');
+        // ビューワーは同じサイトの F/ を開く（ローカル版はネットに取りに行かない）
+        if (initialFrame && !initialFrame.getAttribute('src')) {
+            initialFrame.src = VIEWER_BASE + '?labViewer=1';
+        }
         if (initialFrame) state.bridge = createViewerBridge(initialFrame);
         state.bridgeGrace = Date.now() + 6000;
         await loadEnvironment();

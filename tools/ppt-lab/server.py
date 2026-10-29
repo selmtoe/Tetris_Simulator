@@ -111,6 +111,16 @@ APP_ROOT = Path(__file__).resolve().parent
 TOOLS_ROOT = APP_ROOT.parent
 RUNTIME = TOOLS_ROOT / 'video-recovery-runtime'
 WEB_ROOT = APP_ROOT / 'web'
+# 画面は公開版と同じ /ppt-lab/ に置き、盤面ビューワー（F/）とシミュレータは
+# リポジトリ直下のもの（＝ネットに取りに行かない）を同じサイトから配信する。
+SITE_ROOT = APP_ROOT.parents[1]
+LAB_PREFIX = '/ppt-lab'
+SITE_DIRS = ('F', 'hub', 'simulator', 'shared', 'styles', 'icons', 'ai-lab', 'Load PPT')
+SITE_FILES = ('index.html', 'manifest.webmanifest', 'sw.js')
+SITE_EXTRA = ('tools/tetris-lab/preview-theme.css',)
+SITE_TYPES = {'.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm',
+              '.json': 'application/json', '.webmanifest': 'application/manifest+json',
+              '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.onnx': 'application/octet-stream'}
 DEFAULT_DATA = Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'PPTLab'
 VERSION = '0.1.0'
 STARTED_AT = time.time()
@@ -400,7 +410,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path.startswith('/api/'):
                 return self.api_get(path)
-            return self.serve_static(path)
+            if path in ('', '/'):
+                # 画面は /ppt-lab/ に置いた（相対パスが公開版と同じになる）
+                return self.redirect(LAB_PREFIX + '/')
+            if path == LAB_PREFIX:
+                return self.redirect(LAB_PREFIX + '/')
+            if path.startswith(LAB_PREFIX + '/'):
+                return self.serve_static(path[len(LAB_PREFIX):])
+            return self.serve_site(path)
         except Exception as error:  # 想定外でも落とさず、画面に理由を出す
             return self.send_error_json(str(error), 500)
 
@@ -834,6 +851,39 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         if os.environ.get('PPT_LAB_VERBOSE'):
             sys.stderr.write('%s - %s\n' % (self.address_string(), fmt % args))
+
+    def redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header('Location', location)
+        self.send_header('Content-Length', '0')
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+
+    # ---- 本体（ビューワー / シミュレータ）----------------------------------
+    def serve_site(self, path: str) -> None:
+        """リポジトリ直下の Tetris_Simulator 本体を配信する（許可した場所だけ）。"""
+        relative = path.lstrip('/') or 'index.html'
+        if relative.endswith('/'):
+            relative += 'index.html'
+        first = relative.split('/', 1)[0]
+        if relative not in SITE_FILES and relative not in SITE_EXTRA and first not in SITE_DIRS:
+            return self.send_error_json('ファイルがありません', 404)
+        root = SITE_ROOT.resolve()
+        target = (root / relative).resolve()
+        if root not in target.parents:
+            return self.send_error_json('参照先が不正です', 403)
+        if not target.is_file():
+            return self.send_error_json('ファイルがありません', 404)
+        body = target.read_bytes()
+        mime = SITE_TYPES.get(target.suffix.lower())
+        if not mime:
+            mime, _ = mimetypes.guess_type(target.name)
+        self.send_response(200)
+        self.send_header('Content-Type', mime or 'application/octet-stream')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(body)
 
 
 def main() -> int:
