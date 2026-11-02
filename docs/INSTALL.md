@@ -223,16 +223,17 @@ embeddable zip を使う方法（レジストリを触らない）もありま�
 | `cublas64_13.dll` / `cublasLt64_13.dll` | CUDA Toolkit、または pip の `nvidia-cublas` |
 | `cudart64_13.dll` | CUDA Toolkit、または pip の `nvidia-cuda-runtime` |
 | `cudnn64_9.dll` + `cudnn_*64_9.dll` | pip の `nvidia-cudnn-cu13`、または公式配布物（要アカウント） |
-| `cufft64_12.dll` | **配布物の `bin` に同梱**、または CUDA Toolkit。ダウンロード不要 |
+| `cufft64_12.dll` | 配布物の `bin` に同梱 / CUDA Toolkit / pip の `nvidia-cufft`（12.x） |
 
 いちばん簡単な直し方（NVIDIA アカウント不要）: もう一度 `install.cmd` を実行し、
-「pip で NVIDIA の CUDA / cuDNN を取得して bin にコピーしますか？」に **はい** と答えます。
-インストーラは次の 2 つを使います（`-cu13` 付きの名前は中身が空のダミーなので使いません）。
+「pip で NVIDIA の CUDA / cuDNN / cuFFT を取得して bin にコピーしますか？」に **はい** と答えます。
+インストーラは次の 4 つを使います（`-cu13` 付きの名前は中身が空のダミーなので使いません）。
 
 ```
 nvidia-cublas           （13.x）
 nvidia-cuda-runtime     （13.x）
 nvidia-cudnn-cu13       （既存 cudnn64_9.dll と同じ版に固定。例 9.12.0.46）
+nvidia-cufft            （12.x。bin にもシステムにも cuFFT が無いときだけ）
 ```
 
 手動で入れる場合:
@@ -359,9 +360,11 @@ install.cmd -DryRun
 
 ```text
 ダウンロード予定の一覧（配布前の確認用）
+[必要] cuFFT（pip: nvidia-cufft>=12,<14）（約 200 MB / NVIDIA CUDA EULA）
+       https://pypi.org/project/nvidia-cufft/
 [必要] FFmpeg LGPL 共有ビルド（ffmpeg / ffprobe / av*.dll）（約 77 MiB / LGPL v2.1 以降）
        https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/...
-※ cuFFT（cufft64_12.dll）は配布物の bin に同梱されているため取得しません。
+※ cuFFT は bin に同梱されていれば取得しません（無い PC だけ nvidia-cufft を取得）。
 ```
 
 主なオプション:
@@ -418,7 +421,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\ppt-setup\uninstall.
 | 解析エンジン | `TetrisVideoRecovery_stream.exe`, `onnxruntime*.dll` | `tools\video-recovery-runtime\bin` | 配布物に同梱 |
 | 映像 | `ffmpeg.exe`, `ffprobe.exe`, `avcodec-63.dll`, `avformat-63.dll`, `avutil-61.dll` | 同上 | [BtbN LGPL 共有ビルド](https://github.com/BtbN/FFmpeg-Builds/releases/latest) |
 | CUDA | `cublas64_13.dll`, `cublasLt64_13.dll`, `cudart64_13.dll` | 同上 | [CUDA Toolkit 13.x](https://developer.nvidia.com/cuda-downloads) / pip `nvidia-cublas`, `nvidia-cuda-runtime` |
-| cuFFT | `cufft64_12.dll`（無くても CPU モードで起動は可） | 同上 | **配布物に同梱**（CUDA Toolkit にもあります） |
+| cuFFT | `cufft64_12.dll`（無くても CPU モードで起動は可） | 同上 | 配布物に同梱 / CUDA Toolkit / pip `nvidia-cufft` |
 | cuDNN | `cudnn64_9.dll`, `cudnn_*64_9.dll` | 同上 | [cuDNN 9](https://developer.nvidia.com/cudnn)（要アカウント）/ pip `nvidia-cudnn-cu13` |
 | 設定 | `tetris_recover.ini` | `tools\video-recovery-runtime\config` | 配布物に同梱 |
 | Python | Python 3.11 以上の 64bit | どこでも（PATH か既知の場所） | [python.org](https://www.python.org/downloads/windows/) |

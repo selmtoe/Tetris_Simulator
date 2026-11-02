@@ -90,7 +90,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:InstallerVersion = '1.0.1'
+$script:InstallerVersion = '1.0.2'
 $script:SetupRoot = $PSScriptRoot                                  # tools\ppt-setup
 $script:ToolRoot = Split-Path -Parent $script:SetupRoot             # tools
 $script:RepoRoot = Split-Path -Parent $script:ToolRoot              # リポジトリ直下
@@ -1459,12 +1459,25 @@ function Step-Cuda {
     }
 
     # --- 2) 足りない分は pip で取得（NVIDIA アカウント不要） ---
+    #   cuFFT は「同梱 or システム CUDA」が第一候補だが、どちらにも無い PC では
+    #   PyPI の nvidia-cufft（CUDA 13 系は 12.x）から取る。
     $pipTargets = @($missing | Where-Object { $pipNames -contains $_ })
     $cudnnMissing = ($cudnnNames.Count -eq 0) -or (@($missing | Where-Object { $_ -like 'cudnn*' }).Count -gt 0)
-    $needPip = ($pipTargets.Count -gt 0) -or $cudnnMissing
+    $cufftMissing = @($missing | Where-Object { $extraNames -contains $_ })
+    $needPip = ($pipTargets.Count -gt 0) -or $cudnnMissing -or ($cufftMissing.Count -gt 0)
 
     $cudaRange = ('>={0},<{1}' -f $requirement.CudaMajor, ($requirement.CudaMajor + 1))
     $cudnnPackage = ('nvidia-cudnn-cu{0}' -f $requirement.CudaMajor)
+
+    # cuFFT のパッケージは soname（cufft64_12 → 12 系）から決める
+    $cufftMajor = 12
+    if ($extraNames.Count -gt 0) {
+        $cufftMatch = [regex]::Match($extraNames[0], 'cufft\w*64_(\d+)\.dll')
+        if ($cufftMatch.Success) { $cufftMajor = [int]$cufftMatch.Groups[1].Value }
+    }
+    $cufftRange = ('>={0},<{1}' -f $cufftMajor, ($cufftMajor + 1))
+    $cufftPackage = ('nvidia-cufft{0}' -f $cufftRange)
+
     $pipPackages = New-Object System.Collections.ArrayList
     [void]$pipPackages.Add(('nvidia-cublas{0}' -f $cudaRange))
     [void]$pipPackages.Add(('nvidia-cuda-runtime{0}' -f $cudaRange))
@@ -1491,11 +1504,14 @@ function Step-Cuda {
             Write-Info ('既存の {0} は {1}。同じ版を pip で指定します。' -f $requirement.CudnnName, $cudnnPin)
         }
 
+        $planPackages = @($pipPackages)
+        if ($cufftMissing.Count -gt 0) { $planPackages += $cufftPackage }
+
         if ($script:DryRun) {
-            Write-Dry ('pip install --target {0} {1}' -f $script:CudaDir, ($pipPackages -join ' '))
+            Write-Dry ('pip install --target {0} {1}' -f $script:CudaDir, ($planPackages -join ' '))
             Write-Detail '（実行時は、この後に wheel の中の DLL を bin へコピーします）'
         } else {
-            $doPip = Confirm-YesNo -Question 'pip で NVIDIA の CUDA / cuDNN を取得して bin にコピーしますか？（数百 MB）' -Default $true
+            $doPip = Confirm-YesNo -Question 'pip で NVIDIA の CUDA / cuDNN / cuFFT を取得して bin にコピーしますか？（数百 MB）' -Default $true
             if ($doPip) {
                 $ok = Invoke-PipInstall -TargetDir $script:CudaDir -Packages $pipPackages -Label 'CUDA ランタイム + cuBLAS + cuDNN'
                 if (-not $ok -and $cudnnPin) {
@@ -1536,6 +1552,24 @@ function Step-Cuda {
                         Write-Warn 'pip の中に cuDNN が見つかりませんでした'
                     }
                 }
+
+                # cuFFT は「bin → システム CUDA」で見つからなかったときだけ pip から取る
+                if ($cufftMissing.Count -gt 0) {
+                    Write-Info ('cuFFT を pip から取得します: {0}' -f $cufftPackage)
+                    [void](Invoke-PipInstall -TargetDir $script:CudaDir -Packages @($cufftPackage) -Label 'cuFFT（nvidia-cufft）')
+                }
+                foreach ($name in $extraNames) {
+                    if (Test-Path -LiteralPath (Join-Path $script:BinDir $name)) { continue }
+                    $source = Get-PipDllSource -Root $script:CudaDir -Name $name
+                    if ([string]::IsNullOrEmpty($source)) {
+                        Write-Warn ('pip の中に {0} が見つかりませんでした' -f $name)
+                        continue
+                    }
+                    if (Copy-DllToBin -Source $source -Name $name -Tag 'cuda') {
+                        [void]$copied.Add($name)
+                        Add-Action ('{0} を bin へコピー（pip 版 cuFFT）' -f $name)
+                    }
+                }
             } else {
                 Write-Warn 'CUDA / cuDNN の自動補完を行いませんでした。'
                 Write-Detail 'この状態でも画面は「CPU モード」で起動できますが、解析は非常に遅くなります（目安: GPU の数十倍）。'
@@ -1569,7 +1603,7 @@ function Step-Cuda {
         } elseif ($script:DryRun -and $systemSources.ContainsKey($name)) {
             $ok = $true
             $detail = 'システム側にあり（実行時にコピー）'
-        } elseif ($script:DryRun -and $needPip -and ($pipNames -contains $name -or $name -eq $requirement.CudnnName)) {
+        } elseif ($script:DryRun -and $needPip -and ($pipNames -contains $name -or $extraNames -contains $name -or $name -eq $requirement.CudnnName)) {
             $ok = $true
             $detail = 'DryRun: pip で取得予定'
         } else {
@@ -2077,6 +2111,27 @@ function Show-DownloadPlan {
         $ffmpegNeeded = (($ffmpegInfo.IsGpl -or $ffmpegInfo.IsNonFree) -and (-not $script:SkipFfmpeg))
     }
 
+    # cuFFT は「bin に同梱」「システムの CUDA Toolkit」のどちらにも無いときだけ pip で取る
+    $cufftNeeded = $false
+    $cufftNames = @()
+    $cufftRange = '>=12,<13'
+    if ($null -ne $script:Cuda) {
+        $cufftNames = @($script:Cuda.CufftNames)
+        if ($cufftNames.Count -gt 0) {
+            $cufftMatch = [regex]::Match($cufftNames[0], 'cufft\w*64_(\d+)\.dll')
+            if ($cufftMatch.Success) {
+                $cufftMajor = [int]$cufftMatch.Groups[1].Value
+                $cufftRange = ('>={0},<{1}' -f $cufftMajor, ($cufftMajor + 1))
+            }
+        }
+        foreach ($name in $cufftNames) {
+            if ([string]::IsNullOrEmpty($name)) { continue }
+            if (Test-Path -LiteralPath (Join-Path $script:BinDir $name)) { continue }
+            if (-not [string]::IsNullOrEmpty((Find-DllSource -Name $name))) { continue }
+            $cufftNeeded = $true
+        }
+    }
+
     $rows = New-Object System.Collections.ArrayList
     if ($pythonNeeded) {
         [void]$rows.Add([pscustomobject]@{ Kind = '必要'; Name = ('Python {0} 公式インストーラ（64bit）' -f $script:PythonVersion); Url = $script:PythonInstallerUrl; Size = '約 26 MB'; License = 'PSF License' })
@@ -2090,6 +2145,9 @@ function Show-DownloadPlan {
             $cudnnUrl = ('https://pypi.org/project/nvidia-cudnn-cu{0}/' -f $script:Cuda.CudaMajor)
             [void]$rows.Add([pscustomobject]@{ Kind = '必要'; Name = ('cuDNN（pip: nvidia-cudnn-cu{0}）' -f $script:Cuda.CudaMajor); Url = $cudnnUrl; Size = '約 400〜600 MB'; License = 'NVIDIA cuDNN SLA' })
         }
+    }
+    if ($cufftNeeded) {
+        [void]$rows.Add([pscustomobject]@{ Kind = '必要'; Name = ('cuFFT（pip: nvidia-cufft{0}）' -f $cufftRange); Url = 'https://pypi.org/project/nvidia-cufft/'; Size = '約 200 MB'; License = 'NVIDIA CUDA EULA' })
     }
     if ($ffmpegNeeded) {
         [void]$rows.Add([pscustomobject]@{ Kind = '必要'; Name = 'FFmpeg LGPL 共有ビルド（ffmpeg / ffprobe / av*.dll）'; Url = $script:FfmpegZipUrl; Size = '約 77 MiB'; License = 'LGPL v2.1 以降' })
@@ -2111,7 +2169,7 @@ function Show-DownloadPlan {
         Write-LogLine -Level 'PLAN' -Message ('         {0}' -f $row.Url) -Color DarkGray
     }
     Write-LogLine -Level 'PLAN' -Message '  ※ NVIDIA の部品は再配布せず、利用者の PC で取得する方式にしています。' -Color DarkGray
-    Write-LogLine -Level 'PLAN' -Message '  ※ cuFFT（cufft64_12.dll）は配布物の bin に同梱されているため取得しません。' -Color DarkGray
+    Write-LogLine -Level 'PLAN' -Message '  ※ cuFFT は bin に同梱されていれば取得しません（無い PC だけ nvidia-cufft を取得）。' -Color DarkGray
     Write-LogLine -Level 'PLAN' -Message ('  ' + ('-' * 66)) -Color DarkCyan
 }
 

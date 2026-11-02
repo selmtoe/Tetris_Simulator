@@ -53,15 +53,17 @@
 | cuBLAS (CUDA 13) | `pip install "nvidia-cublas>=13,<14"` | 約 420 MB | NVIDIA CUDA EULA | 条件付き |
 | CUDA Runtime (13) | `pip install "nvidia-cuda-runtime>=13,<14"` | 約 5 MB | NVIDIA CUDA EULA | 条件付き |
 | cuDNN 9 | `pip install nvidia-cudnn-cu13==9.12.0.46` | 約 400〜600 MB | NVIDIA cuDNN SLA | 条件付き |
+| cuFFT（CUDA 13 系は 12.x） | `pip install "nvidia-cufft>=12,<14"` | 約 200 MB | NVIDIA CUDA EULA | 条件付き |
 | FFmpeg 9.0 LGPL 共有ビルド | <https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip> | 73 MiB | LGPL v2.1 以降 | 可（条件あり） |
 
 > **パッケージ名の注意（実測済み）**
 > `nvidia-cublas-cu13` / `nvidia-cuda-runtime-cu13` / `nvidia-cuda-nvrtc-cu13` という名前も
 > PyPI に存在しますが、**中身は 0.0.1 のダミー**です。実際の CUDA 13 版は
-> サフィックス無しの `nvidia-cublas` / `nvidia-cuda-runtime` です。
+> サフィックス無しの `nvidia-cublas` / `nvidia-cuda-runtime` / `nvidia-cufft` です。
 > cuDNN だけは `nvidia-cudnn-cu13` が本物です（9.12.0.46 が実在し、この PC の
 > `cudnn64_9.dll` の FileVersion と一致します）。
 > NVRTC は `nvidia-cublas` の依存として自動で入るため、個別指定していません。
+> cuFFT は `nvidia-cufft-cu12`（11.x 系）ではなく **`nvidia-cufft`（12.x）** を使ってください。
 
 ポイント:
 
@@ -69,8 +71,10 @@
   どうしても入らない環境向けに、レジストリを触らない embeddable zip も選べます。
 - **CUDA / cuDNN は PyPI の NVIDIA 公式 wheel** を使うので、NVIDIA アカウントが要りません。
   （cuDNN の公式サイト配布物はアカウント必須なので、フォールバックとして案内だけしています）
-- **cuFFT（`cufft64_12.dll`）はダウンロードしません**。配布物の `bin` に同梱されている前提で、
-  インストーラは「存在チェック → 無ければシステムの CUDA Toolkit からコピー」だけを行います。
+- **cuFFT（`cufft64_12.dll`）は 3 段構え**です。`bin` に同梱されていればそれを使い、
+  無ければシステムの CUDA Toolkit からコピー、それも無い PC だけ
+  `pip install nvidia-cufft`（12.x）で取得して `bin` にコピーします。
+  配布物に同梱しておけば、そもそもダウンロードは発生しません。
 - **ffmpeg は LGPL の「shared」ビルド**を選びます。`shared` でないと `avcodec-63.dll` などが
   入らず、既存の C++ 実行ファイルが動きません。
 
@@ -93,9 +97,9 @@
 したがって、**この配布物の前提は CUDA 13 系 / cuDNN 9.12 系**です。
 `onnxruntime_providers_cuda.dll` を差し替えた場合は、この前提も見直してください。
 
-cuFFT は「pip では取得しない」枠です。`bin` に同梱されていればそれを使い、
-無ければシステムの CUDA Toolkit からコピーし、どちらにも無ければ ❌ と
-「別 PC の `bin` からコピー」を案内します。
+cuFFT は「bin → システムの CUDA Toolkit → pip（`nvidia-cufft`）→ ❌」の順で調達します。
+CUDA Toolkit を入れていない配布先でも、pip から 12.x を取って `bin` にコピーできるので、
+そこで止まりません（配布物に同梱しておけば取得自体が発生しません）。
 
 FFmpeg は soname（`avcodec-63` / `avformat-63` / `avutil-61`）が一致するビルドだけを採用します。
 一致しない場合は差し替えを中止し、既存を維持します（起動不能を避けるため）。
@@ -204,17 +208,26 @@ PyPI の名前は `-cu13` の有無で意味が変わります（実測済み）
 | `nvidia-cublas` / `nvidia-cuda-runtime` | **本物**（13.8.0.4 / 13.4.92 などが実在） |
 | `nvidia-cublas-cu13` / `nvidia-cuda-runtime-cu13` | 存在するが **0.0.1 のダミー** |
 | `nvidia-cudnn-cu13` | **本物**（9.12.0.46 などが実在） |
+| `nvidia-cufft` | **本物**（12.4.0.43 など。CUDA 13 系の cuFFT） |
+| `nvidia-cufft-cu12` | 11.x 系なので **使わない** |
 | `nvidia-cuda-nvrtc-cu13` | ダミー（NVRTC は `nvidia-cublas` の依存として入る） |
 
 `install.ps1` の `Step-Cuda` はこの名前を使っています。将来 NVIDIA が命名を変えた場合は、
-`Step-Cuda` の `$pipPackages` を組み立てている数行だけを直してください。
+`Step-Cuda` の `$pipPackages` / `$cufftPackage` を組み立てている数行だけを直してください。
 
 ### Q. cuFFT（cufft64_12.dll）は入れなくていい？
 
 `onnxruntime_providers_cuda.dll` は `cufft64_12` をインポートしているので、
-**ファイルとしては必要**です。ただし配布物の `bin` に同梱されている前提なので、
-インストーラはダウンロードせず「存在チェック → 無ければシステムの CUDA Toolkit からコピー」
-だけを行います。どちらにも無い場合は ❌ と「別 PC の `bin` からコピー」を表示します。
+**ファイルとしては必要**です。インストーラは次の順で調達します。
+
+1. `bin` に同梱されていればそれを使う
+2. 無ければシステムの CUDA Toolkit（`...\CUDA\v13.x\bin\x64`）からコピー
+3. それも無ければ `pip install "nvidia-cufft>=12,<14"` で取得し、`cufft64_12.dll` /
+   `cufftw64_12.dll` を `bin` にコピー
+4. どれも駄目なら ❌ と「別 PC の `bin` からコピー」を表示
+
+3 のおかげで、**CUDA Toolkit を入れていない配布先でも止まりません**。
+`-DryRun` では、1〜2 で足りない場合に限り `nvidia-cufft` がダウンロード予定に載ります。
 
 ### Q. `avcodec` のメジャーが違うと言われる
 
@@ -230,6 +243,7 @@ PyPI の名前は `-cu13` の有無で意味が変わります（実測済み）
 | --- | --- | --- |
 | 1.0.0 | 2026-11-03 | 初版。8 ステップ・冪等・DryRun・LGPL 差し替え・ショートカット・任意 RAM ディスク |
 | 1.0.1 | 2026-11-03 | pip のパッケージ名を実在する `nvidia-cublas` / `nvidia-cuda-runtime` に修正。cuFFT の存在チェックを追加。インポート名との突き合わせ表示を追加。`.cmd` を ASCII のみに変更。DryRun にダウンロード予定一覧を追加。失敗時の CPU モード代替の案内を追加 |
+| 1.0.2 | 2026-11-03 | cuFFT の調達に pip `nvidia-cufft`（12.x）を追加（bin → システム CUDA → pip → ❌ の順）。CUDA Toolkit 未導入の配布先でも止まらないようにした。DryRun のダウンロード予定と README に cuFFT を追記 |
 
 ---
 
