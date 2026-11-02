@@ -115,9 +115,9 @@ class Store:
     def _migrate_360(self, db) -> None:
         """360p 既定への一度きりの切り替え。
 
-        旧既定は `standard`（1080p・旧モデル）だった。明示的に別の
-        プロファイルを選んでいる環境は触らず、既定のままの人だけ
-        `fast320`（360p + 新モデル）へ移す。
+        旧既定は `standard`（1080p・旧モデル）だった。明示的に別のプロファイルを
+        選んでいる環境は触らず、既定のままの人だけ解析モデル（Tetrace-V1.0-PPT）へ
+        移す。取得解像度は保存するかどうかで jobs.py が切り替える。
         """
         marker = db.execute(
             "SELECT value FROM settings WHERE key='migration.model360'").fetchone()
@@ -129,11 +129,11 @@ class Store:
             profile = json.loads(row['value']) if row is not None else None
         except (TypeError, json.JSONDecodeError):
             profile = None
-        if profile in (None, 'standard'):
+        if profile in (None, 'standard', 'fast320'):
             db.execute(
                 "INSERT INTO settings(key, value, updated_at) VALUES('analysisProfile', ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-                (json.dumps('fast320'), now()))
+                (json.dumps('tetrace-v1.0-ppt'), now()))
         db.execute(
             "INSERT INTO settings(key, value, updated_at) VALUES('migration.model360', ?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",

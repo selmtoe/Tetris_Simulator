@@ -1,4 +1,4 @@
-# PPT Lab 設定画面 最終設計（2026-10-29 確定）
+﻿# PPT Lab 設定画面 最終設計（2026-10-29 確定）
 
 ## 0. 決定事項
 
@@ -31,20 +31,32 @@
 
 | ラベル | キー | 型 | 既定 | 選択肢 |
 |---|---|---|---|---|
-| 画質の上限 | `downloadQuality` | enum | 1080p | 1080p / 720p / 480p / 320p |
+| 動画保存時の取得解像度 | `downloadQualitySaved` | enum | 1080p（推奨） | 1080p（推奨） / 720p / 480p / 360p |
+| 動画非保存時の取得解像度 | `downloadQualityStream` | enum | 360p（推奨） | 1080p / 720p / 480p / 360p（推奨） |
 | 動画の保存先 | `downloadDir` | path | データフォルダ | フォルダ選択 |
+
+- 以前の「画質の上限」（`downloadQuality`）は廃止しました。保存するかどうかで解像度が変わります。
+- YouTube Cookie の設定は表示していません（`ytdlpCookies` は互換のため残置）。
 
 ### 盤面認識
 
 | ラベル | キー | 型 | 既定 | 選択肢 |
 |---|---|---|---|---|
-| 解析モデル | `analysisProfile` | enum | 標準 (1080p) | 標準 / 高速 (320p) / ぷよテト以外 / カスタム |
-| 精度モード | `analysisDevice` | enum | GPU | GPU / CPU / 自動 |
+| 解析モデル | `analysisProfile` | enum | Tetrace-V1.0-PPT | インストール済みモデル / ぷよテト以外 |
 | 解析の出力先 | `analysisOutputDir` | path | データフォルダ | フォルダ選択 |
 | RAMディスクを使う | `useRamDisk` | bool | オフ | オン / オフ |
 | 詳細ログを残す | `detailedLog` | bool | オフ | オン / オフ |
 
-- 解析モデル・精度モードを変えると**次回は再解析**（画面に明記）
+- 「精度モード」（`analysisDevice`）は廃止しました。NVIDIA GPU 固定です。
+- 解析モデルを変えると**次回は再解析**（画面に明記）。
+
+### モデルの追加
+
+- 設定 → 解析 → 「モデルを追加」から `.tetracemodel`（ZIP）を読み込むと、
+  `models\<id>\` に展開され、解析モデルの一覧に出ます。
+- パッケージには `manifest.json`（schema `tetrace-model/v1`、`id`/`name`/`version`/`files`/`sha256`）と
+  `*.onnx` が入っている必要があります。壊れたパッケージは検証で拒否されます。
+- 配布用のパッケージは `python tools/ppt-lab/pack-model.py --model tools/ppt-lab/models/fast320` で作れます。
 
 ## 4. 名前とタグ
 

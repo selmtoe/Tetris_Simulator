@@ -71,19 +71,22 @@ SETTINGS_SCHEMA = [
      'options': [['0.25', 'x0.25'], ['0.5', 'x0.5'], ['1', 'x1.0'], ['1.5', 'x1.5']]},
     {'key': 'sortOrder', 'group': '表示', 'label': '既定の並び順', 'type': 'enum', 'default': 'new',
      'options': [['new', '新しい順'], ['old', '古い順'], ['matches', '試合数が多い順'], ['title', '名前順']]},
-    {'key': 'downloadQuality', 'group': '解析', 'label': '画質の上限', 'type': 'enum', 'default': '360',
-     'options': [['1080', '1080p'], ['720', '720p'], ['480', '480p'], ['360', '360p (最速)']]},
+    {'key': 'downloadQualitySaved', 'group': '解析', 'label': '動画保存時の取得解像度', 'type': 'enum',
+     'default': '1080',
+     'options': [['1080', '1080p（推奨）'], ['720', '720p'], ['480', '480p'], ['360', '360p']],
+     'note': '動画をPCに保存するときの解像度です（大きいほどきれいで容量も増えます）'},
+    {'key': 'downloadQualityStream', 'group': '解析', 'label': '動画非保存時の取得解像度', 'type': 'enum',
+     'default': '360',
+     'options': [['1080', '1080p'], ['720', '720p'], ['480', '480p'], ['360', '360p（推奨）']],
+     'note': '解析のためだけに取得するときの解像度です（360pが最速）'},
     {'key': 'downloadDir', 'group': '解析', 'label': '動画の保存先', 'type': 'path', 'default': ''},
-    {'key': 'ytdlpCookies', 'group': '解析', 'label': 'YouTube Cookieファイル', 'type': 'path', 'default': '',
-     'note': '「Botではないことを確認」で取得に失敗する場合、ブラウザ拡張で書き出した cookies.txt を指定します'},
     {'key': 'downloadVideo', 'group': '解析', 'label': 'YouTubeの動画をPCに保存', 'type': 'bool',
      'default': False,
      'note': 'オンにすると、解析後に音声も取得して映像と結合し、PCに保存します（追加画面のチェックの初期値）'},
-    {'key': 'analysisProfile', 'group': '解析', 'label': '解析モデル', 'type': 'enum', 'default': 'fast320',
-     'options': [['standard', '標準 (1080p)'], ['fast320', '高速 (360p)'], ['other-game', 'ぷよテト以外']],
-     'note': '変えると次回の解析は最初からやり直しになります'},
-    {'key': 'analysisDevice', 'group': '解析', 'label': '精度モード', 'type': 'enum', 'default': 'gpu',
-     'options': [['gpu', 'GPU'], ['cpu', 'CPU'], ['auto', '自動']],
+    {'key': 'analysisProfile', 'group': '解析', 'label': '解析モデル', 'type': 'enum',
+     # 選択肢は settings_schema() がインストール済みモデルから作り直す。
+     'default': 'tetrace-v1.0-ppt',
+     'options': [['tetrace-v1.0-ppt', 'Tetrace-V1.0-PPT']],
      'note': '変えると次回の解析は最初からやり直しになります'},
     {'key': 'analysisOutputDir', 'group': '解析', 'label': '解析の出力先', 'type': 'path', 'default': ''},
     {'key': 'useRamDisk', 'group': '解析', 'label': 'RAMディスクを使う', 'type': 'bool', 'default': False},
@@ -134,10 +137,14 @@ STARTED_AT = time.time()
 
 sys.path.insert(0, str(APP_ROOT))
 from store import Store  # noqa: E402
+import models_registry  # noqa: E402
 from jobs import JobManager, ensure_ram_disk, ram_disk_info  # noqa: E402
 from jobs import batch_folder_name, find_ram_disk  # noqa: E402
 from namereview import NameReview, read_player_names, apply_names  # noqa: E402
 from namereview import SAME_IMAGE_THRESHOLD, _correlation, crop_vector  # noqa: E402
+
+# 解析モデル（models\<id>\manifest.json）の置き場所。
+MODELS_DIR = models_registry.MODELS_DIR
 from namereview import save_name_crops  # noqa: E402
 # 表記ゆれの畳み方と「いちばん多い表記」は namereview と共通（同じ規則でまとめる）
 from namereview import fold_name, most_common, name_groups  # noqa: E402
@@ -417,14 +424,48 @@ def ram_disk_note(info: dict) -> str:
             '以後はログオン時に自動で作り直します')
 
 
+def model_options() -> list[list[str]]:
+    """「解析モデル」の選択肢を、インストール済みモデルから作る。"""
+    options = [[item['id'], item['name']]
+               for item in models_registry.list_models(MODELS_DIR)]
+    if not options:
+        options = [[models_registry.DEFAULT_MODEL_ID, 'Tetrace-V1.0-PPT']]
+    # 別ゲーム用（profiles.json の設定）も従来どおり選べるようにする。
+    options.append(['other-game', 'ぷよテト以外'])
+    return options
+
+
+def active_model_id() -> str:
+    """いま選ばれているモデル id（旧プロファイル id は読み替える）。"""
+    try:
+        value = STORE.settings().get('analysisProfile') if STORE else ''
+    except Exception:
+        value = ''
+    return models_registry.canonical_model_id(value)
+
+
+def models_payload() -> dict:
+    """設定画面に出すモデル一覧（表示名・版・サイズ）と選択中 id。"""
+    models = []
+    for item in models_registry.list_models(MODELS_DIR):
+        models.append({key: item.get(key) for key in
+                       ('id', 'name', 'version', 'description', 'files',
+                        'builtin', 'size')})
+    return {'models': models, 'active': active_model_id()}
+
+
 def settings_schema() -> list[dict]:
-    """設定画面のスキーマ。RAM ディスクの行だけ、いまの状態を注記に入れる。"""
+    """設定画面のスキーマ。状態で変わる行（RAM ディスク・解析モデル）を差し込む。"""
     info = ram_disk_info()
+    options = model_options()
     rows = []
     for item in SETTINGS_SCHEMA:
         row = dict(item)
         if row.get('key') == 'useRamDisk':
             row['note'] = ram_disk_note(info)
+        elif row.get('key') == 'analysisProfile':
+            row['options'] = options
+            row['default'] = models_registry.DEFAULT_MODEL_ID
         rows.append(row)
     return rows
 
@@ -1211,6 +1252,8 @@ class Handler(BaseHTTPRequestHandler):
             values = dict(SETTING_DEFAULTS)
             values.update({k: v for k, v in STORE.settings().items() if k in SETTING_TYPES})
             return self.send_json({'settings': values})
+        if path == '/api/models':
+            return self.send_json(models_payload())
         if path == '/api/analysis/profiles':
             return self.send_json({'profiles': PROFILES, 'active': STORE.settings().get('analysisProfile', 'standard')})
         if path == '/api/data/cache':
@@ -1386,6 +1429,36 @@ class Handler(BaseHTTPRequestHandler):
             values = dict(SETTING_DEFAULTS)
             values.update({k: v for k, v in STORE.settings().items() if k in SETTING_TYPES})
             return self.send_json({'ok': True, 'settings': values})
+        if path == '/api/models/install':
+            # `.tetracemodel`（ZIP）の生バイトを受け取る。Content-Length は必須。
+            length_text = (self.headers.get('Content-Length') or '').strip()
+            if not length_text.isdigit() or int(length_text) <= 0:
+                raise ValueError('ファイルのサイズが分かりません（Content-Length が必要です）')
+            length = int(length_text)
+            if length > models_registry.MAX_PACKAGE_BYTES:
+                # 読み切らずに断る。接続は閉じて、次のリクエストと混ざらないようにする。
+                self.close_connection = True
+                return self.send_error_json(
+                    f'ファイルが大きすぎます（{length / models_registry.MB:.1f}MB）。'
+                    f'上限は {models_registry.MAX_PACKAGE_BYTES / models_registry.MB:.0f}MB です',
+                    413)
+            raw = self.rfile.read(length)
+            if len(raw) != length:
+                raise ValueError('ファイルを最後まで受信できませんでした')
+            result = models_registry.install_package(raw, MODELS_DIR)
+            return self.send_json({'ok': True, 'id': result['id'], 'name': result['name'],
+                                   'warnings': result['warnings']})
+        if path == '/api/models/delete':
+            body = self.read_json() or {}
+            model_id = str(body.get('id') or '').strip()
+            if not model_id:
+                raise ValueError('削除するモデルを指定してください')
+            removed = models_registry.remove_model(MODELS_DIR, model_id)
+            # 選択中のモデルを消したら既定に戻す（次の解析で迷わないように）。
+            if active_model_id() == removed['id']:
+                STORE.set_setting('analysisProfile', models_registry.DEFAULT_MODEL_ID)
+            return self.send_json({'ok': True, 'id': removed['id'],
+                                   'name': removed['name'], 'active': active_model_id()})
         if path == '/api/tags':
             body = self.read_json()
             return self.send_json(STORE.add_tag(str(body.get('name', ''))))

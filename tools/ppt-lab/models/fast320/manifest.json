@@ -1,0 +1,21 @@
+{
+  "schema": "tetrace-model/v1",
+  "id": "tetrace-v1.0-ppt",
+  "name": "Tetrace-V1.0-PPT",
+  "version": "1.0",
+  "description": "ぷよぷよテトリス2 の動画解析モデル（盤面・シーン・NEXT）",
+  "author": "PPT Lab",
+  "license": "プロプライエタリ（PPT Lab 利用者向け）",
+  "createdAt": "2026-11-03",
+  "files": {
+    "scene": "scene-classifier.onnx",
+    "board": "tetris.onnx",
+    "next": "next_hold.onnx"
+  },
+  "sha256": {
+    "scene-classifier.onnx": "2882a9bbb181ce1633540dd0f5d12d657fc2c0127aa8cfedcebd000244dbdb84",
+    "tetris.onnx": "da60d1c9a32939f0d607a0393db842b994d801f877c5e24dcfaca5d301d5b7f2",
+    "next_hold.onnx": "dc638c7c9ed0521f7c5b3117a4863344b861da06c120ca340cb39d5b7533cc5d"
+  },
+  "builtin": true
+}

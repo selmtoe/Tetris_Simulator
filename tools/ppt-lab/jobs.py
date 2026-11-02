@@ -22,6 +22,8 @@ from pathlib import Path
 
 # 解析直後に名前画像を切り出す（名前の記憶と同じ指紋で保存する）。
 from namereview import name_crop_dir, save_name_crops
+# 解析モデル（models\<id>\manifest.json）の一覧・導入・削除。
+import models_registry
 
 VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.webm', '.mov', '.avi', '.m4v', '.ts')
 AUDIO_EXTENSIONS = ('.m4a', '.webm', '.opus', '.aac', '.mp3', '.ogg', '.wav')
@@ -31,9 +33,11 @@ ANALYSIS_SHARE = 70
 
 DOWNLOAD_PROGRESS = re.compile(r'\[download\]\s+([0-9.]+)%')
 PROFILES_FILE = Path(__file__).with_name('profiles.json')
-# 既定の解析プロファイル。動画は 360p で取得し、シーン検出と NEXT は
-# 10クラス/360p 対応の新モデル、盤面は従来モデルを使う。
-DEFAULT_PROFILE = 'fast320'
+MODELS_DIR = models_registry.MODELS_DIR
+# 既定の解析モデル（＝ models\fast320\ の Tetrace-V1.0-PPT）。
+# 旧プロファイル id（standard / fast320）は同じモデルとして扱う。
+DEFAULT_PROFILE = models_registry.DEFAULT_MODEL_ID
+OTHER_GAME_PROFILE = 'other-game'
 
 # 完成済みとして再利用してよい動画の拡張子（先読みの成果を本処理で使う）。
 REUSABLE_VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.webm')
@@ -46,18 +50,47 @@ PREFETCH_MIN_FREE_BYTES = 3 * 1024 ** 3
 PREFETCH_RAM_MIN_FREE_BYTES = 2 * 1024 ** 3
 
 
-def load_profile(profile_id: str) -> dict | None:
-    """profiles.json から解析プロファイルを読む（標準は空＝従来どおり）。"""
+def _profile_from_file(profile_id: str) -> dict | None:
+    """profiles.json（従来のプロファイル定義）から1件読む。
+
+    新しい仕組みではモデル（models\\<id>\\manifest.json）が本体で、ここは
+    「ぷよテト以外」と、モデルが見つからないときの後方互換のためだけに使う。
+    """
     try:
         data = json.loads(PROFILES_FILE.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError):
         return None
     for item in data.get('profiles') or []:
         if str(item.get('id')) == str(profile_id):
-            if not any(item.get(key) for key in ('sceneModel', 'boardModel', 'settings', 'downloadQuality', 'engine')):
+            if not any(item.get(key) for key in ('sceneModel', 'boardModel', 'settings', 'engine')):
                 return None
             return item
     return None
+
+
+def load_profile(profile_id: str) -> dict | None:
+    """解析プロファイル（＝インストール済みモデル）を解決する。
+
+    - モデル id（例 `tetrace-v1.0-ppt`）→ models\\<id>\\manifest.json の files から
+      シーン／盤面／NEXT のパスを作る
+    - 旧プロファイル id（standard / fast320）→ Tetrace-V1.0-PPT として扱う
+    - `other-game` → 従来どおり profiles.json の定義（空なら従来の既定＝None）
+    """
+    value = str(profile_id or '').strip() or DEFAULT_PROFILE
+    if value == OTHER_GAME_PROFILE:
+        return _profile_from_file(value)
+    profile = models_registry.model_profile(MODELS_DIR,
+                                            models_registry.canonical_model_id(value))
+    if profile is not None:
+        return profile
+    # 選んでいたモデルが削除された等で見つからないときは、入っているモデルの
+    # 先頭（通常は組み込み）→ profiles.json → 既定（None）の順に落とす。
+    installed = models_registry.list_models(MODELS_DIR)
+    if installed:
+        fallback = models_registry.model_profile(MODELS_DIR, installed[0]['id'])
+        if fallback is not None:
+            return fallback
+    return _profile_from_file(value) or _profile_from_file(DEFAULT_PROFILE)
 
 
 STUDY_PROGRESS = re.compile(r'study_progress=(\d+)\s+status=(.*)')
@@ -514,29 +547,37 @@ def _quality_sort(quality: str = '1080') -> str:
     return f'res:{_quality_height(quality)},+size'
 
 
-def _effective_quality(store=None) -> str:
-    """解析プロファイルが画質を指定していれば、設定の画質より優先する。
+QUALITY_VALUES = ('1080', '720', '480', '360', '320')
+QUALITY_DEFAULT_SAVED = '1080'   # 動画をPCに保存するとき（きれいさ優先）
+QUALITY_DEFAULT_STREAM = '360'   # 解析のためだけに取得するとき（速度優先）
 
-    「高速 (320p)」プロファイルは、取得時点で 320p に落とさないと意味がないため、
-    モデルの差し替えだけでなく取得解像度もここで切り替える。
+
+def _truthy(value) -> bool:
+    """設定の真偽値（JSON の true / 文字列の on など）を bool にする。"""
+    if isinstance(value, str):
+        return value.strip().lower() not in ('', '0', 'false', 'off', 'no')
+    return bool(value)
+
+
+def _effective_quality(store=None, saved: bool = False) -> str:
+    """取得する解像度を「動画をPCに保存するか」で切り替える。
+
+    保存する動画は `downloadQualitySaved`（既定 1080p）、解析のためだけに
+    取得する動画は `downloadQualityStream`（既定 360p）を使う。
+    旧キー `downloadQuality` しか無い DB でも落ちないよう、新しいキーが
+    無い／不正なときは既定値に戻す（移行処理はせず、読むだけ）。
     """
+    key = 'downloadQualitySaved' if saved else 'downloadQualityStream'
+    default = QUALITY_DEFAULT_SAVED if saved else QUALITY_DEFAULT_STREAM
     target = store if store is not None else STORE_REF[0]
-    profile = None
     try:
-        if target is not None:
-            profile = load_profile(target.settings().get('analysisProfile', DEFAULT_PROFILE))
+        values = target.settings() if target is not None else {}
     except Exception:
-        profile = None
-    if profile:
-        value = str(profile.get('downloadQuality') or '').strip()
-        if value in ('1080', '720', '480', '360', '320'):
-            return value
-    try:
-        if target is not None:
-            return str(target.settings().get('downloadQuality', '1080'))
-    except Exception:
-        pass
-    return '1080'
+        values = {}
+    value = str(values.get(key) or '').strip()
+    if value in QUALITY_VALUES:
+        return value
+    return default
 
 
 def _cookie_args(store=None) -> list[str]:
@@ -907,7 +948,8 @@ class JobManager:
                 pass
         ready.write_text('0', encoding='ascii')
 
-        quality = _effective_quality(self.store)
+        # 追記型で解析しながら取得するだけ（保存しない）ので、速度優先の解像度。
+        quality = _effective_quality(self.store, saved=False)
         height = _quality_height(quality)
         # 追記型に詰めるので映像のみ。60fps を優先し、無ければ解像度優先で落とす。
         video_format = (f'bv*[height<={height}][vcodec^=avc1][fps>=50]/'
@@ -1005,6 +1047,7 @@ class JobManager:
 
         同じ動画を先読みと本処理で同時に取りに行かないよう、動画単位の
         ロックの中で行う。先読みで完成していれば、そのファイルをそのまま返す。
+        取得する解像度は、そのジョブが動画を保存するかどうかで切り替える。
         """
         lock = video_lock(video_id)
         if lock.locked():
@@ -1012,10 +1055,30 @@ class JobManager:
             self._update(job_id, only_if_queued=prefetch,
                          message='先に取得した動画の完了を待っています…')
         with lock:
-            return self._download_locked(job_id, video_id, url, prefetch)
+            return self._download_locked(job_id, video_id, url, prefetch,
+                                         self._saves_video(job_id))
+
+    def _saves_video(self, job_id: str = '') -> bool:
+        """そのジョブが動画をPCに保存するか（設定 downloadVideo も見る）。
+
+        保存するなら取得解像度は `downloadQualitySaved`、保存しないなら
+        `downloadQualityStream` を使う。先読みは「走る前のジョブ」なので、
+        キューに登録された saveVideo（＝追加画面のチェック）で判断する。
+        """
+        try:
+            settings = self.store.settings()
+        except Exception:
+            settings = {}
+        if _truthy(settings.get('downloadVideo')):
+            return True
+        try:
+            job = self.get(job_id) or {}
+        except Exception:
+            job = {}
+        return _truthy(job.get('saveVideo'))
 
     def _download_locked(self, job_id: str, video_id: str, url: str,
-                         prefetch: bool = False) -> Path:
+                         prefetch: bool = False, saved: bool = False) -> Path:
         # STUDY が管理している本体（runtime\tools\yt-dlp\yt-dlp.exe）を最優先で使う。
         managed = self.runtime / 'tools' / 'yt-dlp' / 'yt-dlp.exe'
         candidates = [str(managed)] if managed.is_file() else []
@@ -1057,11 +1120,13 @@ class JobManager:
                 f'動画の保存先の空きが足りません（{free_bytes / 1024 ** 3:.1f} GB）。'
                 f'RAM ディスクなら容量を増やすか、設定の「動画の保存先」を空に戻してください。')
         started_at = time.time()
+        # 保存する動画はきれいさ優先、解析だけなら速度優先の解像度にする。
+        quality = _effective_quality(self.store, saved=saved)
         command = [yt_dlp, *_cookie_args(self.store), '--newline', '--no-playlist', '--no-warnings',
                    '--merge-output-format', 'mkv',
                    '-N', '8',
-                   '-f', _quality_format(_effective_quality(self.store)),
-                   '-S', _quality_sort(_effective_quality(self.store)),
+                   '-f', _quality_format(quality),
+                   '-S', _quality_sort(quality),
                    # 内部名は `[動画ID].mkv`。タイトルを入れると、エンジンが入力名から
                    # 作る simulator のファイル名まで長くなり、パス長を超える。
                    '-o', str(download_root / f'[{ident}].%(ext)s')]
@@ -1293,8 +1358,7 @@ class JobManager:
                 command.append('-UseRamDisk')
             if _s.get('detailedLog'):
                 command.append('-DetailedLog')
-            if str(_s.get('analysisDevice') or 'gpu') == 'cpu':
-                command += ['-ForceCpu']
+            # 解析デバイスは GPU 固定（CPU では実用速度にならないため、切り替えは廃止）。
         except Exception:
             pass
         # 解析プロファイル（モデルの切り替え）。未指定なら従来どおり。

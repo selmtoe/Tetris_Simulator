@@ -39,6 +39,17 @@
 
 FFmpeg / yt-dlp は同梱しません（ライセンスとサイズのため）。README の手順で導入してください。
 
+## 解析モデル
+
+モデルは `models\<id>\` に置き、`manifest.json` が表示名・版・ファイル・sha256 を持つ。
+配布形式は `.tetracemodel`（中身は ZIP で、ルートに `manifest.json`、同じ階層に `*.onnx`）。
+設定画面の「解析モデル」から追加・削除できる（組み込みの Tetrace-V1.0-PPT は削除できない）。
+配布ファイルを作るときは:
+
+```powershell
+python tools\ppt-lab\pack-model.py --model tools\ppt-lab\models\fast320 --out dist\models
+```
+
 ## API（抜粋）
 
 | メソッド | パス | 内容 |
@@ -53,3 +64,6 @@ FFmpeg / yt-dlp は同梱しません（ライセンスとサイズのため）�
 | DELETE | `/api/tetofu/<id>` | テト譜を削除 |
 | GET/POST/DELETE | `/api/tags` | タグの一覧 / 追加 / 全削除 |
 | POST | `/api/tags/apply` | 対象のタグを設定 |
+| GET | `/api/models` | インストール済みモデルの一覧と選択中の id |
+| POST | `/api/models/install` | `.tetracemodel`（生の ZIP バイト、`Content-Length` 必須）を導入 |
+| POST | `/api/models/delete` | モデルを削除（`{"id": ...}`。組み込みは不可） |

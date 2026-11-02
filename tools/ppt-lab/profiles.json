@@ -16,7 +16,6 @@
       "sceneModel": "C:\\Users\\hirom\\Documents\\tetris ai\\tools\\ppt-lab\\models\\fast320\\scene-classifier.onnx",
       "boardModel": "C:\\Users\\hirom\\Documents\\tetris ai\\tools\\ppt-lab\\models\\fast320\\tetris.onnx",
       "settings": "",
-      "downloadQuality": "360",
       "env": {}
     },
     {

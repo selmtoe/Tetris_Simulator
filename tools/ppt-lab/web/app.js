@@ -76,6 +76,10 @@
         settings: {},
         settingsTab: '一般',
         settingsSchema: [],
+        // インストール済みの解析モデル（/api/models の結果）
+        models: [],
+        modelsActive: '',
+        modelsError: '',
         groups: new Set()
     };
 
@@ -1568,6 +1572,172 @@
         return input;
     }
 
+    // ---- 解析モデル（インストール済みモデルの一覧と追加・削除） -------------
+    // 旧プロファイル名（standard / fast320）は Tetrace-V1.0-PPT と同じ扱い。
+    const LEGACY_MODEL_IDS = ['standard', 'fast320'];
+
+    async function loadModels() {
+        try {
+            const body = await api('/api/models');
+            state.models = Array.isArray(body.models) ? body.models : [];
+            state.modelsActive = String(body.active || '');
+            state.modelsError = '';
+        } catch (error) {
+            // 旧版のサーバーで起動中（/api/models が無い）ときはここに来る。
+            state.models = [];
+            state.modelsActive = '';
+            state.modelsError = error.message || 'モデル一覧を取得できませんでした';
+        }
+        return state.models;
+    }
+
+    function formatModelSize(bytes) {
+        const value = Number(bytes) || 0;
+        if (value >= 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + 'MB';
+        if (value >= 1024) return Math.round(value / 1024) + 'KB';
+        return value + 'B';
+    }
+
+    function modelIdForSelect() {
+        const current = String(setting('analysisProfile') || '');
+        const known = (state.models || []).map(model => model.id);
+        // 一覧が取れないときは保存されている値をそのまま使う（旧版サーバー対策）。
+        if (!known.length) return current;
+        if (known.indexOf(current) >= 0) return current;
+        if (current === 'other-game') return current;
+        if (LEGACY_MODEL_IDS.indexOf(current) >= 0 && known.indexOf('tetrace-v1.0-ppt') >= 0) {
+            return 'tetrace-v1.0-ppt';
+        }
+        if (state.modelsActive && known.indexOf(state.modelsActive) >= 0) return state.modelsActive;
+        return String(known[0]);
+    }
+
+    // 解析モデルの選択。選択肢はサーバーの一覧（/api/models）から作る。
+    function modelSettingControl(item) {
+        const wrapper = node('div', null, 'ppt-model-controls');
+        const select = node('select');
+        const models = state.models || [];
+        // 一覧が取れないときは、設定スキーマの選択肢で描く（画面を壊さない）。
+        const entries = models.length
+            ? models.map(model => [String(model.id), model.name])
+            : (item.options || []).filter(option => String(option[0]) !== 'other-game');
+        if (!entries.length) entries.push(['', 'インストール済みのモデルがありません']);
+        entries.forEach(entry => {
+            const option = node('option', entry[1]);
+            option.value = String(entry[0]);
+            select.append(option);
+        });
+        if (!entries.some(entry => String(entry[0]) === 'other-game')) {
+            const other = node('option', 'ぷよテト以外');
+            other.value = 'other-game';
+            select.append(other);
+        }
+        const values = Array.from(select.options).map(option => option.value);
+        const preferred = modelIdForSelect();
+        select.value = values.indexOf(preferred) >= 0 ? preferred : (values[0] || '');
+        select.addEventListener('change', () => saveSetting('analysisProfile', select.value));
+        wrapper.append(select);
+
+        const addButton = node('button', 'モデルを追加', 'btn-outline');
+        addButton.type = 'button';
+        addButton.disabled = Boolean(state.modelsError);
+        const picker = node('input');
+        picker.type = 'file';
+        picker.accept = '.tetracemodel,.zip';
+        picker.hidden = true;
+        addButton.addEventListener('click', () => picker.click());
+        picker.addEventListener('change', () => {
+            const file = picker.files && picker.files[0];
+            picker.value = '';
+            if (file) uploadModel(file);
+        });
+        wrapper.append(addButton);
+        wrapper.append(picker);
+        if (state.modelsError) {
+            wrapper.append(node('span', 'モデル一覧を取得できませんでした（Lab を再起動してください）。',
+                'ppt-setting-note'));
+        }
+        return wrapper;
+    }
+
+    // インストール済みモデルの一覧（組み込み以外は削除できる）。
+    function modelManager() {
+        const list = node('div', null, 'ppt-model-list');
+        const models = state.models || [];
+        if (!models.length) {
+            list.append(node('span', state.modelsError
+                ? 'モデル一覧を取得できませんでした（Lab を再起動してください）。'
+                : 'インストール済みのモデルはありません。', 'ppt-setting-note'));
+            return list;
+        }
+        models.forEach(model => {
+            const row = node('div', null, 'ppt-model-item');
+            const version = model.version ? ' (v' + model.version + ')' : '';
+            row.append(node('span', model.name + version + ' — ' + formatModelSize(model.size),
+                'ppt-setting-value'));
+            if (model.builtin) {
+                row.append(node('span', '組み込み', 'ppt-setting-note'));
+            } else {
+                const remove = node('button', '削除', 'btn-outline');
+                remove.type = 'button';
+                remove.addEventListener('click', () => removeModel(model));
+                row.append(remove);
+            }
+            list.append(row);
+        });
+        list.append(node('span', '.tetracemodel を追加すると、解析モデルとして選べます。',
+            'ppt-setting-note'));
+        return list;
+    }
+
+    // 選んだ .tetracemodel（ZIP）をそのままサーバーへ送る。
+    async function uploadModel(file) {
+        try {
+            const response = await fetch('/api/models/install', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/zip' },
+                body: file
+            });
+            let body = null;
+            try {
+                body = await response.json();
+            } catch (error) {
+                body = null;
+            }
+            if (!response.ok) {
+                throw new Error((body && body.error) || 'モデルを追加できませんでした');
+            }
+            const name = (body && body.name) || file.name;
+            notify(name + ' を追加しました。');
+            if (body && body.warnings && body.warnings.length) {
+                notify('注意: ' + body.warnings.join(' / '));
+            }
+            state.models = [];
+            await loadModels();
+            renderSettings();
+        } catch (error) {
+            toast('モデルを追加できませんでした: ' + error.message);
+        }
+    }
+
+    async function removeModel(model) {
+        if (!window.confirm('「' + model.name + '」を削除します。よろしいですか？')) return;
+        try {
+            await api('/api/models/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: model.id })
+            });
+            notify('「' + model.name + '」を削除しました。');
+            state.models = [];
+            await loadSettings();
+            await loadModels();
+            renderSettings();
+        } catch (error) {
+            toast(error.message);
+        }
+    }
+
     function renderSettings() {
         const root = node('section', null, 'lab-video-library');
         mainView.replaceChildren(root);
@@ -1605,7 +1775,19 @@
                 }
             }
             const group = settingsTab();
+            if (group === '解析' && !(state.models || []).length) await loadModels();
             schema.filter(item => item.group === group).forEach(item => {
+                if (item.key === 'analysisProfile') {
+                    // 「解析モデル」だけは、選択肢をサーバーの一覧（/api/models）から作り、
+                    // 追加ボタンと削除ボタンを添える。
+                    const modelRow = node('div', null, 'ppt-setting-row');
+                    modelRow.append(node('span', item.label, 'ppt-setting-label'));
+                    modelRow.append(modelSettingControl(item));
+                    if (item.note) modelRow.append(node('span', item.note, 'ppt-setting-note'));
+                    body.append(modelRow);
+                    body.append(modelManager());
+                    return;
+                }
                 const row = node('label', null, 'ppt-setting-row');
                 row.append(node('span', item.label, 'ppt-setting-label'));
                 row.append(settingControl(item));

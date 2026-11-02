@@ -995,6 +995,16 @@ dialog.lab-dialog h2 {
   gap: 18px;
   margin-top: 12px;
 }
+/* 空のときの案内文はタイル1列に閉じ込めず、横幅いっぱいに出す。
+   列幅に押し込まれると「まだ動画がありませ／ん。」のように不自然に折り返す。 */
+.ppt-tile-grid > .lab-help-text {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin: 0;
+  white-space: normal;
+  word-break: normal;
+  line-break: strict;
+}
 .ppt-tile {
   display: flex;
   flex-direction: column;
@@ -1112,6 +1122,31 @@ dialog.lab-dialog h2 {
 .ppt-setting-note {
   font-size: 12px;
   color: var(--text-muted);
+}
+/* 解析モデルの管理（追加・削除）。行の見た目（.ppt-setting-row）に合わせる。 */
+.ppt-model-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ppt-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 0 8px 162px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.ppt-model-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+.ppt-model-item .btn-outline {
+  padding: 2px 10px;
+  font-size: 12px;
 }
 .ppt-mapping-table {
   width: 100%;
