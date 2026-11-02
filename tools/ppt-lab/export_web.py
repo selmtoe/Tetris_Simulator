@@ -112,11 +112,7 @@ def main() -> int:
                     'p1Guess': '', 'p2Guess': '',
                     'p1Fingerprint': '', 'p2Fingerprint': ''
                 })
-        players = []
-        for match in matches:
-            for name in (match['p1'], match['p2']):
-                if name and name not in players:
-                    players.append(name)
+        players: list[str] = []
         (OUT / 'matches' / f'{row["id"]}.json').write_text(
             json.dumps({'matches': matches, 'warning': ''}, ensure_ascii=False),
             encoding='utf-8')
@@ -151,7 +147,9 @@ def main() -> int:
             'id': row['id'], 'title': row['title'], 'status': row['status'],
             'source': f'https://www.youtube.com/watch?v={youtube}' if youtube else '',
             'youtubeId': youtube, 'createdAt': row['created_at'],
-            'matchCount': row['match_count'], 'players': players,
+            'matchCount': row['match_count'],
+            # 画面（名前確認・タグ）と同じ名前だけを並べる。OCR の表記ゆれは出さない。
+            'players': [name for name in links.get(row['id'], []) if name != '動画解析'],
             'tags': links.get(row['id'], []), 'autoTags': [],
             'progress': 100, 'message': ''
         })

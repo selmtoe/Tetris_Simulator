@@ -11,6 +11,9 @@
     const dialogNote = document.getElementById('entry-dialog-note');
     const entryTitle = document.getElementById('entry-title');
     const entryUrl = document.getElementById('entry-url');
+    const entrySubmit = document.getElementById('entry-submit');
+    const entrySaveField = document.getElementById('entry-save-field');
+    const entrySaveVideo = document.getElementById('entry-save-video');
 
     const state = {
         view: 'videos',
@@ -56,6 +59,7 @@
         ytReady: false,
         videoId: '',
         videoTitle: '',
+        tetofuId: '',
         matches: [],
         replays: new Map(),
         edits: new Map(),
@@ -320,6 +324,7 @@
     // 動画もテト譜と同じ「正方形タイル」で並べる
     function renderLabCard(container, video, matchCount) {
         const card = node('article', null, 'card ppt-tile ppt-video-tile');
+        card.dataset.videoId = video.id;
         const thumb = node('div', null, 'ppt-tile-preview');
         const image = node('img', null, 'ppt-tile-thumb');
         image.src = labThumbnail(video);
@@ -340,7 +345,14 @@
         const title = node('h3', null, 'card-title');
         const link = node('a', video.title, 'card-title-action');
         link.href = '#video/' + video.id;
-        link.addEventListener('click', event => event.stopPropagation());
+        // ブラウザ既定の遷移に任せず、このカードのIDで明示的に開く
+        link.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!video.id) return;
+            state.pendingMatch = 0;
+            location.hash = '#video/' + video.id;
+        });
         title.append(link);
         card.append(title);
 
@@ -361,7 +373,8 @@
         card.addEventListener('click', event => {
             if (event.target.closest('a,button,input,select,textarea')) return;
             if (window.getSelection()?.toString()) return;
-            location.hash = '#video/' + video.id;
+            const videoId = card.dataset.videoId;
+            if (videoId) location.hash = '#video/' + videoId;
         });
         container.append(card);
     }
@@ -592,15 +605,13 @@
             renderVideos();
         });
         controls.append(clear);
-        root.append(controls);
 
-        const featureBar = node('div', null, 'lab-inline-actions');
         const feature = node('button', '連続再生', 'btn-outline');
         feature.type = 'button';
         feature.title = '絞り込み結果を先頭から続けて再生します';
         feature.addEventListener('click', () => playSequentially());
-        featureBar.append(feature);
-        root.append(featureBar);
+        controls.append(feature);
+        root.append(controls);
 
         const entries = sortEntries(filterVideos(state.videos));
         // プレイヤーで絞るときは、動画一覧でも試合データが要る
@@ -831,138 +842,304 @@
         if (page >= 0 && page !== state.pageIndex) showPage(page, { seek: false });
     }
     // ---- テト譜のプレビュー -------------------------------------------------
-    const BOARD_COLORS = {
-        I: '#43d3d3', O: '#e8c53a', T: '#a45fd3', S: '#57c85a',
-        Z: '#e05a5a', J: '#4a7fe0', L: '#e0913a', G: '#8a8f92'
-    };
-
-    function boardCells(board) {
-        if (!board) return '';
-        if (Array.isArray(board)) {
-            if (Array.isArray(board[0])) return board.map(row => row.join('')).join('');
-            return board.join('');
+    function tetofuBoardText(value) {
+        if (Array.isArray(value)) {
+            return value.map(row => (Array.isArray(row) ? row.join('') : String(row || ''))).join('');
         }
-        return String(board);
+        return String(value || '');
     }
 
-    function tetofuPages(item) {
+    const TETOFU_DECODER = new TextDecoder();
+
+    // 保存したURLを、カードに出す1ページぶんだけ復号する。
+    // ページ列を丸ごと抱えると重いので、盤面とNEXTだけ残す。
+    function tetofuPageData(item) {
         const hash = String(item.url || '').split('#')[1];
         if (!hash) return null;
         try {
             const binary = atob(hash.replace(/-/g, '+').replace(/_/g, '/'));
-            const json = JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, ch => ch.charCodeAt(0))));
-            if (!window.TetrisEventCodec || !window.TetrisEventCodec.isEventReplay(json)) return null;
-            const decoded = window.TetrisEventCodec.decodeCollection(json, { compactBoards: true });
-            const target = decoded.cases[decoded.currentCase || 0];
-            return (target && target.pages) || null;
+            const json = JSON.parse(TETOFU_DECODER.decode(Uint8Array.from(binary, ch => ch.charCodeAt(0))));
+            if (window.TetrisEventCodec && window.TetrisEventCodec.isEventReplay(json)) {
+                const decoded = window.TetrisEventCodec.decodeCollection(json, { compactBoards: true });
+                const target = decoded.cases[decoded.currentCase || 0];
+                const pages = (target && target.pages) || [];
+                if (!pages.length) return null;
+                const requested = Number((String(item.url).match(/[?&]page=(\d+)/) || [])[1] || 1);
+                const page = pages[Math.max(0, Math.min(requested - 1, pages.length - 1))];
+                const pick = player => (player ? {
+                    board: String(player.board || ''),
+                    next: String(player.next || '')
+                } : null);
+                return { p1: pick(page.p1), p2: page.p2 ? pick(page.p2) : null };
+            }
+            // 旧形式（v2のスナップショット）は盤面とNEXTがそのまま入っている
+            const snapshot = panel => {
+                if (!panel || typeof panel !== 'object') return null;
+                const board = panel.b !== undefined ? panel.b : panel.board;
+                if (board === undefined) return null;
+                const next = panel.n !== undefined ? panel.n : panel.next;
+                return { board: tetofuBoardText(board), next: String(next || '') };
+            };
+            const p1 = snapshot(json.p1);
+            const p2 = snapshot(json.p2);
+            return p1 || p2 ? { p1, p2 } : null;
         } catch (error) {
             return null;
         }
     }
 
-    function drawBoard(ctx, cells, x, y, size) {
+    // 今のシミュレータ（白いページ＋濃紺の盤面＋パステルのミノ）に合わせる。
+    // 形・色・NEXT見出しの並びは runtime-config.js と 30-viewer.js から持ってくる。
+    const TETOFU_BLOCK = 28;
+    const TETOFU_PREVIEW_WIDTH = 460;
+    const TETOFU_PREVIEW_HEIGHT = 600;
+    const TETOFU_BOARD_X = 10;
+    const TETOFU_BOARD_Y = 20;
+    const TETOFU_BOARD_WIDTH = 10 * TETOFU_BLOCK;
+    const TETOFU_BOARD_HEIGHT = 20 * TETOFU_BLOCK;
+    const TETOFU_NEXT_X = 340;
+    const TETOFU_NEXT_TOP = 95;
+    const TETOFU_NEXT_SLOT = 80;
+    const TETOFU_BOARD_BG = '#1b1b1f';
+    const TETOFU_GRID = '#444';
+    const TETOFU_NEXT_INK = '#6f6f6f';
+    const TETOFU_COLORS = {
+        I: '#4ec7cd', O: '#eac44a', T: '#b56fc7', L: '#e0a15a',
+        J: '#587aca', S: '#82c964', Z: '#e97d7d', G: '#b0b0b0'
+    };
+    const TETOFU_TETROMINOS = {
+        I: { shape: [[0, 0], [1, 0], [2, 0], [3, 0]], center: [1.5, 0.5] },
+        O: { shape: [[0, 0], [1, 0], [0, -1], [1, -1]], center: [0.5, -0.5] },
+        T: { shape: [[0, 0], [-1, 0], [0, -1], [1, 0]], center: [0, 0] },
+        L: { shape: [[-1, 0], [0, 0], [1, 0], [1, -1]], center: [0, 0] },
+        J: { shape: [[0, 0], [-1, 0], [1, 0], [-1, -1]], center: [0, 0] },
+        S: { shape: [[1, -1], [-1, 0], [0, 0], [0, -1]], center: [0, 0] },
+        Z: { shape: [[0, 0], [1, 0], [0, -1], [-1, -1]], center: [0, 0] }
+    };
+    const tetofuPreviewCache = new Map();
+
+    function tetofuPreviewData(item) {
+        const key = String(item.id || '') + '|' + String(item.url || '');
+        if (tetofuPreviewCache.has(key)) return tetofuPreviewCache.get(key);
+        const data = tetofuPageData(item);
+        if (tetofuPreviewCache.size > 300) tetofuPreviewCache.clear();
+        tetofuPreviewCache.set(key, data);
+        return data;
+    }
+
+    function drawTetofuBlock(ctx, piece, x, y, size) {
+        ctx.fillStyle = TETOFU_COLORS[piece] || '#b0b0b0';
+        ctx.fillRect(x, y, size, size);
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(x, y, size, size);
+    }
+
+    function drawTetofuGrid(ctx, x, y, width, height) {
+        ctx.strokeStyle = TETOFU_GRID;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let col = 1; col < 10; col += 1) {
+            ctx.moveTo(x + col * TETOFU_BLOCK + 0.5, y);
+            ctx.lineTo(x + col * TETOFU_BLOCK + 0.5, y + height);
+        }
+        for (let row = 1; row < 20; row += 1) {
+            ctx.moveTo(x, y + row * TETOFU_BLOCK + 0.5);
+            ctx.lineTo(x + width, y + row * TETOFU_BLOCK + 0.5);
+        }
+        ctx.stroke();
+    }
+
+    function drawTetofuBoard(ctx, board) {
         const width = 10;
-        // 盤面は 40 行。見えるのは下 20 行だけ。
-        const rows = 40;
-        const offset = (rows - 20) * width;
-        const height = 20;
-        ctx.fillStyle = '#101c20';
-        ctx.fillRect(x, y, width * size, height * size);
-        for (let row = 0; row < height; row += 1) {
+        const visible = 20;
+        const offset = 20 * width; // 40行のうち下20行
+        const x = TETOFU_BOARD_X;
+        const y = TETOFU_BOARD_Y;
+        const size = TETOFU_BLOCK;
+        ctx.fillStyle = TETOFU_BOARD_BG;
+        ctx.fillRect(x, y, TETOFU_BOARD_WIDTH, TETOFU_BOARD_HEIGHT);
+        drawTetofuGrid(ctx, x, y, TETOFU_BOARD_WIDTH, TETOFU_BOARD_HEIGHT);
+        for (let row = 0; row < visible; row += 1) {
             for (let col = 0; col < width; col += 1) {
-                const value = (cells[offset + row * width + col] || '').toUpperCase();
+                const value = String(board || '')[offset + row * width + col] || '';
                 if (!value || value === '_' || value === '.' || value === ' ') continue;
-                ctx.fillStyle = BOARD_COLORS[value] || '#6b7c7e';
-                ctx.fillRect(x + col * size + 1, y + row * size + 1, size - 2, size - 2);
+                drawTetofuBlock(ctx, value, x + col * size, y + row * size, size);
             }
         }
     }
 
-    // 保存したURLを、そのままビューワーで開ける形にする（操作は無効）
-    function viewerThumbUrl(url) {
-        const value = siteUrl(url);
-        if (!value) return 'about:blank';
-        const parts = String(value).split('#');
-        if (parts.length < 2) return value;
-        const base = parts[0].replace(/\?.*$/, '');
-        const page = (String(value).match(/[?&]page=(\d+)/) || [])[1] || '1';
-        return base + '?page=' + page + '&labViewer=1#' + parts[1];
+    function drawTetofuNext(ctx, sequence) {
+        const queue = String(sequence || '').split('');
+        const pieces = [];
+        for (let i = 0; i < Math.min(queue.length, 10); i += 1) {
+            const piece = queue[i];
+            if (piece && TETOFU_TETROMINOS[piece]) pieces.push(piece);
+        }
+        ctx.textAlign = 'left';
+        ctx.fillStyle = TETOFU_NEXT_INK;
+        ctx.font = '600 26px -apple-system, "Segoe UI", "Noto Sans JP", sans-serif';
+        ctx.fillText('NEXT', TETOFU_NEXT_X, 60);
+        pieces.forEach((piece, index) => {
+            const entry = TETOFU_TETROMINOS[piece];
+            const minX = Math.min(...entry.shape.map(cell => cell[0]));
+            const minY = Math.min(...entry.shape.map(cell => cell[1]));
+            const top = TETOFU_NEXT_TOP + index * TETOFU_NEXT_SLOT;
+            entry.shape.forEach(cell => {
+                drawTetofuBlock(ctx, piece,
+                    TETOFU_NEXT_X + (cell[0] - minX) * TETOFU_BLOCK,
+                    top + (cell[1] - minY) * TETOFU_BLOCK,
+                    TETOFU_BLOCK);
+            });
+        });
     }
 
-    // ビューワーの実寸（1200x574）を枠に合わせて縮小する
-    function fitTetofuPreview(wrap, frame) {
-        const apply = () => {
-            const width = wrap.clientWidth || 280;
-            const scale = width / 1200;
-            frame.style.transform = 'scale(' + scale + ')';
-            wrap.style.height = Math.round(574 * scale) + 'px';
-        };
-        apply();
-        if (window.ResizeObserver) new ResizeObserver(apply).observe(wrap);
+    function drawTetofuPlayer(ctx, player) {
+        drawTetofuBoard(ctx, player.board);
+        drawTetofuNext(ctx, player.next);
+    }
+
+    function drawTetofuPlaceholder(ctx, width, height) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = TETOFU_BOARD_BG;
+        ctx.fillRect(TETOFU_BOARD_X, TETOFU_BOARD_Y,
+            TETOFU_BOARD_WIDTH, TETOFU_BOARD_HEIGHT);
+        drawTetofuGrid(ctx, TETOFU_BOARD_X, TETOFU_BOARD_Y,
+            TETOFU_BOARD_WIDTH, TETOFU_BOARD_HEIGHT);
+        ctx.fillStyle = '#8a8a8a';
+        ctx.font = '14px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('プレビューなし', width / 2, height / 2);
     }
 
     function drawTetofuPreview(canvas, item) {
-        const pages = tetofuPages(item);
-        const requested = Number((String(item.url).match(/[?&]page=(\d+)/) || [])[1] || 1);
-        const page = pages && pages.length
-            ? pages[Math.max(0, Math.min(requested - 1, pages.length - 1))]
-            : null;
-        if (window.PPTViewerRender) {
-            // エディタと同じ描画（F/app/30-viewer.js の手順）で描く
-            window.PPTViewerRender.render(canvas, page, { players: ['p1', 'p2'] });
-            return;
+        const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+        const width = TETOFU_PREVIEW_WIDTH;
+        const height = TETOFU_PREVIEW_HEIGHT;
+        if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
         }
         const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#eef3f2';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#8aa0a2';
-        ctx.font = '13px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(pages ? 'プレビューなし' : 'プレビューなし', canvas.width / 2, canvas.height / 2);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        const data = tetofuPreviewData(item);
+        const panels = data ? [data.p1, data.p2].filter(Boolean) : [];
+        if (!panels.length) {
+            drawTetofuPlaceholder(ctx, width, height);
+            canvas.dataset.ready = '1';
+            return;
+        }
+        if (panels.length > 1) {
+            // 2Pは左右に半分の縮尺で並べる
+            const scale = 0.5;
+            const top = (height - height * scale) / 2;
+            panels.slice(0, 2).forEach((player, index) => {
+                ctx.save();
+                ctx.translate(index * width * scale, top);
+                ctx.scale(scale, scale);
+                drawTetofuPlayer(ctx, player);
+                ctx.restore();
+            });
+        } else {
+            drawTetofuPlayer(ctx, panels[0]);
+        }
+        canvas.dataset.ready = '1';
     }
 
-    function renderTetofuCard(container, item) {
-        const card = node('article', null, 'card ppt-tetofu-card');
-        const previewWrap = node('div', null, 'ppt-tetofu-preview-wrap');
-        const preview = node('iframe', null, 'ppt-tetofu-preview');
-        preview.setAttribute('tabindex', '-1');
-        preview.setAttribute('aria-hidden', 'true');
-        preview.setAttribute('loading', 'lazy');
-        preview.setAttribute('scrolling', 'no');
-        preview.src = viewerThumbUrl(item.url);
-        previewWrap.append(preview);
-        card.append(previewWrap);
-        requestAnimationFrame(() => fitTetofuPreview(previewWrap, preview));
+    // 画面に入ったカードだけ描く（スクロールの先のカードは復号しない）
+    let tetofuObserver = null;
+    function observeTetofuPreview(frame, item) {
+        const draw = () => {
+            const canvas = frame.querySelector('canvas');
+            if (canvas) drawTetofuPreview(canvas, item);
+        };
+        if (!('IntersectionObserver' in window)) {
+            requestAnimationFrame(draw);
+            return;
+        }
+        if (!tetofuObserver) {
+            tetofuObserver = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    if (!entry.isIntersecting) return;
+                    tetofuObserver.unobserve(entry.target);
+                    const canvas = entry.target.querySelector('canvas');
+                    if (canvas) drawTetofuPreview(canvas, entry.target.__tetofuItem);
+                });
+            }, { rootMargin: '240px' });
+        }
+        frame.__tetofuItem = item;
+        tetofuObserver.observe(frame);
+    }
 
-        const title = node('h3', null, 'card-title');
-        const link = node('a', item.title, 'card-title-action');
-        link.href = item.url;
-        link.target = '_blank';
-        link.rel = 'noopener';
-        title.append(link);
-        card.append(title);
+    function closeTetofuMenu() {
+        document.querySelectorAll('.ppt-card-menu.open').forEach(menu => {
+            menu.classList.remove('open');
+            const trigger = menu.querySelector('.ppt-card-edit');
+            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        });
+    }
 
-        const kind = item.kind === 'official' ? '本家テト譜'
-            : item.kind === 'editor' ? 'エディタ' : 'シミュレータ';
-        card.append(node('div', kind, 'card-desc'));
+    function openTetofuMenu(card) {
+        const menu = card.querySelector('.ppt-card-menu');
+        if (!menu) return;
+        const open = !menu.classList.contains('open');
+        closeTetofuMenu();
+        menu.classList.toggle('open', open);
+        const trigger = menu.querySelector('.ppt-card-edit');
+        if (trigger) {
+            trigger.setAttribute('aria-expanded', String(open));
+            if (open) trigger.focus();
+        }
+    }
 
-        const tagRow = node('div', null, 'lab-video-tags');
-        (item.tags || []).forEach(tag => tagRow.append(tagLink(tag)));
-        card.append(tagRow);
+    function openTetofuRename(item) {
+        state.entryMode = 'rename-tetofu';
+        state.tetofuId = item.id;
+        dialogTitle.textContent = '名前を変更';
+        dialogNote.textContent = 'テト譜の表示名です。';
+        entryTitle.value = item.title || '';
+        entryUrl.value = '';
+        entryTitle.parentElement.hidden = false;
+        entryUrl.parentElement.hidden = true;
+        entryTitle.required = true;
+        entrySubmit.textContent = '保存する';
+        dialog.showModal();
+        entryTitle.focus();
+        entryTitle.select();
+    }
 
-        const actions = node('div', null, 'lab-inline-actions');
-        const tagButton = node('button', 'タグ', 'btn-outline');
-        tagButton.type = 'button';
-        tagButton.addEventListener('click', event => {
-            event.stopPropagation();
+    // カード右上の鉛筆。名前変更・タグ・削除はここにまとめる。
+    function tetofuEditMenu(item) {
+        const menu = node('div', null, 'ppt-card-menu');
+        const trigger = node('button', null, 'ppt-icon-button ppt-card-edit');
+        trigger.type = 'button';
+        trigger.title = '編集';
+        trigger.setAttribute('aria-label', '編集');
+        trigger.setAttribute('aria-haspopup', 'true');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.6 5.6l4 4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
+
+        const actions = node('div', null, 'ppt-card-actions');
+        const rename = node('button', '名前を変更');
+        rename.type = 'button';
+        rename.addEventListener('click', () => {
+            closeTetofuMenu();
+            openTetofuRename(item);
+        });
+        const tags = node('button', 'タグを編集');
+        tags.type = 'button';
+        tags.addEventListener('click', () => {
+            closeTetofuMenu();
             openTagDialog({ id: item.id, kind: 'tetofu', title: item.title, tags: item.tags || [], autoTags: [] });
         });
-        actions.append(tagButton);
-        const removeButton = node('button', '削除', 'btn-outline');
-        removeButton.type = 'button';
-        removeButton.addEventListener('click', async event => {
-            event.stopPropagation();
+        const remove = node('button', '削除', 'ppt-danger');
+        remove.type = 'button';
+        remove.addEventListener('click', async () => {
+            closeTetofuMenu();
             if (!window.confirm('「' + item.title + '」を削除しますか？')) return;
             try {
                 await api('/api/tetofu/' + item.id, { method: 'DELETE' });
@@ -973,9 +1150,56 @@
                 toast(error.message);
             }
         });
-        actions.append(removeButton);
-        card.append(actions);
+        actions.append(rename, tags, remove);
+
+        trigger.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const open = !menu.classList.contains('open');
+            closeTetofuMenu();
+            menu.classList.toggle('open', open);
+            trigger.setAttribute('aria-expanded', String(open));
+        });
+        menu.append(trigger, actions);
+        return menu;
+    }
+
+    function renderTetofuCard(container, item) {
+        const card = node('article', null, 'card ppt-tetofu-card');
+        const frame = node('div', null, 'ppt-tetofu-frame');
+
+        // 盤面＋NEXTだけの軽量プレビュー（iframeは使わない）
+        const link = node('a', null, 'ppt-tetofu-open');
+        link.href = item.url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.setAttribute('aria-label', (item.title || 'テト譜') + ' を開く');
+        const canvas = node('canvas', null, 'ppt-tetofu-canvas');
+        canvas.width = TETOFU_PREVIEW_WIDTH;
+        canvas.height = TETOFU_PREVIEW_HEIGHT;
+        canvas.dataset.ready = '0';
+        link.append(canvas);
+        // タイトルはプレビュー下部に重ねて常時表示（盤面に被ってよい）
+        link.append(node('span', item.title || '', 'ppt-tetofu-title'));
+        frame.append(link);
+
+        if (document.documentElement.dataset.readonly !== 'true') {
+            // 鉛筆はプレビュー右下に固定
+            frame.append(tetofuEditMenu(item));
+            card.addEventListener('contextmenu', event => {
+                if (event.target.closest('.ppt-tetofu-tags, .ppt-card-menu')) return;
+                event.preventDefault();
+                openTetofuMenu(card);
+            });
+        }
+        card.append(frame);
+
+        const tagRow = node('div', null, 'lab-video-tags ppt-tetofu-tags');
+        (item.tags || []).forEach(tag => tagRow.append(tagLink(tag)));
+        card.append(tagRow);
+
         container.append(card);
+        observeTetofuPreview(frame, item);
     }
     function renderTetofu() {
         const root = node('section', null, 'lab-video-library');
@@ -1046,7 +1270,7 @@
         });
         root.append(node('p', items.length + 'テト譜', 'lab-video-count'));
 
-        const list = node('div', null, 'ppt-tile-grid');
+        const list = node('div', null, 'ppt-tile-grid ppt-grid-tetofu');
         if (!items.length) {
             list.append(node('p', state.tetofu.length
                 ? '条件に合うテト譜はありません。'
@@ -1162,11 +1386,14 @@
         theme: 'light',
         simulatorBase: 'https://selmtoe.github.io/Tetris_Simulator/',
         openLinks: 'newTab',
-        analysisWorkers: '1'
+        analysisWorkers: '1',
+        downloadVideo: false
     };
 
     function setting(key) {
-        return (state.settings && state.settings[key]) || SETTING_DEFAULTS[key] || '';
+        const value = state.settings ? state.settings[key] : undefined;
+        if (value !== undefined && value !== null && value !== '') return value;
+        return SETTING_DEFAULTS[key] ?? '';
     }
 
     async function loadSettings() {
@@ -1205,6 +1432,36 @@
 
     function settingsTab() {
         return state.settingsTab && SETTINGS_TABS.includes(state.settingsTab) ? state.settingsTab : '一般';
+    }
+
+    function ramDiskText(info) {
+        if (!info) return '';
+        const gb = value => ((Number(value) || 0) / 1024).toFixed(1);
+        if (info.available) {
+            return (info.drive || 'RAM') + ' 使用中（空き ' + gb(info.freeMB) + 'GB / ' + gb(info.totalMB) + 'GB）';
+        }
+        if (info.busy) return '作成しています…（管理者の確認が出たら「はい」を選んでください）';
+        if (info.error) return info.error;
+        return '未作成 — オンにすると管理者の確認（UAC）が1回出ます';
+    }
+
+    function watchRamDisk(row) {
+        const status = node('span', '', 'ppt-setting-note');
+        row.append(status);
+        let timer = null;
+        const tick = async () => {
+            if (!status.isConnected) {
+                if (timer) clearInterval(timer);
+                return;
+            }
+            try {
+                status.textContent = ramDiskText(await api('/api/ramdisk'));
+            } catch (error) {
+                // 表示だけの情報なので、取れなくても何もしない
+            }
+        };
+        tick();
+        timer = setInterval(tick, 2000);
     }
 
     function settingControl(item) {
@@ -1279,6 +1536,7 @@
                 row.append(node('span', item.label, 'ppt-setting-label'));
                 row.append(settingControl(item));
                 if (item.note) row.append(node('span', item.note, 'ppt-setting-note'));
+                if (item.key === 'useRamDisk') watchRamDisk(row);
                 body.append(row);
             });
         })();
@@ -1895,9 +2153,22 @@
 
     // ビューワーを指定ページで開き直す（同一ページなら何もしない）
     // F/ のリンクからハッシュを取り、シミュレータ用リンクを組み立てる
-    function simulatorLink(url) {
+    // シミュレータは1つの盤面しか読めないので、?page=N（1始まり）で
+    // 「いま見ている局面」を渡す。これが無いと試合開始（空の盤面）が開く。
+    function simulatorLink(url, page) {
         if (!url || !url.includes('#')) return '';
-        return SIMULATOR_BASE + 'hub/?entry=simulator#' + url.split('#')[1];
+        const index = Math.max(1, Math.round(Number(page) || 1));
+        return SIMULATOR_BASE + 'hub/?entry=simulator&page=' + index + '#' + url.split('#')[1];
+    }
+
+    // 「シミュレータ」「ビューワー」ボタンを今の局面に合わせる
+    function updateMatchToolLinks(pageIndex) {
+        const urls = state.currentUrls;
+        if (!urls || !urls.combined) return;
+        const page = Math.max(1, (Number(pageIndex) || 0) + 1);
+        const links = document.querySelectorAll('.lab-match-tools > a.btn-outline');
+        if (links[0]) links[0].href = simulatorLink(urls.combined, page) || '#';
+        if (links[1]) links[1].href = withPage(siteUrl(urls.combined), page) || '#';
     }
 
     // リプレイJSON（urls + ページ列）を取得してキャッシュする
@@ -1988,6 +2259,7 @@
             caption.textContent = '局面 ' + (page + 1) + ' / ' + pages.length + ' · 動画 ' + timeText(seconds);
         }
         if (options && options.seek) seekVideoTo(seconds, { pause: false });
+        updateMatchToolLinks(page);
         if (match && state.bridge && state.bridge.ready) {
             state.bridge.show(match, pages, page);
             return;
@@ -2169,9 +2441,7 @@
             slider.disabled = state.pages.length <= 1;
             slider.value = '0';
         }
-        const links = document.querySelectorAll('.lab-match-tools > a.btn-outline');
-        if (links[0]) links[0].href = simulatorLink(urls.combined) || '#';
-        if (links[1]) links[1].href = siteUrl(urls.combined) || '#';
+        updateMatchToolLinks(0);
         if (state.bridge) state.bridge.show(row, state.pages, 0);
         setTimeout(() => {
             const frame = document.getElementById('detail-viewer');
@@ -2293,7 +2563,7 @@
             if (!state.currentMatch) return;
             try {
                 const urls = await replayUrls(state.currentMatch.index);
-                window.open(simulatorLink(urls.combined), '_blank', 'noopener');
+                window.open(simulatorLink(urls.combined, (state.pageIndex || 0) + 1), '_blank', 'noopener');
             } catch (error) {
                 toast(error.message);
             }
@@ -2471,12 +2741,21 @@
 
         const boards = node('div', null, 'lab-boards lab-viewer-host');
         const viewerFrame = ensureViewerFrame();
+        // 盤面ビューワーは動画詳細を開いたときだけ読み込む（一覧を軽くする）
+        if (!viewerFrame.getAttribute('src')) {
+            viewerFrame.src = VIEWER_BASE + '?labViewer=1';
+        }
         viewerFrame.hidden = false;
         viewerFrame.dataset.status = 'loading';
         viewerFrame.removeAttribute('data-ready');
         viewerFrame.dataset.status = 'loading';
         boards.append(viewerFrame);
-        if (!state.bridge) state.bridge = createViewerBridge(viewerFrame);
+        // 一覧に戻ると iframe が DOM から外れ、次に開くと別の iframe になる。
+        // そのときは古いブリッジを捨てて、新しい iframe で作り直す。
+        if (!state.bridge || state.bridge.frame !== viewerFrame) {
+            state.bridge = createViewerBridge(viewerFrame);
+            state.bridgeGrace = Date.now() + 6000;
+        }
         work.append(boards);
 
         const caption = node('div', null, 'lab-replay-caption');
@@ -2930,6 +3209,8 @@
             entryTitle.parentElement.hidden = false;
             entryUrl.parentElement.hidden = true;
             entryTitle.required = true;
+            entrySaveField.hidden = true;
+            entrySubmit.textContent = '保存する';
             state.entryMode = 'rename';
             dialog.showModal();
             entryTitle.focus();
@@ -2948,7 +3229,11 @@
         entryTitle.value = '';
         entryUrl.value = '';
         entryTitle.parentElement.hidden = isYoutube;
+        entryUrl.parentElement.hidden = false;
         entryTitle.required = !isYoutube;
+        entrySaveField.hidden = !isYoutube;
+        entrySaveVideo.checked = setting('downloadVideo') !== false;
+        entrySubmit.textContent = '登録する';
         entryUrl.placeholder = isYoutube ? 'https://www.youtube.com/watch?v=...' : 'https://...';
         dialog.showModal();
         (isYoutube ? entryUrl : entryTitle).focus();
@@ -2960,11 +3245,26 @@
     document.getElementById('entry-form').addEventListener('submit', async event => {
         event.preventDefault();
         const url = entryUrl.value.trim();
-        if (!url && state.entryMode !== 'rename') {
+        const renaming = state.entryMode === 'rename' || state.entryMode === 'rename-tetofu';
+        if (!url && !renaming) {
             entryUrl.focus();
             return;
         }
         try {
+            if (state.entryMode === 'rename-tetofu') {
+                const title = entryTitle.value.trim();
+                if (!title) { entryTitle.focus(); return; }
+                await api('/api/tetofu/' + state.tetofuId + '/title', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title })
+                });
+                dialog.close();
+                await loadTetofu();
+                render();
+                toast('名前を変更しました。');
+                return;
+            }
             if (state.entryMode === 'rename') {
                 const title = entryTitle.value.trim();
                 if (!title) { entryTitle.focus(); return; }
@@ -2984,7 +3284,7 @@
                 await api('/api/videos', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source: url })
+                    body: JSON.stringify({ source: url, saveVideo: entrySaveVideo.checked })
                 });
                 dialog.close();
                 state.view = 'videos';
@@ -3105,7 +3405,7 @@
         const parts = hashParts();
         try {
             if (state.view === 'video') {
-                const videoId = parts[1] || state.videoId;
+                const videoId = parts[1] || '';
                 if (videoId !== state.editsVideoId) {
                     state.edits = new Map();
                     state.editsVideoId = videoId;
@@ -3116,6 +3416,7 @@
                 }
                 if (!videoId) {
                     state.view = 'videos';
+                    if (location.hash !== '#videos') location.hash = '#videos';
                     await loadVideos();
                 } else {
                     state.videoId = videoId;
@@ -3126,7 +3427,7 @@
                     await loadMatches(videoId);
                 }
             } else if (state.view === 'names') {
-                const videoId = parts[1] || state.videoId;
+                const videoId = parts[1] || '';
                 if (videoId !== state.editsVideoId) {
                     state.edits = new Map();
                     state.editsVideoId = videoId;
@@ -3137,6 +3438,7 @@
                 }
                 if (!videoId) {
                     state.view = 'videos';
+                    if (location.hash !== '#videos') location.hash = '#videos';
                     await loadVideos();
                 } else {
                     state.videoId = videoId;
@@ -3192,11 +3494,23 @@
         nameGroups: state.nameGroups ? state.nameGroups.size : -1
     });
     window.__pptApply = (index, side, value) => { try { applyName(state.matches.find(r => r.index === index), side, value); return JSON.stringify({ edits: state.edits.size }); } catch (error) { return 'ERR ' + error.message + ' | ' + error.stack; } };
+    // 同期の検証用（画面には出さない）
+    window.__pptSeek = seconds => { seekVideoTo(Number(seconds), { pause: false }); return Boolean(state.bridge && state.bridge.ready); };
+    window.__pptPlay = () => {
+        state.ytPlayer?.playVideo?.();
+        const media = document.getElementById('detail-video');
+        if (media) media.play?.().catch?.(() => {});
+        return videoState();
+    };
     // メニューの外をクリックしたら閉じる
     document.addEventListener('click', event => {
         document.querySelectorAll('.lab-save-menu.open, .ppt-edit-menu.open').forEach(menu => {
             if (!menu.contains(event.target)) menu.classList.remove('open');
         });
+        closeTetofuMenu();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeTetofuMenu();
     });
     window.addEventListener('message', event => {
         const bridge = state.bridge;
@@ -3214,13 +3528,7 @@
     // ---- 起動 -------------------------------------------------------------
     (async function start() {
         if (!location.hash) location.hash = '#videos';
-        const initialFrame = document.getElementById('detail-viewer');
-        // ビューワーは同じサイトの F/ を開く（ローカル版はネットに取りに行かない）
-        if (initialFrame && !initialFrame.getAttribute('src')) {
-            initialFrame.src = VIEWER_BASE + '?labViewer=1';
-        }
-        if (initialFrame) state.bridge = createViewerBridge(initialFrame);
-        state.bridgeGrace = Date.now() + 6000;
+        // ビューワー（F/）は動画詳細を開くまで読み込まない。テト譜や一覧を軽く保つ。
         await loadEnvironment();
         try { await loadTags(); } catch (error) { /* 起動時の失敗は無視 */ }
         await loadSettings();

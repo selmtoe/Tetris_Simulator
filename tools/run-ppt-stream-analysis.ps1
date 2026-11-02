@@ -4,6 +4,9 @@
     [switch]$MachineReadable,
     [switch]$ForceReanalysis,
     [switch]$ForceCpu,
+    # 解析前の環境チェック（必要なファイル・DLL・GPU・空き容量）を省略する。上級者向け。
+    # 通常は付けない。足りないものがあれば解析を始めずに終了コード 2 で止まる。
+    [switch]$SkipEnvironmentCheck,
     # Internal test seams. Normal users and TetrisStudy.exe do not pass these.
     [string]$BatchExecutable = '',
     [string]$OutputDirectory = '',
@@ -25,6 +28,9 @@ $analysisContractVersion = 'ppt-full-stream-analysis/2026-08-30-v3-hold-leading-
 # RAM disk helper (detect / capacity / cleanup). Missing helper = legacy behaviour.
 $ramDiskHelper = Join-Path $PSScriptRoot 'ppt-workdir.ps1'
 if (Test-Path -LiteralPath $ramDiskHelper -PathType Leaf) { . $ramDiskHelper }
+# 解析前の環境チェック（tools\ppt-preflight.ps1）。不足があれば解析を始めずに終了する。
+$preflightHelper = Join-Path $PSScriptRoot 'ppt-preflight.ps1'
+if (Test-Path -LiteralPath $preflightHelper -PathType Leaf) { . $preflightHelper }
 $script:pptRamWork = $null
 $script:pptRamSavedTemp = $null
 
@@ -272,6 +278,156 @@ function Open-StudyResult {
     }
 }
 
+function Get-WinnerDetectionState {
+    # 勝敗判定をやり直す必要があるかを返す（空文字＝有効な勝敗が入っている）。
+    # 再実行の条件は「未作成 / matches が空 / 全試合 winner が null」のいずれか。
+    # 1試合でも決まっていれば有効とみなし、毎回の再計算はしない。
+    param([string]$Output)
+    $path = Join-Path $Output 'winner-detection.json'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return 'missing' }
+    try {
+        $payload = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        return 'unreadable'
+    }
+    $rows = @($payload.matches)
+    if ($rows.Count -eq 0) { return 'no-matches' }
+    $resolved = @($rows | Where-Object {
+            $null -ne $_.winner -and -not [string]::IsNullOrWhiteSpace([string]$_.winner)
+        })
+    if ($resolved.Count -eq 0) { return 'all-undetermined' }
+    return ''
+}
+
+function Invoke-WinnerDetection {
+    # Winner detection (decide the match winner from the result screen).
+    # 2026-11-02〜: 終了3クラスモデル（引き分け/P1/P2）を結果画面にだけ適用する。
+    #   1. エンジン内で終了3クラスを適用済みなら classification_runs の票だけで決める（最速）
+    #   2. 未適用なら ppt-end3-winner.py（動画から結果画面を切り出して3クラス判定）
+    #   3. 動画が無い/遅いときは ppt-winner-from-runs.py（分類ログの票）
+    #   4. それも無理なら detect-winners.py（旧WinnerCNNの再デコード）
+    # PPT_WINNER_MODE=runs / replay で従来方式を強制できる。
+    # A failure here must not fail the analysis itself, so it is swallowed.
+    param([string]$Output)
+    if ($env:PPT_NO_WINNER -eq '1') { return }
+    $end3Script = 'C:\Users\hirom\Documents\tetris ai\tools\ppt-end3-winner.py'
+    $runsScript = 'C:\Users\hirom\Documents\tetris ai\tools\ppt-winner-from-runs.py'
+    $winnerScript = 'C:\Users\hirom\Documents\AI-Agent-Workspace\detect-winners.py'
+    $pythonExe = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python311\python.exe'
+    $detection = Join-Path $Output 'segments.matches.json'
+    $winnerJson = Join-Path $Output 'winner-detection.json'
+    $done = $false
+    $runsTried = $false
+
+    # エンジン内で終了3クラスモデルを適用した検出かどうか。
+    # settings.end_state_model があれば classification_runs の 6=引き分け / 8=P1 / 9=P2。
+    $inline = $false
+    if (Test-Path -LiteralPath $detection -PathType Leaf) {
+        try {
+            $detPayload = Get-Content -LiteralPath $detection -Raw -Encoding UTF8 | ConvertFrom-Json
+            $inline = [bool]($detPayload.settings.end_state_model)
+        } catch {
+            $inline = $false
+        }
+    }
+
+    if (-not $done -and $inline -and $env:PPT_WINNER_MODE -ne 'replay' -and
+        (Test-Path -LiteralPath $runsScript -PathType Leaf) -and
+        (Test-Path -LiteralPath $detection -PathType Leaf) -and
+        (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+        $runsTried = $true
+        Write-Host ''
+        Write-Host 'Detecting match winners (inline end-state runs)...'
+        try {
+            & $pythonExe -X utf8 $runsScript --batch-dir $Output
+            $runsExitCode = $LASTEXITCODE
+            if ($runsExitCode -eq 0) {
+                $done = $true
+            } elseif ($runsExitCode -eq 2) {
+                Write-Host 'インラインの3クラス票では決められない試合が多すぎます。動画方式に切り替えます。' `
+                    -ForegroundColor Yellow
+            } else {
+                Write-Host "Winner detection (inline runs) failed with exit code $runsExitCode" `
+                    -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "Winner detection (inline runs) skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+
+    if (-not $done -and
+        $env:PPT_WINNER_MODE -notin @('runs', 'replay') -and
+        (Test-Path -LiteralPath $end3Script -PathType Leaf) -and
+        (Test-Path -LiteralPath $detection -PathType Leaf) -and
+        (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+        Write-Host ''
+        Write-Host 'Detecting match winners (end-state 3-class model)...'
+        try {
+            & $pythonExe -X utf8 $end3Script --batch-dir $Output
+            $end3ExitCode = $LASTEXITCODE
+            if ($end3ExitCode -eq 0) {
+                $done = $true
+            } elseif ($end3ExitCode -eq 2) {
+                Write-Host '結果画面が取れない試合が多すぎます。分類ログ方式に切り替えます。' `
+                    -ForegroundColor Yellow
+            } else {
+                Write-Host "Winner detection (end3) failed with exit code $end3ExitCode" `
+                    -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "Winner detection (end3) skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    if (-not $done -and -not $runsTried -and
+        $env:PPT_WINNER_MODE -ne 'replay' -and
+        (Test-Path -LiteralPath $runsScript -PathType Leaf) -and
+        (Test-Path -LiteralPath $detection -PathType Leaf) -and
+        (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+        Write-Host ''
+        Write-Host 'Detecting match winners (from scene classifications)...'
+        try {
+            & $pythonExe -X utf8 $runsScript --batch-dir $Output
+            $runsExitCode = $LASTEXITCODE
+            if ($runsExitCode -eq 0) {
+                $done = $true
+            } elseif ($runsExitCode -eq 2) {
+                Write-Host '分類ログでは決められない試合が多すぎます（8クラスモデル等）。' `
+                    -ForegroundColor Yellow
+                Write-Host '従来の再デコード方式に切り替えます。' -ForegroundColor Yellow
+            } else {
+                Write-Host "Winner detection (runs) failed with exit code $runsExitCode" `
+                    -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "Winner detection (runs) skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    if (-not $done -and
+        (Test-Path -LiteralPath $winnerScript -PathType Leaf) -and
+        (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+        Write-Host ''
+        Write-Host 'Detecting match winners (result screen)...'
+        $winnerBatch = Split-Path -Leaf $Output
+        # detect-winners.py は runtime\data\batches\<バッチ名> を引く。-OutputDirectory で
+        # バッチ外へ出した解析（検証用）は名前では引けないので絶対パスを渡す
+        # （Python 側は Path の結合で絶対パス側が優先される）。
+        $registeredBatch = Join-Path $runtime (Join-Path 'data\batches' $winnerBatch)
+        if (-not (Test-Path -LiteralPath $registeredBatch -PathType Container)) {
+            $winnerBatch = $Output
+        }
+        try {
+            & $pythonExe -X utf8 $winnerScript --batch $winnerBatch
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Winner detection failed with exit code $LASTEXITCODE" -ForegroundColor Yellow
+            } elseif (-not (Test-Path -LiteralPath $winnerJson -PathType Leaf)) {
+                Write-Host "Winner detection finished without $winnerJson" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "Winner detection skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
 function Invalidate-SceneCacheForVersionChange {
     param([string]$Output, [string]$Reason)
     if ($Reason -notin @(
@@ -348,24 +504,42 @@ try {
     $batch = if ([string]::IsNullOrWhiteSpace($BatchExecutable)) {
         Join-Path $runtime 'bin\TetrisVideoRecovery_stream.exe'
     } else {
-        (Resolve-Path -LiteralPath $BatchExecutable -ErrorAction Stop).Path
+        [IO.Path]::GetFullPath($BatchExecutable)
     }
     $sceneModel = if ([string]::IsNullOrWhiteSpace($SceneModelPath)) {
         Join-Path $PSScriptRoot 'ppt-scene-classifier\artifacts\scene-classifier-fp32.onnx'
     } else {
-        (Resolve-Path -LiteralPath $SceneModelPath -ErrorAction Stop).Path
+        [IO.Path]::GetFullPath($SceneModelPath)
     }
     $boardModel = if ([string]::IsNullOrWhiteSpace($BoardModelPath)) {
         Join-Path $runtime 'models\tetris.onnx'
     } else {
-        (Resolve-Path -LiteralPath $BoardModelPath -ErrorAction Stop).Path
+        [IO.Path]::GetFullPath($BoardModelPath)
     }
     $settings = if ([string]::IsNullOrWhiteSpace($SettingsPath)) {
         Join-Path $runtime 'config\tetris_recover.ini'
     } else {
-        (Resolve-Path -LiteralPath $SettingsPath -ErrorAction Stop).Path
+        [IO.Path]::GetFullPath($SettingsPath)
     }
     $cuda = 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\bin\x64'
+
+    # 解析を始める前に、必要なファイル・DLL・GPU・空き容量を確認する。
+    # 1つでも足りなければ解析には入らず、終了コード 2 で止まる
+    # （失敗の一言ではなく、足りないものと対処を出す）。
+    if (-not $SkipEnvironmentCheck) {
+        if ($null -eq (Get-Command Test-PptAnalysisEnvironment -ErrorAction SilentlyContinue)) {
+            throw "解析前チェックのスクリプトが見つかりません: $preflightHelper"
+        }
+        $environment = Test-PptAnalysisEnvironment -ToolsRoot $PSScriptRoot `
+            -EnginePath $batch -SceneModelPath $sceneModel `
+            -BoardModelPath $boardModel -SettingsPath $settings -OutputPath $output
+        if (-not $environment.Ok) {
+            Write-Host ''
+            Write-Host 'このままでは解析を開始できません。上記を直してから再実行してください。' `
+                -ForegroundColor Red
+            exit 2
+        }
+    }
 
     foreach ($required in @($batch, $sceneModel, $boardModel, $settings)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
@@ -374,6 +548,14 @@ try {
     }
 
     $env:PATH = "$($runtime)\bin;$cuda;$env:PATH"
+    # エンジン内で終了3クラスモデルを適用する（存在するときだけ）。
+    # 旧エンジンはこの環境変数を無視するので、差し替え前でも安全。
+    $endStateModel = Join-Path $PSScriptRoot 'ppt-lab\models\end3\scene-classifier.onnx'
+    if (Test-Path -LiteralPath $endStateModel -PathType Leaf) {
+        $env:TR_END_STATE_MODEL = $endStateModel
+    } else {
+        Remove-Item Env:TR_END_STATE_MODEL -ErrorAction SilentlyContinue
+    }
     [void](New-Item -ItemType Directory -Path $output -Force)
     $manifestPath = Join-Path $output 'batch-results.json'
     $cachePath = Join-Path $output 'analysis-cache.v1.json'
@@ -388,6 +570,16 @@ try {
         if ($MachineReadable) {
             Write-Output "study_cache=hit version=$analysisContractVersion"
             Write-Output "study_manifest=$manifestPath"
+        }
+        # 解析はやり直さないが、勝敗が欠けたバッチ（この修正より前に作られたもの）は
+        # 勝敗ステップだけ実行して埋める。有効な勝敗が既にあれば何もしない。
+        if ($env:PPT_NO_WINNER -ne '1') {
+            $winnerState = Get-WinnerDetectionState -Output $output
+            if (-not [string]::IsNullOrEmpty($winnerState)) {
+                Write-Host "勝敗が未確定のため、勝敗判定だけ実行します（$winnerState）" `
+                    -ForegroundColor Yellow
+                Invoke-WinnerDetection -Output $output
+            }
         }
         Start-Sleep -Milliseconds 150
         Complete-ProgressDisplay
@@ -465,7 +657,9 @@ try {
         $env:TR_BOARD_WORKERS = '2'
         $env:TR_BATCH_WORKER_RAM_MB = '1536'
         $env:TR_BATCH_RAM_RESERVE_MB = '2048'
-        $env:TR_BATCH_WORKER_VRAM_MB = '1024'
+        # 実測のピークは 1 ワーカーあたり約 1321MB。1024MB では 29% 過小予算になり、
+        # スケジューラが「載る」と誤認して VRAM 不足を招いていた。
+        $env:TR_BATCH_WORKER_VRAM_MB = '1400'
         $env:TR_BATCH_VRAM_RESERVE_MB = '512'
         $env:TR_BATCH_RELEASE_DELAY_SECONDS = '5'
         & $batch $source --detect $output $sceneModel $boardModel $settings 2>&1 |
@@ -604,25 +798,8 @@ try {
     Write-Host "解析バージョン記録: $cachePath"
 
     # Winner detection (decide the match winner from the result screen).
-    # A failure here must not fail the analysis itself, so it is swallowed.
-    if ($env:PPT_NO_WINNER -ne '1') {
-        $winnerScript = 'C:\Users\hirom\Documents\AI-Agent-Workspace\detect-winners.py'
-        $pythonExe = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python311\python.exe'
-        if ((Test-Path -LiteralPath $winnerScript -PathType Leaf) -and
-            (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-            Write-Host ''
-            Write-Host 'Detecting match winners (result screen)...'
-            $winnerBatch = Split-Path -Leaf $output
-            try {
-                & $pythonExe -X utf8 $winnerScript --batch $winnerBatch
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Host "Winner detection failed with exit code $LASTEXITCODE" -ForegroundColor Yellow
-                }
-            } catch {
-                Write-Host "Winner detection skipped: $($_.Exception.Message)" -ForegroundColor Yellow
-            }
-        }
-    }
+    # キャッシュヒット時も同じ関数を通すため、処理は Invoke-WinnerDetection に集約している。
+    Invoke-WinnerDetection -Output $output
     if ($MachineReadable) {
         Write-Output "study_cache=stored version=$analysisContractVersion"
         Write-Output "study_manifest=$manifestPath"

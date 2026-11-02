@@ -1,4 +1,4 @@
-# PPT Lab 引き継ぎメモ（2026-10-29 14:30）
+# PPT Lab 引き継ぎメモ（2026-10-30 17:50）
 
 次のセッションはこのファイルから始めてください。
 
@@ -25,8 +25,19 @@
 | 試合一覧と連続再生の件数 | ○ 同じ `matchFilterOk()` を使うので一致（72 = 72） |
 | ビューワー/シミュレータ | ○ ネットではなく**ローカル**から。ローカルは公開版と同じビルド（`dist/pages`）を配信 |
 | テト譜のプレビュー | ○ Lab自身が映る不具合を解消（`/` をシミュレータに戻した） |
+| テト譜プレビュー（10-30） | ○ iframeをやめてCanvas。盤面＋NEXTだけ。今のシミュレータと同じ白ページ＋濃紺盤面 |
+| テト譜カード（10-30） | ○ プレビュー＋タグ＋鉛筆だけ。鉛筆/右クリックで 名前変更 / タグ / 削除 |
+| テト譜の名前変更（10-30） | ○ `POST /api/tetofu/<id>/title` を追加 |
+| 盤面ビューワー（10-30） | ○ 動画詳細を開くまで読み込まない（一覧・テト譜が軽い） |
+| テト譜のタイトル・鉛筆（10-30） | ○ タイトルはプレビュー下部に常時表示。鉛筆は右下固定（メニューは上に開く） |
+| 動画と盤面の同期（10-30） | ○ 一覧に戻って別の動画を開くと同期が止まる件。iframe 再生成時に bridge を作り直す |
+| 絞り込み1行（10-31） | ○ 検索/プレイヤー1/2/タグ/勝敗/並び順/解除/連続再生を1行に。検索360px・セレクト120px |
+| YouTubeタイトル（10-31） | ○ 取得開始時に `yt-dlp --get-title` で `videos.title` を更新（cp932対策込み） |
+| 動画をPCに保存（10-31） | ○ 設定 `downloadVideo`（既定オフ）＋追加ダイアログのチェック。オンなら解析後に音声も取得して mkv に結合 |
+| 自動タグの旧名（10-31） | ○ `/api/videos` で再計算し、OCR名から消えたタグリンクを外す |
+| タイトルクリック（10-31） | ○ カードのIDで明示遷移。`#video` にIDが無い場合は一覧へ |
 
-詳細は `docs/PPT-LAB.md` §34〜§37。
+詳細は `docs/PPT-LAB.md` §34〜§40。
 
 ## 検証済み（Edge ヘッドレス + YouTube プレイヤー差し替え）
 
@@ -36,13 +47,16 @@
 - いんたい / syakegohan: 動画一覧 1動画・72試合、試合一覧 72、連続再生 72（左右を入れ替えても同じ）
 - ビューワー: `http://127.0.0.1:8765/F/?labViewer=1` を開いて 157局面・2400x1148 で描画、ページ送りも追従
 - テト譜のプレビュー: シミュレータ4件＋エディタ1件。Lab を映すものは 0
+- テト譜（10-30）: 5枚すべてCanvas、`F/` の iframe 0、復号は5件・427ページで 11ms
+- カードメニュー（10-30）: 鉛筆と右クリックで開く。UIから名前変更 → `/api/tetofu` に反映 → 元に戻すまで確認
+- 閲覧専用版（10-30）: `dist/pages` を 8766 で配信し、5枚Canvas・鉛筆なし・コンソールエラー0
 
 検証スクリプトは `C:\Users\hirom\Documents\AI-Agent-Workspace\ppt-lab-fix\`
 （`check-feature.mjs`＝app.jsのロジック単体、`e2e.py`＝ブラウザ、`e2e-static-build.py`＝配信物、`cdp.py`＝DevTools Protocol の最小クライアント）。
 
 ## 次にやるとよさそうなこと
 
-1. **公開版の反映**: `python tools\build-web.py` → `python tools\test-web-build.py` はローカルで成功済み。push すれば GitHub Actions が配信する。
+1. **公開版の反映**: `tools\ppt-lab\web` の `index.html` / `app.js` / `theme\ppt-lab.css` をルートの `ppt-lab\` へコピーし、`python tools\build-web.py` で `dist/pages` を作り直した（10-30 済み）。push すれば GitHub Actions が配信する。
 2. 連続再生の**画面表示**: いまは開始時にトーストが出るだけで、何番目を再生中か・止めるボタンが無い（`state.feature` はある）。
 3. `playNextFeature()` は `featureList` 方式の名残で、いまは実質到達しない（`advanceFeature()` が常に先に処理する）。整理するならここ。
 4. 解析失敗区間の送信は未実装（§12 の残り）。
@@ -57,6 +71,8 @@
 5. `Copy-Item src\theme dst\theme -Recurse` は `dst\theme\theme` を作る。中身は `src\theme\*` でコピー。
 6. `replay_file()` は `simulator` フォルダ限定（`profiles.json` をリプレイと誤認した事故）。
 7. 設定の bool は `json.dumps` で保存（`0/1` になっていた）。
+8. **画面は `/ppt-lab/`**。`/` はシミュレータなので、`http://127.0.0.1:8765/#videos` を開くとシミュレータが `#videos` を譜面として読み、alert でレンダラが止まる（CDPの evaluate もタイムアウトする）。
+9. **ビューワーの iframe は画面遷移で作り直される**。`mainView.replaceChildren()` で外れるため、`state.bridge` を使い回さず `state.bridge.frame !== viewerFrame` で作り直す（同期が止まる原因）。
 
 ## 参照ドキュメント
 

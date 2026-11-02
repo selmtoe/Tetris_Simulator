@@ -2,10 +2,25 @@
 const CACHE_NAME = 'tetris-web-__BUILD_ID__';
 const ROOT = new URL(__ROOT_PATH__, self.location.href);
 const PRECACHE = __PRECACHE__;
+// PPT Lab（/ppt-lab/）はコードを直したら次に開いたとき必ず反映させる。
+// この画面だけは HTTP キャッシュも使わずに取りに行き、通信できないときだけ
+// 保存済みの控えを返す。他の画面（シミュレータ・ビューワー）は今までどおり
+// 「取れたら保存・取れなければ控え」で、オフラインでも開ける。
+const LAB_ROOT = new URL('ppt-lab/', ROOT).pathname;
+
+function precache(cache, request, timeout = 15000) {
+    return new Promise(resolve => {
+        const timer = setTimeout(resolve, timeout);
+        cache.add(request).catch(() => { /* 無いものは諦める */ })
+            .then(() => { clearTimeout(timer); resolve(); });
+    });
+}
 
 self.addEventListener('install', event => {
     event.waitUntil(caches.open(CACHE_NAME).then(async cache => {
-        await cache.addAll(PRECACHE.map(path => new Request(new URL(path, ROOT), { cache: 'reload' })));
+        // 1件でも 404 や無応答があると、新しい Service Worker が有効にならず
+        // 古いキャッシュのまま居座る。1件ずつ入れ、必ず時間で打ち切る。
+        await Promise.all(PRECACHE.map(path => precache(cache, new Request(new URL(path, ROOT), { cache: 'reload' }))));
         await self.skipWaiting();
     }));
 });
@@ -15,10 +30,11 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
     const url = new URL(event.request.url);
     if (event.request.method !== 'GET' || url.origin !== ROOT.origin || !url.pathname.startsWith(ROOT.pathname)) return;
+    const isLabRequest = url.pathname === LAB_ROOT.slice(0, -1) || url.pathname.startsWith(LAB_ROOT);
     event.respondWith((async () => {
         const cache = await caches.open(CACHE_NAME);
         try {
-            const response = await fetch(event.request, { cache: 'no-cache' });
+            const response = await fetch(event.request, { cache: isLabRequest ? 'reload' : 'no-cache' });
             if (response.ok) await cache.put(event.request, response.clone());
             return response;
         } catch (error) {

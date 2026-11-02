@@ -36,6 +36,13 @@ const APP_SHELL = [
   './icons/icon-512x512.png'
 ];
 
+// PPT Lab（/ppt-lab/）だけは「開いたときは常に最新」にする。コードを直したのに
+// 古い画面が出続けると、サーバー側を直しても気づけないため。
+// 通信できないときだけキャッシュを使う（network-first）。
+// シミュレータなど他のパスは、これまでどおりキャッシュ優先のままにして
+// オフラインで開けることを保つ。
+const NETWORK_FIRST_PATHS = ['/ppt-lab/'];
+
 // These candidate build products are intentionally gitignored and may not be
 // present on a production host. Cache them when a candidate was built, but do
 // not make the app-shell upgrade fail when only production WASM is deployed.
@@ -44,10 +51,20 @@ const OPTIONAL_CANDIDATE_ASSETS = [
   './simulator/candidate/kasane-stack-ren-candidate.manifest.json'
 ];
 
+// 1件の取りこぼしで install が終わらないと、新しい Service Worker が有効に
+// ならず、古い cache-first のまま居座る。1件ずつ入れ、必ず時間で打ち切る。
+function precache(cache, asset, timeout = 15000) {
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, timeout);
+    cache.add(asset).catch(() => { /* 無いものは諦める */ })
+      .then(() => { clearTimeout(timer); resolve(); });
+  });
+}
+
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(async cache => {
-    await cache.addAll(APP_SHELL);
-    await Promise.allSettled(OPTIONAL_CANDIDATE_ASSETS.map(asset => cache.add(asset)));
+    await Promise.all(APP_SHELL.map(asset => precache(cache, asset)));
+    await Promise.all(OPTIONAL_CANDIDATE_ASSETS.map(asset => precache(cache, asset, 5000)));
   }));
   self.skipWaiting();
 });
@@ -65,6 +82,28 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
   const requestUrl = new URL(event.request.url);
+  const isLabRequest = requestUrl.origin === self.location.origin &&
+    (requestUrl.pathname === '/ppt-lab' ||
+     NETWORK_FIRST_PATHS.some(prefix => requestUrl.pathname.startsWith(prefix)));
+  if (isLabRequest) {
+    // PPT Lab は毎回ネットワークへ取りに行き（HTTP キャッシュも使わない）、
+    // 取れたら控えを更新する。通信できないときだけ控えを返す。
+    event.respondWith((async () => {
+      try {
+        const response = await fetch(event.request, { cache: 'reload' });
+        if (response && response.ok) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(event.request, response.clone());
+        }
+        return response;
+      } catch (error) {
+        const cached = await caches.match(event.request, { ignoreSearch: true });
+        if (cached) return cached;
+        throw error;
+      }
+    })());
+    return;
+  }
   const isCandidateBuildAsset = OPTIONAL_CANDIDATE_ASSETS.some(asset =>
     new URL(asset, self.location.href).pathname === requestUrl.pathname
   );

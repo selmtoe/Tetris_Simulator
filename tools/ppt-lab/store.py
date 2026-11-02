@@ -83,6 +83,13 @@ def now() -> str:
     return dt.datetime.now().isoformat(timespec='seconds')
 
 
+def _name_key(value: str) -> str:
+    """名前の照合用キー（全角半角・大文字小文字・空白の差を吸収する）。"""
+    import unicodedata
+    text = unicodedata.normalize('NFKC', str(value or ''))
+    return ''.join(text.split()).casefold()
+
+
 def new_id(prefix: str) -> str:
     return prefix + '-' + uuid.uuid4().hex[:16]
 
@@ -103,6 +110,34 @@ class Store:
                 db.execute("ALTER TABLE videos ADD COLUMN manifest TEXT NOT NULL DEFAULT ''")
             if 'tags_locked' not in columns:
                 db.execute("ALTER TABLE videos ADD COLUMN tags_locked INTEGER NOT NULL DEFAULT 0")
+            self._migrate_360(db)
+
+    def _migrate_360(self, db) -> None:
+        """360p 既定への一度きりの切り替え。
+
+        旧既定は `standard`（1080p・旧モデル）だった。明示的に別の
+        プロファイルを選んでいる環境は触らず、既定のままの人だけ
+        `fast320`（360p + 新モデル）へ移す。
+        """
+        marker = db.execute(
+            "SELECT value FROM settings WHERE key='migration.model360'").fetchone()
+        if marker is not None:
+            return
+        row = db.execute(
+            "SELECT value FROM settings WHERE key='analysisProfile'").fetchone()
+        try:
+            profile = json.loads(row['value']) if row is not None else None
+        except (TypeError, json.JSONDecodeError):
+            profile = None
+        if profile in (None, 'standard'):
+            db.execute(
+                "INSERT INTO settings(key, value, updated_at) VALUES('analysisProfile', ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                (json.dumps('fast320'), now()))
+        db.execute(
+            "INSERT INTO settings(key, value, updated_at) VALUES('migration.model360', ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (json.dumps(1), now()))
     # ---- 基盤 -------------------------------------------------------------
     @contextlib.contextmanager
     def connect(self):
@@ -265,6 +300,16 @@ class Store:
         return {'id': identifier, 'kind': kind, 'title': title, 'url': url,
                 'createdAt': now(), 'tags': []}
 
+    def set_tetofu_title(self, identifier: str, title: str) -> bool:
+        title = (title or '').strip()
+        if not title:
+            raise ValueError('タイトルを入力してください')
+        if len(title) > 200:
+            raise ValueError('タイトルは200文字までです')
+        with self.connect() as db:
+            cursor = db.execute('UPDATE tetofu SET title=? WHERE id=?', (title, identifier))
+        return cursor.rowcount > 0
+
     # ---- タグ -------------------------------------------------------------
     def tags(self) -> list[dict]:
         with self.connect() as db:
@@ -301,6 +346,28 @@ class Store:
             if name and name not in clean:
                 clean.append(name)
         with self.connect() as db:
+            for name in clean:
+                db.execute('INSERT OR IGNORE INTO tags(name,created_at) VALUES(?,?)', (name, now()))
+                db.execute('INSERT OR IGNORE INTO tag_links(tag,target,created_at) VALUES(?,?,?)',
+                           (name, target, now()))
+        return clean
+
+    def reconcile_tags(self, target: str, auto: list[str], stale_names) -> list[str]:
+        """自動タグを付け直す。OCR名の候補から消えたタグは外す。"""
+        clean = []
+        for name in auto:
+            name = (name or '').strip()
+            if name and name not in clean:
+                clean.append(name)
+        wanted = set(clean)
+        stale = set()
+        for name in stale_names or []:
+            name = str(name or '').strip()
+            if name and name not in wanted:
+                stale.add(name)
+        with self.connect() as db:
+            for name in stale:
+                db.execute('DELETE FROM tag_links WHERE target=? AND tag=?', (target, name))
             for name in clean:
                 db.execute('INSERT OR IGNORE INTO tags(name,created_at) VALUES(?,?)', (name, now()))
                 db.execute('INSERT OR IGNORE INTO tag_links(tag,target,created_at) VALUES(?,?,?)',
@@ -363,6 +430,37 @@ class Store:
             row = db.execute('SELECT name FROM name_memory WHERE fingerprint=?',
                              (fingerprint,)).fetchone()
         return row['name'] if row else None
+
+    def recall_name_by_text(self, text: str) -> str | None:
+        """OCR が読んだ文字列から、過去に確定した名前を引く。
+
+        指紋は画像の完全一致ハッシュなので、同じ人でも配信ごとに画素が変わると
+        当たらない。文字のほうが安定するため、こちらを第二の手がかりに使う。
+        """
+        key = _name_key(text)
+        if len(key) < 2:
+            return None
+        with self.connect() as db:
+            for row in db.execute('SELECT DISTINCT name FROM name_memory'):
+                if _name_key(row['name']) == key:
+                    return row['name']
+        return None
+
+    def names_for_fingerprints(self, fingerprints) -> dict[str, str]:
+        """指紋の一覧から {fingerprint: name} を作る（画像照合用）。"""
+        values = [str(item) for item in fingerprints if item]
+        result: dict[str, str] = {}
+        if not values:
+            return result
+        with self.connect() as db:
+            for start in range(0, len(values), 400):
+                part = values[start:start + 400]
+                marks = ','.join('?' * len(part))
+                for row in db.execute(
+                        f'SELECT fingerprint, name FROM name_memory '
+                        f'WHERE fingerprint IN ({marks})', part):
+                    result[row['fingerprint']] = row['name']
+        return result
 
     # ---- ジョブ -----------------------------------------------------------
     def add_job(self, kind: str, status: str, data: dict) -> str:

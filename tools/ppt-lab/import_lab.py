@@ -129,7 +129,7 @@ def main():
             manifest_matches.append(entry)
             winner = str(match.get('winner') or '').strip()
             status = str(match.get('winnerStatus') or 'ok')
-            if winner in ('p1', 'p2'):
+            if winner in ('p1', 'p2', 'draw'):
                 winners.append({'match': index, 'winner': winner, 'status': status})
 
         manifest_path = folder / 'manifest.json'

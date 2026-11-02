@@ -11,6 +11,9 @@
     const dialogNote = document.getElementById('entry-dialog-note');
     const entryTitle = document.getElementById('entry-title');
     const entryUrl = document.getElementById('entry-url');
+    const entrySubmit = document.getElementById('entry-submit');
+    const entrySaveField = document.getElementById('entry-save-field');
+    const entrySaveVideo = document.getElementById('entry-save-video');
 
     const state = {
         view: 'videos',
@@ -25,6 +28,8 @@
         mode: 'videos',
         page: 0,
         filters: { query: '', player: '', opponent: '', tag: '', result: '', sort: 'newest' },
+        // 動画詳細（試合のレール）の絞り込み。動画一覧の filters とは別に持つ
+        matchFilters: { query: '', player: '', opponent: '' },
         matchCache: new Map(),
         matchLoading: false,
         matchFailed: new Set(),
@@ -44,6 +49,10 @@
         currentUrls: null,
         syncTimer: null,
         bridge: null,
+        // ビューワーを postMessage 連携で動かしているか（false のときだけ URL を開き直す）
+        viewerFallback: false,
+        // postMessage の準備を待つ期限（この間は読み込み直さずに待つ）
+        viewerReadyBy: 0,
         lastSeekAt: 0,
         preferred: null,
         pendingSeek: null,
@@ -56,7 +65,10 @@
         ytReady: false,
         videoId: '',
         videoTitle: '',
+        tetofuId: '',
         matches: [],
+        // サーバーが名前画像の指紋でまとめた「1組 = 1エントリ」の一覧
+        matchGroups: [],
         replays: new Map(),
         edits: new Map(),
         editsVideoId: '',
@@ -70,7 +82,7 @@
     const STATUS_LABEL = {
         queued: '待機中',
         analyzing: '解析中',
-        'needs-names': 'プレイヤー名を確認',
+        'needs-names': '解析済み',
         ready: '登録済み',
         failed: '失敗'
     };
@@ -81,6 +93,15 @@
         if (text !== undefined && text !== null) element.textContent = String(text);
         if (className) element.className = className;
         return element;
+    }
+
+    // 全角/半角・大文字小文字・前後の空白を無視して比べる（Lab の normalize と同じ）
+    function normalizeText(value) {
+        return String(value === undefined || value === null ? '' : value)
+            .normalize('NFKC')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .toLocaleLowerCase('ja');
     }
 
     // 画面遷移で破棄されても詳細を開き直せるようにする
@@ -304,6 +325,9 @@
             }
             wrap.append(document.createTextNode(name));
         });
+        if (match.winner === 'draw') {
+            wrap.append(node('span', '引き分け', 'lab-draw-badge'));
+        }
         return wrap;
     }
     const DEFAULT_THUMB = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
@@ -320,6 +344,7 @@
     // 動画もテト譜と同じ「正方形タイル」で並べる
     function renderLabCard(container, video, matchCount) {
         const card = node('article', null, 'card ppt-tile ppt-video-tile');
+        card.dataset.videoId = video.id;
         const thumb = node('div', null, 'ppt-tile-preview');
         const image = node('img', null, 'ppt-tile-thumb');
         image.src = labThumbnail(video);
@@ -328,9 +353,7 @@
         image.decoding = 'async';
         image.onerror = () => { image.onerror = null; image.src = DEFAULT_THUMB; };
         thumb.append(image);
-        if (video.status === 'needs-names') {
-            thumb.append(node('span', 'プレイヤー名を確認', 'ppt-tile-badge'));
-        } else if (video.status === 'queued' || video.status === 'analyzing') {
+        if (video.status === 'queued' || video.status === 'analyzing') {
             thumb.append(node('span', '解析中 ' + Math.round(video.progress || 0) + '%', 'ppt-tile-badge'));
         } else if (video.status === 'failed') {
             thumb.append(node('span', '失敗', 'ppt-tile-badge ppt-tile-badge-error'));
@@ -340,7 +363,14 @@
         const title = node('h3', null, 'card-title');
         const link = node('a', video.title, 'card-title-action');
         link.href = '#video/' + video.id;
-        link.addEventListener('click', event => event.stopPropagation());
+        // ブラウザ既定の遷移に任せず、このカードのIDで明示的に開く
+        link.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!video.id) return;
+            state.pendingMatch = 0;
+            location.hash = '#video/' + video.id;
+        });
         title.append(link);
         card.append(title);
 
@@ -361,7 +391,8 @@
         card.addEventListener('click', event => {
             if (event.target.closest('a,button,input,select,textarea')) return;
             if (window.getSelection()?.toString()) return;
-            location.hash = '#video/' + video.id;
+            const videoId = card.dataset.videoId;
+            if (videoId) location.hash = '#video/' + videoId;
         });
         container.append(card);
     }
@@ -430,11 +461,14 @@
     function resultOk(row) {
         const want = state.filters.result;
         const player = state.filters.player;
-        if (!want || !player) return true;
+        if (!want) return true;
+        if (want === 'draw') return row.winner === 'draw';
+        if (!player) return true;
         const names = [row.p1, row.p2].filter(Boolean);
         const side = names[0] === player ? 'p1' : names[1] === player ? 'p2' : '';
         if (!side) return false;
         if (want === 'review') return !row.winner || row.winnerStatus !== 'ok';
+        if (row.winner === 'draw') return false;
         const won = row.winner === side;
         return want === 'win' ? won : !won;
     }
@@ -442,6 +476,52 @@
     // 試合一覧と連続再生で同じ絞り込みを使う（件数がずれないように）
     function matchFilterOk(row) {
         return pairOk(row) && resultOk(row);
+    }
+
+    // ---- 動画詳細（試合のレール）の絞り込み --------------------------------
+    // Lab の動画詳細と同じで、プレイヤーを2つ選んだときは
+    // 「その2人が同じ試合で対戦している」ものだけを通す（片方だけでもよい）。
+    function matchPlayerOk(row) {
+        const one = normalizeText(state.matchFilters.player);
+        const two = normalizeText(state.matchFilters.opponent);
+        if (!one && !two) return true;
+        const names = [row.p1, row.p2].map(normalizeText).filter(Boolean);
+        if (one && two) {
+            return names.some((name, index) => name === one
+                && names.some((other, otherIndex) => otherIndex !== index && other === two));
+        }
+        return (!one || names.includes(one)) && (!two || names.includes(two));
+    }
+
+    // 検索語は空白で区切ると AND（部分一致・大文字小文字は無視）
+    function matchTextOk(row) {
+        const words = normalizeText(state.matchFilters.query).split(' ').filter(Boolean);
+        if (!words.length) return true;
+        const text = normalizeText([row.p1, row.p2].filter(Boolean).join(' '));
+        return words.every(word => text.includes(word));
+    }
+
+    // 試合カード・前後の移動・件数で同じ絞り込みを使う（件数がずれないように）
+    function detailMatchFilterOk(row) {
+        return matchPlayerOk(row) && matchTextOk(row);
+    }
+
+    function detailMatches(matches) {
+        return (matches || []).filter(row => detailMatchFilterOk(row));
+    }
+
+    // その動画の試合に出てくるプレイヤー（表記ゆれは1つにまとめて名前順）
+    function matchPlayerChoices(matches, video) {
+        const labels = new Map();
+        const add = value => {
+            const label = String(value === undefined || value === null ? '' : value).trim();
+            const key = normalizeText(label);
+            if (!key || key.includes('?')) return;
+            if (!labels.has(key)) labels.set(key, label);
+        };
+        (matches || []).forEach(row => { add(row.p1); add(row.p2); });
+        ((video && video.players) || []).forEach(add);
+        return [...labels.values()].sort((a, b) => a.localeCompare(b, 'ja'));
     }
 
     function renderMatchCard(container, video, row, order) {
@@ -465,6 +545,9 @@
             }
             link.append(document.createTextNode(name));
         });
+        if (row.winner === 'draw') {
+            link.append(node('span', '引き分け', 'lab-draw-badge'));
+        }
         link.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
@@ -579,7 +662,7 @@
         bind('プレイヤー1', 'player', [['', 'すべて'], ...players.map(name => [name, name])]);
         bind('プレイヤー2', 'opponent', [['', 'すべて'], ...players.map(name => [name, name])]);
         bind('タグ', 'tag', [['', 'すべて'], ...tagChoices.map(name => [name, name])]);
-        bind('勝敗', 'result', [['', 'すべて'], ['win', '勝ち'], ['lost', '負け'], ['review', '未確定']]);
+        bind('勝敗', 'result', [['', 'すべて'], ['win', '勝ち'], ['lost', '負け'], ['draw', '引き分け'], ['review', '未確定']]);
         const sortOptions = [['newest', '新しい順'], ['oldest', '古い順'], ['title', 'タイトル順'], ['matches', '試合数順']];
         const sortDefault = String(setting('sortOrder') || 'new');
         bind('並び順', 'sort', sortOptions, ['newest', 'oldest', 'title', 'matches'].includes(sortDefault) ? sortDefault : 'newest');
@@ -592,15 +675,13 @@
             renderVideos();
         });
         controls.append(clear);
-        root.append(controls);
 
-        const featureBar = node('div', null, 'lab-inline-actions');
         const feature = node('button', '連続再生', 'btn-outline');
         feature.type = 'button';
         feature.title = '絞り込み結果を先頭から続けて再生します';
         feature.addEventListener('click', () => playSequentially());
-        featureBar.append(feature);
-        root.append(featureBar);
+        controls.append(feature);
+        root.append(controls);
 
         const entries = sortEntries(filterVideos(state.videos));
         // プレイヤーで絞るときは、動画一覧でも試合データが要る
@@ -728,6 +809,8 @@
             // 試合一覧と同じ条件（プレイヤー1/2・勝敗）で絞るので件数も一致する。
             rows.slice().sort((a, b) => (Number(a.index) || 0) - (Number(b.index) || 0))
                 .forEach(row => {
+                    // 盤面復元に失敗した試合はビューワーが空になるので、連続再生では飛ばす
+                    if (row.failed) return;
                     if (!matchFilterOk(row)) return;
                     const start = Number(row.start) || 0;
                     const end = Number(row.end) || (start + 60);
@@ -761,6 +844,8 @@
         state.videoId = first.videoId;
         state.pendingMatch = first.matchIndex;
         state.follow = true;
+        // 連続再生は動画一覧の絞り込みで作る。動画詳細側の絞り込みは解除して始める
+        state.matchFilters = { query: '', player: '', opponent: '' };
         if (location.hash === '#video/' + first.videoId) route();
         else location.hash = '#video/' + first.videoId;
         toast('絞り込み結果の' + segments.length + '試合を続けて再生します。');
@@ -831,138 +916,304 @@
         if (page >= 0 && page !== state.pageIndex) showPage(page, { seek: false });
     }
     // ---- テト譜のプレビュー -------------------------------------------------
-    const BOARD_COLORS = {
-        I: '#43d3d3', O: '#e8c53a', T: '#a45fd3', S: '#57c85a',
-        Z: '#e05a5a', J: '#4a7fe0', L: '#e0913a', G: '#8a8f92'
-    };
-
-    function boardCells(board) {
-        if (!board) return '';
-        if (Array.isArray(board)) {
-            if (Array.isArray(board[0])) return board.map(row => row.join('')).join('');
-            return board.join('');
+    function tetofuBoardText(value) {
+        if (Array.isArray(value)) {
+            return value.map(row => (Array.isArray(row) ? row.join('') : String(row || ''))).join('');
         }
-        return String(board);
+        return String(value || '');
     }
 
-    function tetofuPages(item) {
+    const TETOFU_DECODER = new TextDecoder();
+
+    // 保存したURLを、カードに出す1ページぶんだけ復号する。
+    // ページ列を丸ごと抱えると重いので、盤面とNEXTだけ残す。
+    function tetofuPageData(item) {
         const hash = String(item.url || '').split('#')[1];
         if (!hash) return null;
         try {
             const binary = atob(hash.replace(/-/g, '+').replace(/_/g, '/'));
-            const json = JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, ch => ch.charCodeAt(0))));
-            if (!window.TetrisEventCodec || !window.TetrisEventCodec.isEventReplay(json)) return null;
-            const decoded = window.TetrisEventCodec.decodeCollection(json, { compactBoards: true });
-            const target = decoded.cases[decoded.currentCase || 0];
-            return (target && target.pages) || null;
+            const json = JSON.parse(TETOFU_DECODER.decode(Uint8Array.from(binary, ch => ch.charCodeAt(0))));
+            if (window.TetrisEventCodec && window.TetrisEventCodec.isEventReplay(json)) {
+                const decoded = window.TetrisEventCodec.decodeCollection(json, { compactBoards: true });
+                const target = decoded.cases[decoded.currentCase || 0];
+                const pages = (target && target.pages) || [];
+                if (!pages.length) return null;
+                const requested = Number((String(item.url).match(/[?&]page=(\d+)/) || [])[1] || 1);
+                const page = pages[Math.max(0, Math.min(requested - 1, pages.length - 1))];
+                const pick = player => (player ? {
+                    board: String(player.board || ''),
+                    next: String(player.next || '')
+                } : null);
+                return { p1: pick(page.p1), p2: page.p2 ? pick(page.p2) : null };
+            }
+            // 旧形式（v2のスナップショット）は盤面とNEXTがそのまま入っている
+            const snapshot = panel => {
+                if (!panel || typeof panel !== 'object') return null;
+                const board = panel.b !== undefined ? panel.b : panel.board;
+                if (board === undefined) return null;
+                const next = panel.n !== undefined ? panel.n : panel.next;
+                return { board: tetofuBoardText(board), next: String(next || '') };
+            };
+            const p1 = snapshot(json.p1);
+            const p2 = snapshot(json.p2);
+            return p1 || p2 ? { p1, p2 } : null;
         } catch (error) {
             return null;
         }
     }
 
-    function drawBoard(ctx, cells, x, y, size) {
+    // 今のシミュレータ（白いページ＋濃紺の盤面＋パステルのミノ）に合わせる。
+    // 形・色・NEXT見出しの並びは runtime-config.js と 30-viewer.js から持ってくる。
+    const TETOFU_BLOCK = 28;
+    const TETOFU_PREVIEW_WIDTH = 460;
+    const TETOFU_PREVIEW_HEIGHT = 600;
+    const TETOFU_BOARD_X = 10;
+    const TETOFU_BOARD_Y = 20;
+    const TETOFU_BOARD_WIDTH = 10 * TETOFU_BLOCK;
+    const TETOFU_BOARD_HEIGHT = 20 * TETOFU_BLOCK;
+    const TETOFU_NEXT_X = 340;
+    const TETOFU_NEXT_TOP = 95;
+    const TETOFU_NEXT_SLOT = 80;
+    const TETOFU_BOARD_BG = '#1b1b1f';
+    const TETOFU_GRID = '#444';
+    const TETOFU_NEXT_INK = '#6f6f6f';
+    const TETOFU_COLORS = {
+        I: '#4ec7cd', O: '#eac44a', T: '#b56fc7', L: '#e0a15a',
+        J: '#587aca', S: '#82c964', Z: '#e97d7d', G: '#b0b0b0'
+    };
+    const TETOFU_TETROMINOS = {
+        I: { shape: [[0, 0], [1, 0], [2, 0], [3, 0]], center: [1.5, 0.5] },
+        O: { shape: [[0, 0], [1, 0], [0, -1], [1, -1]], center: [0.5, -0.5] },
+        T: { shape: [[0, 0], [-1, 0], [0, -1], [1, 0]], center: [0, 0] },
+        L: { shape: [[-1, 0], [0, 0], [1, 0], [1, -1]], center: [0, 0] },
+        J: { shape: [[0, 0], [-1, 0], [1, 0], [-1, -1]], center: [0, 0] },
+        S: { shape: [[1, -1], [-1, 0], [0, 0], [0, -1]], center: [0, 0] },
+        Z: { shape: [[0, 0], [1, 0], [0, -1], [-1, -1]], center: [0, 0] }
+    };
+    const tetofuPreviewCache = new Map();
+
+    function tetofuPreviewData(item) {
+        const key = String(item.id || '') + '|' + String(item.url || '');
+        if (tetofuPreviewCache.has(key)) return tetofuPreviewCache.get(key);
+        const data = tetofuPageData(item);
+        if (tetofuPreviewCache.size > 300) tetofuPreviewCache.clear();
+        tetofuPreviewCache.set(key, data);
+        return data;
+    }
+
+    function drawTetofuBlock(ctx, piece, x, y, size) {
+        ctx.fillStyle = TETOFU_COLORS[piece] || '#b0b0b0';
+        ctx.fillRect(x, y, size, size);
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(x, y, size, size);
+    }
+
+    function drawTetofuGrid(ctx, x, y, width, height) {
+        ctx.strokeStyle = TETOFU_GRID;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let col = 1; col < 10; col += 1) {
+            ctx.moveTo(x + col * TETOFU_BLOCK + 0.5, y);
+            ctx.lineTo(x + col * TETOFU_BLOCK + 0.5, y + height);
+        }
+        for (let row = 1; row < 20; row += 1) {
+            ctx.moveTo(x, y + row * TETOFU_BLOCK + 0.5);
+            ctx.lineTo(x + width, y + row * TETOFU_BLOCK + 0.5);
+        }
+        ctx.stroke();
+    }
+
+    function drawTetofuBoard(ctx, board) {
         const width = 10;
-        // 盤面は 40 行。見えるのは下 20 行だけ。
-        const rows = 40;
-        const offset = (rows - 20) * width;
-        const height = 20;
-        ctx.fillStyle = '#101c20';
-        ctx.fillRect(x, y, width * size, height * size);
-        for (let row = 0; row < height; row += 1) {
+        const visible = 20;
+        const offset = 20 * width; // 40行のうち下20行
+        const x = TETOFU_BOARD_X;
+        const y = TETOFU_BOARD_Y;
+        const size = TETOFU_BLOCK;
+        ctx.fillStyle = TETOFU_BOARD_BG;
+        ctx.fillRect(x, y, TETOFU_BOARD_WIDTH, TETOFU_BOARD_HEIGHT);
+        drawTetofuGrid(ctx, x, y, TETOFU_BOARD_WIDTH, TETOFU_BOARD_HEIGHT);
+        for (let row = 0; row < visible; row += 1) {
             for (let col = 0; col < width; col += 1) {
-                const value = (cells[offset + row * width + col] || '').toUpperCase();
+                const value = String(board || '')[offset + row * width + col] || '';
                 if (!value || value === '_' || value === '.' || value === ' ') continue;
-                ctx.fillStyle = BOARD_COLORS[value] || '#6b7c7e';
-                ctx.fillRect(x + col * size + 1, y + row * size + 1, size - 2, size - 2);
+                drawTetofuBlock(ctx, value, x + col * size, y + row * size, size);
             }
         }
     }
 
-    // 保存したURLを、そのままビューワーで開ける形にする（操作は無効）
-    function viewerThumbUrl(url) {
-        const value = siteUrl(url);
-        if (!value) return 'about:blank';
-        const parts = String(value).split('#');
-        if (parts.length < 2) return value;
-        const base = parts[0].replace(/\?.*$/, '');
-        const page = (String(value).match(/[?&]page=(\d+)/) || [])[1] || '1';
-        return base + '?page=' + page + '&labViewer=1#' + parts[1];
+    function drawTetofuNext(ctx, sequence) {
+        const queue = String(sequence || '').split('');
+        const pieces = [];
+        for (let i = 0; i < Math.min(queue.length, 10); i += 1) {
+            const piece = queue[i];
+            if (piece && TETOFU_TETROMINOS[piece]) pieces.push(piece);
+        }
+        ctx.textAlign = 'left';
+        ctx.fillStyle = TETOFU_NEXT_INK;
+        ctx.font = '600 26px -apple-system, "Segoe UI", "Noto Sans JP", sans-serif';
+        ctx.fillText('NEXT', TETOFU_NEXT_X, 60);
+        pieces.forEach((piece, index) => {
+            const entry = TETOFU_TETROMINOS[piece];
+            const minX = Math.min(...entry.shape.map(cell => cell[0]));
+            const minY = Math.min(...entry.shape.map(cell => cell[1]));
+            const top = TETOFU_NEXT_TOP + index * TETOFU_NEXT_SLOT;
+            entry.shape.forEach(cell => {
+                drawTetofuBlock(ctx, piece,
+                    TETOFU_NEXT_X + (cell[0] - minX) * TETOFU_BLOCK,
+                    top + (cell[1] - minY) * TETOFU_BLOCK,
+                    TETOFU_BLOCK);
+            });
+        });
     }
 
-    // ビューワーの実寸（1200x574）を枠に合わせて縮小する
-    function fitTetofuPreview(wrap, frame) {
-        const apply = () => {
-            const width = wrap.clientWidth || 280;
-            const scale = width / 1200;
-            frame.style.transform = 'scale(' + scale + ')';
-            wrap.style.height = Math.round(574 * scale) + 'px';
-        };
-        apply();
-        if (window.ResizeObserver) new ResizeObserver(apply).observe(wrap);
+    function drawTetofuPlayer(ctx, player) {
+        drawTetofuBoard(ctx, player.board);
+        drawTetofuNext(ctx, player.next);
+    }
+
+    function drawTetofuPlaceholder(ctx, width, height) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = TETOFU_BOARD_BG;
+        ctx.fillRect(TETOFU_BOARD_X, TETOFU_BOARD_Y,
+            TETOFU_BOARD_WIDTH, TETOFU_BOARD_HEIGHT);
+        drawTetofuGrid(ctx, TETOFU_BOARD_X, TETOFU_BOARD_Y,
+            TETOFU_BOARD_WIDTH, TETOFU_BOARD_HEIGHT);
+        ctx.fillStyle = '#8a8a8a';
+        ctx.font = '14px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('プレビューなし', width / 2, height / 2);
     }
 
     function drawTetofuPreview(canvas, item) {
-        const pages = tetofuPages(item);
-        const requested = Number((String(item.url).match(/[?&]page=(\d+)/) || [])[1] || 1);
-        const page = pages && pages.length
-            ? pages[Math.max(0, Math.min(requested - 1, pages.length - 1))]
-            : null;
-        if (window.PPTViewerRender) {
-            // エディタと同じ描画（F/app/30-viewer.js の手順）で描く
-            window.PPTViewerRender.render(canvas, page, { players: ['p1', 'p2'] });
-            return;
+        const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+        const width = TETOFU_PREVIEW_WIDTH;
+        const height = TETOFU_PREVIEW_HEIGHT;
+        if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
         }
         const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#eef3f2';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#8aa0a2';
-        ctx.font = '13px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(pages ? 'プレビューなし' : 'プレビューなし', canvas.width / 2, canvas.height / 2);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        const data = tetofuPreviewData(item);
+        const panels = data ? [data.p1, data.p2].filter(Boolean) : [];
+        if (!panels.length) {
+            drawTetofuPlaceholder(ctx, width, height);
+            canvas.dataset.ready = '1';
+            return;
+        }
+        if (panels.length > 1) {
+            // 2Pは左右に半分の縮尺で並べる
+            const scale = 0.5;
+            const top = (height - height * scale) / 2;
+            panels.slice(0, 2).forEach((player, index) => {
+                ctx.save();
+                ctx.translate(index * width * scale, top);
+                ctx.scale(scale, scale);
+                drawTetofuPlayer(ctx, player);
+                ctx.restore();
+            });
+        } else {
+            drawTetofuPlayer(ctx, panels[0]);
+        }
+        canvas.dataset.ready = '1';
     }
 
-    function renderTetofuCard(container, item) {
-        const card = node('article', null, 'card ppt-tetofu-card');
-        const previewWrap = node('div', null, 'ppt-tetofu-preview-wrap');
-        const preview = node('iframe', null, 'ppt-tetofu-preview');
-        preview.setAttribute('tabindex', '-1');
-        preview.setAttribute('aria-hidden', 'true');
-        preview.setAttribute('loading', 'lazy');
-        preview.setAttribute('scrolling', 'no');
-        preview.src = viewerThumbUrl(item.url);
-        previewWrap.append(preview);
-        card.append(previewWrap);
-        requestAnimationFrame(() => fitTetofuPreview(previewWrap, preview));
+    // 画面に入ったカードだけ描く（スクロールの先のカードは復号しない）
+    let tetofuObserver = null;
+    function observeTetofuPreview(frame, item) {
+        const draw = () => {
+            const canvas = frame.querySelector('canvas');
+            if (canvas) drawTetofuPreview(canvas, item);
+        };
+        if (!('IntersectionObserver' in window)) {
+            requestAnimationFrame(draw);
+            return;
+        }
+        if (!tetofuObserver) {
+            tetofuObserver = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    if (!entry.isIntersecting) return;
+                    tetofuObserver.unobserve(entry.target);
+                    const canvas = entry.target.querySelector('canvas');
+                    if (canvas) drawTetofuPreview(canvas, entry.target.__tetofuItem);
+                });
+            }, { rootMargin: '240px' });
+        }
+        frame.__tetofuItem = item;
+        tetofuObserver.observe(frame);
+    }
 
-        const title = node('h3', null, 'card-title');
-        const link = node('a', item.title, 'card-title-action');
-        link.href = item.url;
-        link.target = '_blank';
-        link.rel = 'noopener';
-        title.append(link);
-        card.append(title);
+    function closeTetofuMenu() {
+        document.querySelectorAll('.ppt-card-menu.open').forEach(menu => {
+            menu.classList.remove('open');
+            const trigger = menu.querySelector('.ppt-card-edit');
+            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        });
+    }
 
-        const kind = item.kind === 'official' ? '本家テト譜'
-            : item.kind === 'editor' ? 'エディタ' : 'シミュレータ';
-        card.append(node('div', kind, 'card-desc'));
+    function openTetofuMenu(card) {
+        const menu = card.querySelector('.ppt-card-menu');
+        if (!menu) return;
+        const open = !menu.classList.contains('open');
+        closeTetofuMenu();
+        menu.classList.toggle('open', open);
+        const trigger = menu.querySelector('.ppt-card-edit');
+        if (trigger) {
+            trigger.setAttribute('aria-expanded', String(open));
+            if (open) trigger.focus();
+        }
+    }
 
-        const tagRow = node('div', null, 'lab-video-tags');
-        (item.tags || []).forEach(tag => tagRow.append(tagLink(tag)));
-        card.append(tagRow);
+    function openTetofuRename(item) {
+        state.entryMode = 'rename-tetofu';
+        state.tetofuId = item.id;
+        dialogTitle.textContent = '名前を変更';
+        dialogNote.textContent = 'テト譜の表示名です。';
+        entryTitle.value = item.title || '';
+        entryUrl.value = '';
+        entryTitle.parentElement.hidden = false;
+        entryUrl.parentElement.hidden = true;
+        entryTitle.required = true;
+        entrySubmit.textContent = '保存する';
+        dialog.showModal();
+        entryTitle.focus();
+        entryTitle.select();
+    }
 
-        const actions = node('div', null, 'lab-inline-actions');
-        const tagButton = node('button', 'タグ', 'btn-outline');
-        tagButton.type = 'button';
-        tagButton.addEventListener('click', event => {
-            event.stopPropagation();
+    // カード右上の鉛筆。名前変更・タグ・削除はここにまとめる。
+    function tetofuEditMenu(item) {
+        const menu = node('div', null, 'ppt-card-menu');
+        const trigger = node('button', null, 'ppt-icon-button ppt-card-edit');
+        trigger.type = 'button';
+        trigger.title = '編集';
+        trigger.setAttribute('aria-label', '編集');
+        trigger.setAttribute('aria-haspopup', 'true');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.6 5.6l4 4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
+
+        const actions = node('div', null, 'ppt-card-actions');
+        const rename = node('button', '名前を変更');
+        rename.type = 'button';
+        rename.addEventListener('click', () => {
+            closeTetofuMenu();
+            openTetofuRename(item);
+        });
+        const tags = node('button', 'タグを編集');
+        tags.type = 'button';
+        tags.addEventListener('click', () => {
+            closeTetofuMenu();
             openTagDialog({ id: item.id, kind: 'tetofu', title: item.title, tags: item.tags || [], autoTags: [] });
         });
-        actions.append(tagButton);
-        const removeButton = node('button', '削除', 'btn-outline');
-        removeButton.type = 'button';
-        removeButton.addEventListener('click', async event => {
-            event.stopPropagation();
+        const remove = node('button', '削除', 'ppt-danger');
+        remove.type = 'button';
+        remove.addEventListener('click', async () => {
+            closeTetofuMenu();
             if (!window.confirm('「' + item.title + '」を削除しますか？')) return;
             try {
                 await api('/api/tetofu/' + item.id, { method: 'DELETE' });
@@ -973,9 +1224,56 @@
                 toast(error.message);
             }
         });
-        actions.append(removeButton);
-        card.append(actions);
+        actions.append(rename, tags, remove);
+
+        trigger.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const open = !menu.classList.contains('open');
+            closeTetofuMenu();
+            menu.classList.toggle('open', open);
+            trigger.setAttribute('aria-expanded', String(open));
+        });
+        menu.append(trigger, actions);
+        return menu;
+    }
+
+    function renderTetofuCard(container, item) {
+        const card = node('article', null, 'card ppt-tetofu-card');
+        const frame = node('div', null, 'ppt-tetofu-frame');
+
+        // 盤面＋NEXTだけの軽量プレビュー（iframeは使わない）
+        const link = node('a', null, 'ppt-tetofu-open');
+        link.href = item.url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.setAttribute('aria-label', (item.title || 'テト譜') + ' を開く');
+        const canvas = node('canvas', null, 'ppt-tetofu-canvas');
+        canvas.width = TETOFU_PREVIEW_WIDTH;
+        canvas.height = TETOFU_PREVIEW_HEIGHT;
+        canvas.dataset.ready = '0';
+        link.append(canvas);
+        // タイトルはプレビュー下部に重ねて常時表示（盤面に被ってよい）
+        link.append(node('span', item.title || '', 'ppt-tetofu-title'));
+        frame.append(link);
+
+        if (document.documentElement.dataset.readonly !== 'true') {
+            // 鉛筆はプレビュー右下に固定
+            frame.append(tetofuEditMenu(item));
+            card.addEventListener('contextmenu', event => {
+                if (event.target.closest('.ppt-tetofu-tags, .ppt-card-menu')) return;
+                event.preventDefault();
+                openTetofuMenu(card);
+            });
+        }
+        card.append(frame);
+
+        const tagRow = node('div', null, 'lab-video-tags ppt-tetofu-tags');
+        (item.tags || []).forEach(tag => tagRow.append(tagLink(tag)));
+        card.append(tagRow);
+
         container.append(card);
+        observeTetofuPreview(frame, item);
     }
     function renderTetofu() {
         const root = node('section', null, 'lab-video-library');
@@ -1046,7 +1344,7 @@
         });
         root.append(node('p', items.length + 'テト譜', 'lab-video-count'));
 
-        const list = node('div', null, 'ppt-tile-grid');
+        const list = node('div', null, 'ppt-tile-grid ppt-grid-tetofu');
         if (!items.length) {
             list.append(node('p', state.tetofu.length
                 ? '条件に合うテト譜はありません。'
@@ -1162,11 +1460,14 @@
         theme: 'light',
         simulatorBase: 'https://selmtoe.github.io/Tetris_Simulator/',
         openLinks: 'newTab',
-        analysisWorkers: '1'
+        analysisWorkers: '1',
+        downloadVideo: false
     };
 
     function setting(key) {
-        return (state.settings && state.settings[key]) || SETTING_DEFAULTS[key] || '';
+        const value = state.settings ? state.settings[key] : undefined;
+        if (value !== undefined && value !== null && value !== '') return value;
+        return SETTING_DEFAULTS[key] ?? '';
     }
 
     async function loadSettings() {
@@ -1205,6 +1506,36 @@
 
     function settingsTab() {
         return state.settingsTab && SETTINGS_TABS.includes(state.settingsTab) ? state.settingsTab : '一般';
+    }
+
+    function ramDiskText(info) {
+        if (!info) return '';
+        const gb = value => ((Number(value) || 0) / 1024).toFixed(1);
+        if (info.available) {
+            return (info.drive || 'RAM') + ' 使用中（空き ' + gb(info.freeMB) + 'GB / ' + gb(info.totalMB) + 'GB）';
+        }
+        if (info.busy) return '作成しています…（管理者の確認が出たら「はい」を選んでください）';
+        if (info.error) return info.error;
+        return '未作成 — オンにすると管理者の確認（UAC）が1回出ます';
+    }
+
+    function watchRamDisk(row) {
+        const status = node('span', '', 'ppt-setting-note');
+        row.append(status);
+        let timer = null;
+        const tick = async () => {
+            if (!status.isConnected) {
+                if (timer) clearInterval(timer);
+                return;
+            }
+            try {
+                status.textContent = ramDiskText(await api('/api/ramdisk'));
+            } catch (error) {
+                // 表示だけの情報なので、取れなくても何もしない
+            }
+        };
+        tick();
+        timer = setInterval(tick, 2000);
     }
 
     function settingControl(item) {
@@ -1279,6 +1610,7 @@
                 row.append(node('span', item.label, 'ppt-setting-label'));
                 row.append(settingControl(item));
                 if (item.note) row.append(node('span', item.note, 'ppt-setting-note'));
+                if (item.key === 'useRamDisk') watchRamDisk(row);
                 body.append(row);
             });
         })();
@@ -1754,6 +2086,9 @@
     }
     const SYNC_MS = 250;
     const SEEK_MUTE_MS = 800;
+    // ビューワー（F/）が postMessage の受け付けを始めるまで待つ時間。
+    // これを過ぎても返事が無い環境だけ、URL を開き直す方式に切り替える。
+    const VIEWER_WAIT_MS = 15000;
 
     // Lab と同じ手順でビューワーを postMessage で駆動する（リロードしない）
     function pageIndexAt(pages, relative) {
@@ -1895,9 +2230,88 @@
 
     // ビューワーを指定ページで開き直す（同一ページなら何もしない）
     // F/ のリンクからハッシュを取り、シミュレータ用リンクを組み立てる
-    function simulatorLink(url) {
+    // シミュレータは1つの盤面しか読めないので、?page=N（1始まり）で
+    // 「いま見ている局面」を渡す。これが無いと試合開始（空の盤面）が開く。
+    function simulatorLink(url, page) {
         if (!url || !url.includes('#')) return '';
-        return SIMULATOR_BASE + 'hub/?entry=simulator#' + url.split('#')[1];
+        const index = Math.max(1, Math.round(Number(page) || 1));
+        return SIMULATOR_BASE + 'hub/?entry=simulator&page=' + index + '#' + url.split('#')[1];
+    }
+
+    // 盤面復元に失敗した試合（batch-results.json の status が complete 以外）は
+    // simulator フォルダが作られていないため、シミュレータ／ビューワーを開けない。
+    const FAILED_MATCH_REASON =
+        'この試合は盤面復元に失敗したため、シミュレータ／ビューワーを開けません（データがありません）';
+    // 盤面データは残っているが、解析結果を信用できない試合（品質警告・開始盤面の
+    // 読み取り誤り）。シミュレータ等は開けるので、row.failed とは分けて扱う。
+    const LOW_QUALITY_MATCH_REASON =
+        '盤面と読み取った盤面の一致率が低い試合です（盤面は参考程度に表示されます）';
+
+    // 試合一覧のバッジ用。'' なら正常（バッジを出さない）。
+    // needs_correction は「要修正」、それ以外の解析失敗は「解析失敗」。
+    function matchFailureLabel(row) {
+        if (!row) return '';
+        if (row.analysisStatus === 'needs_correction') return '要修正';
+        if (row.failed) return '解析失敗';
+        if (row.analysisStatus === 'opening_failed'
+            || row.analysisStatus === 'quality_failed'
+            || row.analysisStatus === 'failed') return '解析失敗';
+        return '';
+    }
+
+    // バッジのツールチップ（原因の短い説明）。
+    function matchFailureReason(row) {
+        const label = matchFailureLabel(row);
+        if (!label) return '';
+        const reason = String((row && row.analysisReason) || '').trim();
+        if (!reason) return row && row.failed ? FAILED_MATCH_REASON : LOW_QUALITY_MATCH_REASON;
+        const note = row && row.failed ? '（シミュレータ／ビューワーは開けません）' : '';
+        return label + ': ' + reason + note;
+    }
+
+    function setToolLinkEnabled(link, enabled) {
+        link.classList.toggle('is-disabled', !enabled);
+        if (enabled) {
+            link.removeAttribute('aria-disabled');
+            link.removeAttribute('tabindex');
+            link.removeAttribute('title');
+            return;
+        }
+        // href を外すと、押しても画面遷移しない（見た目は CSS で控えめに落とす）
+        link.removeAttribute('href');
+        link.setAttribute('aria-disabled', 'true');
+        link.setAttribute('tabindex', '-1');
+        link.title = FAILED_MATCH_REASON;
+    }
+
+    // 解析に失敗した試合はビューワーに盤面が無い。空のままにせず理由を出す。
+    function setViewerNotice(message) {
+        const host = document.querySelector('.lab-boards.lab-viewer-host');
+        if (!host) return;
+        let notice = host.querySelector('.lab-viewer-status');
+        if (!message) {
+            if (notice) notice.remove();
+            return;
+        }
+        if (!notice) {
+            notice = node('p', null, 'lab-viewer-status');
+            notice.setAttribute('role', 'status');
+            host.append(notice);
+        }
+        notice.textContent = message;
+    }
+
+    // 「シミュレータ」「ビューワー」ボタンを今の局面に合わせる
+    function updateMatchToolLinks(pageIndex) {
+        const links = document.querySelectorAll('.lab-match-tools > a.btn-outline');
+        const failed = Boolean(state.currentMatch && state.currentMatch.failed);
+        links.forEach(link => setToolLinkEnabled(link, !failed));
+        if (failed) return;
+        const urls = state.currentUrls;
+        if (!urls || !urls.combined) return;
+        const page = Math.max(1, (Number(pageIndex) || 0) + 1);
+        if (links[0]) links[0].href = simulatorLink(urls.combined, page) || '#';
+        if (links[1]) links[1].href = withPage(siteUrl(urls.combined), page) || '#';
     }
 
     // リプレイJSON（urls + ページ列）を取得してキャッシュする
@@ -1961,6 +2375,30 @@
         return clean + (clean.includes('?') ? '&' : '?') + 'page=' + page + (hash !== undefined ? '#' + hash : '');
     }
 
+    // 「?labViewer=1」を付ける（付いていればそのまま）。
+    // URL を開き直す方式に落ちても、ビューワーの準備ができたら postMessage へ戻せる。
+    function withLabViewer(url) {
+        const [base, hash] = String(url).split('#');
+        if (/([?&])labViewer=1(&|$)/.test(base)) return String(url);
+        const clean = base.replace(/[?&]$/, '');
+        return clean + (clean.includes('?') ? '&' : '?') + 'labViewer=1' + (hash !== undefined ? '#' + hash : '');
+    }
+
+    // ビューワーを postMessage で動かせる状態か。
+    // 準備中でも「連携用の URL で開いている」なら true を返す（＝読み込み直さずに待つ）。
+    // showPage() は 250ms ごとに呼ばれるので、ここで iframe の URL を書き換えると
+    // 1ページ送るたびに全体を読み込み直すことになり、画面が激しく点滅する。
+    function viewerBridgeLive() {
+        const frame = document.getElementById('detail-viewer');
+        if (!frame) return false;
+        const bridge = state.bridge;
+        if (!bridge || bridge.frame !== frame) return false;
+        if (bridge.ready) return true;
+        if (state.viewerFallback) return false;
+        if (!String(frame.getAttribute('src') || '').includes('labViewer=1')) return false;
+        return Date.now() < (state.viewerReadyBy || 0);
+    }
+
     function setViewerPage(page) {
         const viewer = document.getElementById('detail-viewer');
         if (!viewer || !state.currentUrls || !state.currentUrls.combined) return;
@@ -1970,8 +2408,10 @@
         const now = Date.now();
         if (now - (state.lastReloadAt || 0) < 700) return;   // 連続リロードを避ける
         state.lastReloadAt = now;
+        // ここまで来たら URL 方式（連携が返ってこない環境）。以後は同じ方式で揃える。
+        state.viewerFallback = true;
         viewer.dataset.page = String(page);
-        viewer.src = withPage(siteUrl(state.currentUrls.combined), page + 1);
+        viewer.src = withPage(withLabViewer(siteUrl(state.currentUrls.combined)), page + 1);
     }
 
     function showPage(index, options) {
@@ -1988,7 +2428,9 @@
             caption.textContent = '局面 ' + (page + 1) + ' / ' + pages.length + ' · 動画 ' + timeText(seconds);
         }
         if (options && options.seek) seekVideoTo(seconds, { pause: false });
-        if (match && state.bridge && state.bridge.ready) {
+        updateMatchToolLinks(page);
+        if (match && viewerBridgeLive()) {
+            // 準備中でも予約だけして、準備できた時点で最新のページを反映してもらう
             state.bridge.show(match, pages, page);
             return;
         }
@@ -1998,7 +2440,7 @@
         }
         const viewer = document.getElementById('detail-viewer');
         if (viewer && state.currentUrls && state.currentUrls.combined) {
-            viewer.src = withPage(siteUrl(state.currentUrls.combined), page + 1);
+            viewer.src = withPage(withLabViewer(siteUrl(state.currentUrls.combined)), page + 1);
         }
     }
 
@@ -2146,6 +2588,39 @@
         if (captionTitle) captionTitle.textContent = '試合 ' + row.index;
         const viewer = document.getElementById('detail-viewer');
         if (!viewer) return;
+        if (row.failed) {
+            // 解析に失敗した試合はリプレイが無い（simulator フォルダが作られていない）。
+            // 空のビューワーを読み込み直さず、理由だけ出す。
+            state.currentUrls = null;
+            state.pages = [];
+            state.pageIndex = 0;
+            // 連続再生の待ち状態が残ると次へ進めなくなるので、ここで解く
+            if (state.featurePending && state.featurePending.videoId === state.videoId
+                && state.featurePending.matchIndex === row.index) {
+                state.featurePending = null;
+            }
+            viewer.dataset.status = 'failed';
+            viewer.dataset.page = '';
+            viewer.removeAttribute('data-ready');
+            setViewerNotice('この試合は盤面復元に失敗したため、盤面データがありません。');
+            const failedSlider = document.getElementById('position-slider');
+            if (failedSlider) {
+                failedSlider.max = '0';
+                failedSlider.value = '0';
+                failedSlider.disabled = true;
+            }
+            if (captionTitle) {
+                captionTitle.textContent = '試合 ' + row.index
+                    + '（' + (matchFailureLabel(row) || '解析失敗') + '）';
+            }
+            const failedPosition = document.querySelector('.lab-replay-caption .lab-position');
+            if (failedPosition) {
+                failedPosition.textContent = '動画 ' + timeText(row.start) + ' · 盤面データなし';
+            }
+            updateMatchToolLinks(0);
+            return;
+        }
+        setViewerNotice('');
         viewer.dataset.status = 'loading';
         viewer.dataset.page = '';
         state.lastReloadAt = 0;
@@ -2169,13 +2644,13 @@
             slider.disabled = state.pages.length <= 1;
             slider.value = '0';
         }
-        const links = document.querySelectorAll('.lab-match-tools > a.btn-outline');
-        if (links[0]) links[0].href = simulatorLink(urls.combined) || '#';
-        if (links[1]) links[1].href = siteUrl(urls.combined) || '#';
+        updateMatchToolLinks(0);
         if (state.bridge) state.bridge.show(row, state.pages, 0);
         setTimeout(() => {
             const frame = document.getElementById('detail-viewer');
-            if (!frame || frame.dataset.loaded === 'true') return;
+            if (!frame || !frame.isConnected || frame.dataset.loaded === 'true') return;
+            // ビューワーの準備待ちなら、そのまま待つ（読み込み直すと毎ページ全読み込みになる）
+            if (viewerBridgeLive()) return;
             state.lastReloadAt = 0;
             frame.dataset.page = '';
             setViewerPage(state.pageIndex || 0);
@@ -2293,7 +2768,7 @@
             if (!state.currentMatch) return;
             try {
                 const urls = await replayUrls(state.currentMatch.index);
-                window.open(simulatorLink(urls.combined), '_blank', 'noopener');
+                window.open(simulatorLink(urls.combined, (state.pageIndex || 0) + 1), '_blank', 'noopener');
             } catch (error) {
                 toast(error.message);
             }
@@ -2307,7 +2782,11 @@
         heading.append(identity);
         const meta = node('div', null, 'lab-video-meta');
         meta.append(node('span', formatDate(video && video.createdAt)));
-        if (video && video.matchCount) meta.append(node('span', '解析 ' + video.matchCount + '試合'));
+        if (video && video.matchCount) {
+            const failedInVideo = matches.filter(row => Boolean(matchFailureLabel(row))).length;
+            meta.append(node('span', '解析 ' + video.matchCount + '試合'
+                + (failedInVideo ? '（うち解析失敗' + failedInVideo + '）' : '')));
+        }
         heading.append(meta);
         const tagRow = node('div', null, 'lab-video-tags');
         (video && video.tags || []).forEach(tag => tagRow.append(tagLink(tag)));
@@ -2365,13 +2844,16 @@
         deleteVideoAction.type = 'button';
         deleteVideoAction.addEventListener('click', async () => {
             editMenu.classList.remove('open');
-            if (!window.confirm('この動画を一覧から削除しますか？（解析ファイルは残ります）')) return;
+            if (!window.confirm('この動画を削除しますか？（解析結果とダウンロード動画も消えます）')) return;
             try {
-                await api('/api/videos/' + state.videoId, { method: 'DELETE' });
+                const result = await api('/api/videos/' + state.videoId, { method: 'DELETE' });
                 state.videoId = '';
                 await loadVideos();
                 location.hash = '#videos';
-                toast('動画を削除しました。');
+                const freed = Number(result && result.removedMB) || 0;
+                const warn = (result && result.warnings && result.warnings.length)
+                    ? '（消せなかったファイルがあります）' : '';
+                toast('動画を削除しました。' + (freed ? ' ' + freed.toFixed(1) + ' MB 解放' : '') + warn);
             } catch (error) {
                 toast(error.message);
             }
@@ -2390,32 +2872,128 @@
         left.append(heading);
 
         // 試合の一覧（横スクロールのレール）
+        // Lab の動画詳細と同じく、レールの上に検索とプレイヤー1／2 の絞り込みを置く
         const rail = node('div', null, 'lab-match-timeline');
+        rail.setAttribute('aria-label', '試合のタイムスタンプ');
         const railList = node('div', null, 'lab-match-list');
-        matches.forEach(row => {
-            const item = node('button', null, 'lab-match-row');
-            item.type = 'button';
-            item.dataset.index = String(row.index);
-            const jump = node('span', null, 'lab-match-jump');
-            const label = node('span', null, 'lab-match-label');
-            label.append(node('strong', '試合 ' + row.index),
-                node('span', '▶ ' + timeText(row.start), 'ts-link'));
-            jump.append(label, playerNames(row));
-            item.append(jump);
-            item.addEventListener('click', () => {
-                railList.querySelectorAll('.lab-match-row').forEach(other => other.classList.remove('active'));
-                item.classList.add('active');
-                // 手動で別の試合を選んだら連続再生はやめる
-                const segment = state.feature.segments[state.feature.index];
-                if (state.feature.segments.length
-                    && (!segment || segment.videoId !== state.videoId || segment.matchIndex !== row.index)) {
-                    stopFeature();
-                }
-                showMatch(row);
-            });
-            railList.append(item);
+        railList.setAttribute('aria-label', '試合一覧');
+
+        const filterRow = node('div', null, 'lab-match-filters');
+        const matchSearch = node('input', null, 'lab-tag-filter');
+        matchSearch.type = 'search';
+        matchSearch.placeholder = '試合を検索（プレイヤー名）';
+        matchSearch.setAttribute('aria-label', '解析した試合を絞り込む');
+        matchSearch.value = state.matchFilters.query;
+        matchSearch.addEventListener('input', () => {
+            // レールだけを描き直すので、入力欄のフォーカスはそのまま残る
+            state.matchFilters.query = matchSearch.value;
+            renderMatchRail();
         });
-        if (!matches.length) railList.append(node('p', '解析結果がまだありません。', 'lab-help-text'));
+        filterRow.append(matchSearch);
+
+        const playerFilters = node('div', null, 'lab-match-player-filters');
+        const playerChoices = matchPlayerChoices(matches, video);
+        const playerSelects = ['player', 'opponent'].map((key, index) => {
+            const wrap = node('label');
+            const select = node('select');
+            select.setAttribute('aria-label', 'この動画のプレイヤー' + (index + 1));
+            select.dataset.matchFilter = key;
+            [['', 'すべてのプレイヤー'], ...playerChoices.map(name => [name, name])]
+                .forEach(([value, text]) => {
+                    const option = node('option', text);
+                    option.value = value;
+                    select.append(option);
+                });
+            select.value = state.matchFilters[key];
+            // 選択肢に無い名前（別の動画の絞り込み）は残さない
+            if (select.value !== state.matchFilters[key]) state.matchFilters[key] = select.value;
+            select.addEventListener('change', () => {
+                state.matchFilters[key] = select.value;
+                renderMatchRail();
+            });
+            wrap.append(select);
+            playerFilters.append(wrap);
+            return select;
+        });
+        filterRow.append(playerFilters);
+
+        const clearMatches = node('button', '絞り込みを解除', 'btn-outline');
+        clearMatches.type = 'button';
+        clearMatches.addEventListener('click', () => {
+            state.matchFilters = { query: '', player: '', opponent: '' };
+            matchSearch.value = '';
+            playerSelects.forEach(select => { select.value = ''; });
+            renderMatchRail();
+        });
+        filterRow.append(clearMatches);
+        // 解析結果が無い動画では絞り込む対象が無いので出さない
+        filterRow.hidden = !matches.length;
+        rail.append(filterRow);
+
+        const matchCount = node('p', null, 'lab-match-count');
+        matchCount.setAttribute('role', 'status');
+        rail.append(matchCount);
+
+        const renderMatchRail = () => {
+            const rows = detailMatches(matches);
+            railList.replaceChildren();
+            rows.forEach(row => {
+                const item = node('button', null, 'lab-match-row');
+                item.type = 'button';
+                item.dataset.index = String(row.index);
+                const jump = node('span', null, 'lab-match-jump');
+                const label = node('span', null, 'lab-match-label');
+                label.append(node('strong', '試合 ' + row.index),
+                    node('span', '▶ ' + timeText(row.start), 'ts-link'));
+                jump.append(label);
+                const failureLabel = matchFailureLabel(row);
+                if (failureLabel) {
+                    // 解析失敗（盤面データ無し／要修正）と、品質警告・開始盤面の読み取り誤り。
+                    // 後者は盤面が残っているので、シミュレータ等はそのまま開ける。
+                    item.classList.add('lab-match-row-failed');
+                    item.dataset.failed = 'true';
+                    item.title = matchFailureReason(row);
+                    item.setAttribute('aria-label',
+                        '試合 ' + row.index + '（' + failureLabel + '）');
+                    jump.append(node('span', failureLabel, 'lab-match-failed'));
+                }
+                jump.append(playerNames(row));
+                item.append(jump);
+                item.addEventListener('click', () => {
+                    railList.querySelectorAll('.lab-match-row').forEach(other => other.classList.remove('active'));
+                    item.classList.add('active');
+                    // 手動で別の試合を選んだら連続再生はやめる
+                    const segment = state.feature.segments[state.feature.index];
+                    if (state.feature.segments.length
+                        && (!segment || segment.videoId !== state.videoId || segment.matchIndex !== row.index)) {
+                        stopFeature();
+                    }
+                    showMatch(row);
+                });
+                railList.append(item);
+            });
+            if (!matches.length) {
+                railList.append(node('p', '解析結果がまだありません。', 'lab-help-text'));
+            } else if (!rows.length) {
+                railList.append(node('p', '該当する試合がありません。', 'lab-help-text'));
+            }
+            // いま開いている試合が絞り込みに残っていれば、その行を選んだままにする
+            const current = state.currentMatch;
+            railList.querySelectorAll('.lab-match-row').forEach(item => {
+                item.classList.toggle('active',
+                    Boolean(current) && item.dataset.index === String(current.index));
+            });
+            const filtering = Boolean(state.matchFilters.query
+                || state.matchFilters.player || state.matchFilters.opponent);
+            // 動画全体の試合数に、解析に失敗した試合の件数を併記する
+            const failedTotal = matches.filter(row => Boolean(matchFailureLabel(row))).length;
+            matchCount.hidden = !matches.length;
+            matchCount.textContent = matches.length
+                ? (filtering ? rows.length + ' / ' + matches.length + '試合' : matches.length + '試合')
+                    + (failedTotal ? '（うち解析失敗' + failedTotal + '）' : '')
+                : '';
+        };
+        renderMatchRail();
         rail.append(railList);
         left.append(rail);
 
@@ -2430,6 +3008,14 @@
         viewerLink.target = '_blank';
         viewerLink.rel = 'noopener';
         viewerLink.href = '#';
+        // 解析に失敗した試合では、押しても開けない理由を出す（href は外してある）
+        [simLink, viewerLink].forEach(link => {
+            link.addEventListener('click', event => {
+                if (link.getAttribute('aria-disabled') !== 'true') return;
+                event.preventDefault();
+                toast(FAILED_MATCH_REASON);
+            });
+        });
         tools.append(simLink, viewerLink);
         const copyButton = node('button', 'リンクをコピー', 'btn-outline');
         copyButton.type = 'button';
@@ -2471,12 +3057,32 @@
 
         const boards = node('div', null, 'lab-boards lab-viewer-host');
         const viewerFrame = ensureViewerFrame();
+        // 盤面ビューワーは動画詳細を開いたときだけ読み込む（一覧を軽くする）
+        if (!viewerFrame.getAttribute('src')) {
+            viewerFrame.src = VIEWER_BASE + '?labViewer=1';
+        }
         viewerFrame.hidden = false;
         viewerFrame.dataset.status = 'loading';
         viewerFrame.removeAttribute('data-ready');
         viewerFrame.dataset.status = 'loading';
         boards.append(viewerFrame);
-        if (!state.bridge) state.bridge = createViewerBridge(viewerFrame);
+        // 一覧に戻ると iframe が DOM から外れ、次に開くと別の iframe になる。
+        // そのときは古いブリッジを捨てて、新しい iframe で作り直す。
+        if (!state.bridge || state.bridge.frame !== viewerFrame) {
+            state.bridge = createViewerBridge(viewerFrame);
+            state.bridgeGrace = Date.now() + 6000;
+        }
+        // 開いた直後はビューワーの準備ができていない。準備できるまでページ送りは
+        // 予約だけにして、読み込み直さない（毎ページ全読み込み＝点滅の原因）。
+        state.viewerFallback = false;
+        state.viewerReadyBy = Date.now() + VIEWER_WAIT_MS;
+        if (!viewerFrame.__readyWatch) {
+            viewerFrame.__readyWatch = true;
+            viewerFrame.addEventListener('load', () => {
+                // 読み込み直したら、その回の準備待ちをやり直す
+                state.viewerReadyBy = Date.now() + VIEWER_WAIT_MS;
+            });
+        }
         work.append(boards);
 
         const caption = node('div', null, 'lab-replay-caption');
@@ -2516,8 +3122,10 @@
         const next = node('button', '次の試合', 'btn-outline');
         next.type = 'button';
         const step = delta => {
-            const index = matches.findIndex(row => row === state.currentMatch);
-            const target = matches[Math.max(0, Math.min(matches.length - 1, index + delta))];
+            // 前/次の試合も絞り込んだ範囲の中だけで動かす
+            const rows = detailMatches(matches);
+            const index = rows.findIndex(row => row === state.currentMatch);
+            const target = rows[Math.max(0, Math.min(rows.length - 1, index + delta))];
             if (!target) return;
             railList.querySelectorAll('.lab-match-row').forEach(other => {
                 other.classList.toggle('active', other.dataset.index === String(target.index));
@@ -2554,7 +3162,10 @@
 
         if (matches.length) {
             const wanted = Number(state.pendingMatch) || 0;
-            const first = matches.find(row => row.index === wanted) || matches[0];
+            // 絞り込み中に開き直したときは、実際に見えている試合から始める
+            const first = matches.find(row => row.index === wanted)
+                || detailMatches(matches)[0]
+                || matches[0];
             state.pendingMatch = 0;
             const target = railList.querySelector('.lab-match-row[data-index="' + first.index + '"]');
             if (target) {
@@ -2605,6 +3216,7 @@
     async function loadMatches(videoId) {
         const body = await api('/api/videos/' + videoId + '/matches');
         state.matches = Array.isArray(body.matches) ? body.matches : [];
+        state.matchGroups = Array.isArray(body.groups) ? body.groups : [];
         state.warning = body.warning || '';
     }
 
@@ -2622,28 +3234,36 @@
         return targets.length;
     }
 
-    function renderNames() {
-        const root = node('section', null, 'lab-video-library');
-        mainView.replaceChildren(root);
-
-        const header = node('div', null, 'lab-video-library-heading');
-        const videoInfo = state.videos.find(item => item.id === state.videoId);
-        header.append(node('h2', 'プレイヤー名の確認' + (videoInfo ? ' — ' + videoInfo.title : ''), 'section-title'));
-        const headingActions = node('div', null, 'lab-inline-actions');
-        const back = node('a', '← 動画一覧に戻る', 'btn-outline');
-        back.href = '#videos';
-        const register = node('button', '登録', 'btn-outline');
-        register.type = 'button';
-        register.addEventListener('click', () => saveNames(register));
-        headingActions.append(back, register);
-        header.append(headingActions);
-        root.append(header);
-
-        const changedCount = () => state.matches.filter(row => {
-            const edit = state.edits.get(row.index);
-            return edit && (edit.p1 !== row.p1 || edit.p2 !== row.p2);
-        }).length;
-
+    // 名前確認の1枚（＝同じ人のまとまり）を作る。
+    // サーバーが名前画像の指紋でまとめた組（/matches の groups）があればそれを
+    // そのまま使い、無ければ従来どおり画像グループと文字でまとめる
+    // （静的書き出しの matches/<id>.json には groups が無いため）。
+    function nameEntries() {
+        const remote = state.matchGroups || [];
+        if (remote.length) {
+            return remote.map(entry => ({
+                key: entry.key,
+                side: (entry.sides || [])[0] || 'p1',
+                sides: new Set(entry.sides || []),
+                image: entry.image || '',
+                guess: entry.guess || '',
+                name: entry.name || '',
+                variants: Array.isArray(entry.variants) ? entry.variants : [],
+                fingerprints: Array.isArray(entry.fingerprints) ? entry.fingerprints : [],
+                fingerprint: (entry.fingerprints || [])[0] || '',
+                remembered: Boolean(entry.remembered),
+                only: Boolean(entry.override),
+                rows: (entry.records || []).reduce((list, record) => {
+                    let item = list.find(other => other.index === record.index);
+                    if (!item) {
+                        item = { index: record.index, sides: new Set() };
+                        list.push(item);
+                    }
+                    item.sides.add(record.side);
+                    return list;
+                }, [])
+            }));
+        }
         // 同じ画像は P1/P2 をまたいでも1つにまとめる（試合番号とは切り離す）
         const groups = [];
         const index = new Map();
@@ -2717,10 +3337,40 @@
             entry.merged = true;
         });
         const merged = groups.filter(entry => !entry.merged);
-        groups.length = 0;
-        merged.forEach(entry => groups.push(entry));
+        merged.sort((a, b) => b.rows.length - a.rows.length || a.rows[0].index - b.rows[0].index);
+        merged.forEach(entry => {
+            entry.name = entry.label || '';
+            entry.variants = [];
+            entry.fingerprints = entry.fingerprint ? [entry.fingerprint] : [];
+        });
+        return merged;
+    }
 
-        groups.sort((a, b) => b.rows.length - a.rows.length || a.rows[0].index - b.rows[0].index);
+    function renderNames() {
+        const root = node('section', null, 'lab-video-library');
+        mainView.replaceChildren(root);
+
+        const header = node('div', null, 'lab-video-library-heading');
+        const videoInfo = state.videos.find(item => item.id === state.videoId);
+        header.append(node('h2', 'プレイヤー名の確認' + (videoInfo ? ' — ' + videoInfo.title : ''), 'section-title'));
+        const headingActions = node('div', null, 'lab-inline-actions');
+        const back = node('a', '← 動画一覧に戻る', 'btn-outline');
+        back.href = '#videos';
+        const register = node('button', '登録', 'btn-outline');
+        register.type = 'button';
+        register.addEventListener('click', () => saveNames(register));
+        headingActions.append(back, register);
+        header.append(headingActions);
+        root.append(header);
+
+        const changedCount = () => state.matches.filter(row => {
+            const edit = state.edits.get(row.index);
+            return edit && (edit.p1 !== row.p1 || edit.p2 !== row.p2);
+        }).length;
+
+        // 名前画像の指紋でまとめた組（＝1組1枚）を使う。画像が取れない試合だけ、
+        // 従来どおり文字でまとめる。
+        const groups = nameEntries();
 
         const summary = node('p', null, 'lab-video-count');
         const updateSummary = () => {
@@ -2741,6 +3391,7 @@
             const head = node('div', null, 'ppt-name-group-head');
             head.append(node('span', [...entry.sides].map(side => side === 'p1' ? 'P1' : 'P2').join('/'), 'lab-source-badge'));
             head.append(node('span', entry.rows.length + '試合', 'lab-video-count'));
+            if (!entry.name && !entry.guess) head.append(node('span', '（OCR空）', 'ppt-muted'));
             if (entry.remembered) head.append(node('span', '過去の確定名', 'ppt-remembered'));
             card.append(head);
 
@@ -2760,8 +3411,13 @@
             input.type = 'text';
             input.maxLength = 40;
             const firstRow = entry.rows.length ? state.matches.find(row => row.index === entry.rows[0].index) : null;
-            input.value = firstRow ? (editsFor(firstRow)[[...entry.sides][0]] || '') : '';
-            input.placeholder = '名前を入力';
+            const firstSide = [...entry.sides][0] || 'p1';
+            const edited = firstRow ? state.edits.get(firstRow.index) : null;
+            // 編集中の値 > 過去の確定名 > 代表名（組で最多の OCR 表記）の順に出す
+            input.value = edited
+                ? (edited[firstSide] || '')
+                : (entry.guess || entry.name || (firstRow ? editsFor(firstRow)[firstSide] : '') || '');
+            input.placeholder = entry.guess || entry.name ? '名前を入力' : '（OCR空）';
             input.addEventListener('input', () => {
                 entry.rows.forEach(record => {
                     const row = state.matches.find(item => item.index === record.index);
@@ -2771,6 +3427,16 @@
                 updateSummary();
             });
             card.append(input);
+            // 組の中のほかの表記（OCR の揺れ）も参照できるようにする
+            if (entry.variants && entry.variants.length > 1) {
+                const text = item => (item.text || '（OCR空）') + ' (' + item.count + ')';
+                const all = entry.variants.map(text);
+                const variants = node('p', null, 'ppt-name-variants');
+                variants.textContent = '表記ゆれ: ' + all.slice(0, 3).join(' / ') +
+                    (all.length > 3 ? ' ほか' + (all.length - 3) + '件' : '');
+                variants.title = all.join('\n');
+                card.append(variants);
+            }
             const onlyLabel = node('label', null, 'ppt-name-override');
             const only = node('input');
             only.type = 'checkbox';
@@ -2855,10 +3521,15 @@
         try {
             const overrides = [];
             (state.nameGroups || new Map()).forEach(entry => {
-                if (!entry.only || !entry.fingerprint) return;
+                if (!entry.only) return;
+                // 組に含まれる指紋すべてに同じ名前を覚えさせる（保存の形は従来どおり）
+                const fingerprints = (entry.fingerprints && entry.fingerprints.length)
+                    ? entry.fingerprints
+                    : (entry.fingerprint ? [entry.fingerprint] : []);
+                if (!fingerprints.length) return;
                 const box = document.querySelector('.ppt-name-groups .ppt-name-input[data-key="' + entry.key + '"]');
                 const value = box ? box.value.trim() : '';
-                if (value) overrides.push({ fingerprint: entry.fingerprint, name: value });
+                if (value) fingerprints.forEach(fingerprint => overrides.push({ fingerprint, name: value }));
             });
             const result = await api('/api/videos/' + state.videoId + '/names', {
                 method: 'POST',
@@ -2887,7 +3558,7 @@
         videos.forEach(item => {
             const previous = before.get(item.id);
             if (previous && previous !== 'needs-names' && item.status === 'needs-names') {
-                notify('解析が終わりました（' + (item.matchCount || 0) + '試合）。プレイヤー名を確認してください。');
+                notify('解析が終わりました（' + (item.matchCount || 0) + '試合）。');
             }
         });
         state.videos = videos;
@@ -2930,6 +3601,8 @@
             entryTitle.parentElement.hidden = false;
             entryUrl.parentElement.hidden = true;
             entryTitle.required = true;
+            entrySaveField.hidden = true;
+            entrySubmit.textContent = '保存する';
             state.entryMode = 'rename';
             dialog.showModal();
             entryTitle.focus();
@@ -2948,7 +3621,11 @@
         entryTitle.value = '';
         entryUrl.value = '';
         entryTitle.parentElement.hidden = isYoutube;
+        entryUrl.parentElement.hidden = false;
         entryTitle.required = !isYoutube;
+        entrySaveField.hidden = !isYoutube;
+        entrySaveVideo.checked = setting('downloadVideo') !== false;
+        entrySubmit.textContent = '登録する';
         entryUrl.placeholder = isYoutube ? 'https://www.youtube.com/watch?v=...' : 'https://...';
         dialog.showModal();
         (isYoutube ? entryUrl : entryTitle).focus();
@@ -2960,11 +3637,26 @@
     document.getElementById('entry-form').addEventListener('submit', async event => {
         event.preventDefault();
         const url = entryUrl.value.trim();
-        if (!url && state.entryMode !== 'rename') {
+        const renaming = state.entryMode === 'rename' || state.entryMode === 'rename-tetofu';
+        if (!url && !renaming) {
             entryUrl.focus();
             return;
         }
         try {
+            if (state.entryMode === 'rename-tetofu') {
+                const title = entryTitle.value.trim();
+                if (!title) { entryTitle.focus(); return; }
+                await api('/api/tetofu/' + state.tetofuId + '/title', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title })
+                });
+                dialog.close();
+                await loadTetofu();
+                render();
+                toast('名前を変更しました。');
+                return;
+            }
             if (state.entryMode === 'rename') {
                 const title = entryTitle.value.trim();
                 if (!title) { entryTitle.focus(); return; }
@@ -2984,7 +3676,7 @@
                 await api('/api/videos', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source: url })
+                    body: JSON.stringify({ source: url, saveVideo: entrySaveVideo.checked })
                 });
                 dialog.close();
                 state.view = 'videos';
@@ -3105,7 +3797,7 @@
         const parts = hashParts();
         try {
             if (state.view === 'video') {
-                const videoId = parts[1] || state.videoId;
+                const videoId = parts[1] || '';
                 if (videoId !== state.editsVideoId) {
                     state.edits = new Map();
                     state.editsVideoId = videoId;
@@ -3113,9 +3805,12 @@
                     state.currentMatch = null;
                     state.pages = [];
                     state.pageIndex = 0;
+                    // 動画が変わったら試合の絞り込みは解除する（Lab と同じ）
+                    state.matchFilters = { query: '', player: '', opponent: '' };
                 }
                 if (!videoId) {
                     state.view = 'videos';
+                    if (location.hash !== '#videos') location.hash = '#videos';
                     await loadVideos();
                 } else {
                     state.videoId = videoId;
@@ -3126,17 +3821,19 @@
                     await loadMatches(videoId);
                 }
             } else if (state.view === 'names') {
-                const videoId = parts[1] || state.videoId;
+                const videoId = parts[1] || '';
                 if (videoId !== state.editsVideoId) {
                     state.edits = new Map();
                     state.editsVideoId = videoId;
                     state.matches = [];
+                    state.matchGroups = [];
                     state.currentMatch = null;
                     state.pages = [];
                     state.pageIndex = 0;
                 }
                 if (!videoId) {
                     state.view = 'videos';
+                    if (location.hash !== '#videos') location.hash = '#videos';
                     await loadVideos();
                 } else {
                     state.videoId = videoId;
@@ -3171,6 +3868,8 @@
         view: state.view,
         videoId: state.videoId,
         matches: state.matches.length,
+        matchFilters: { ...state.matchFilters },
+        matchFiltered: detailMatches(state.matches).length,
         currentMatch: state.currentMatch ? state.currentMatch.index : 0,
         currentStart: state.currentMatch ? Number(state.currentMatch.start) || 0 : 0,
         currentEnd: state.currentMatch ? Number(state.currentMatch.end) || 0 : 0,
@@ -3192,11 +3891,23 @@
         nameGroups: state.nameGroups ? state.nameGroups.size : -1
     });
     window.__pptApply = (index, side, value) => { try { applyName(state.matches.find(r => r.index === index), side, value); return JSON.stringify({ edits: state.edits.size }); } catch (error) { return 'ERR ' + error.message + ' | ' + error.stack; } };
+    // 同期の検証用（画面には出さない）
+    window.__pptSeek = seconds => { seekVideoTo(Number(seconds), { pause: false }); return Boolean(state.bridge && state.bridge.ready); };
+    window.__pptPlay = () => {
+        state.ytPlayer?.playVideo?.();
+        const media = document.getElementById('detail-video');
+        if (media) media.play?.().catch?.(() => {});
+        return videoState();
+    };
     // メニューの外をクリックしたら閉じる
     document.addEventListener('click', event => {
         document.querySelectorAll('.lab-save-menu.open, .ppt-edit-menu.open').forEach(menu => {
             if (!menu.contains(event.target)) menu.classList.remove('open');
         });
+        closeTetofuMenu();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeTetofuMenu();
     });
     window.addEventListener('message', event => {
         const bridge = state.bridge;
@@ -3211,16 +3922,37 @@
         route();
     });
 
+    // ---- キャッシュの掃除 -------------------------------------------------
+    // 同じオリジンの Service Worker（/sw.js）は、ビルドによっては
+    // /ppt-lab/ の古い index.html・app.js・CSS を控えから返す。起動時に
+    // コードだけ捨てて、次の読み込みで必ず取り直す（index.html の
+    // インラインスクリプトでも同じことをしている。こちらは保険）。
+    // 解析結果の JSON（/ppt-lab/data/）は重いので消さない。
+    function isLabCode(path) {
+        return path.startsWith('/ppt-lab/') && !path.startsWith('/ppt-lab/data/') &&
+            /\.(html|js|css|webmanifest)$/.test(path);
+    }
+
+    function purgeStaleLabCaches() {
+        if (!('caches' in window)) return;
+        caches.keys().then(keys => Promise.all(keys.map(async key => {
+            try {
+                const cache = await caches.open(key);
+                const requests = await cache.keys();
+                await Promise.all(requests
+                    .filter(request => isLabCode(new URL(request.url).pathname))
+                    .map(request => cache.delete(request)));
+            } catch (error) {
+                /* 消せなくても表示は続ける */
+            }
+        }))).catch(() => { /* 失敗しても起動は続ける */ });
+    }
+
     // ---- 起動 -------------------------------------------------------------
     (async function start() {
+        purgeStaleLabCaches();
         if (!location.hash) location.hash = '#videos';
-        const initialFrame = document.getElementById('detail-viewer');
-        // ビューワーは同じサイトの F/ を開く（ローカル版はネットに取りに行かない）
-        if (initialFrame && !initialFrame.getAttribute('src')) {
-            initialFrame.src = VIEWER_BASE + '?labViewer=1';
-        }
-        if (initialFrame) state.bridge = createViewerBridge(initialFrame);
-        state.bridgeGrace = Date.now() + 6000;
+        // ビューワー（F/）は動画詳細を開くまで読み込まない。テト譜や一覧を軽く保つ。
         await loadEnvironment();
         try { await loadTags(); } catch (error) { /* 起動時の失敗は無視 */ }
         await loadSettings();

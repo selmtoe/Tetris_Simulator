@@ -18,7 +18,7 @@
 :root[data-lab-theme="dark"] .lab-score-widget{background:#313133;border-color:#4a4a4d}
 :root[data-lab-theme="dark"] .lab-score-widget .lab-score-status{color:#c7c7cc}
 :root[data-lab-theme="dark"] .lab-boundary-note{background:#3e3931;border-color:#8d7b5b;color:#d6c6a6}
-:root[data-lab-theme="dark"] :is(.lab-failed,.lab-form-error){color:#e7a69f!important}
+:root[data-lab-theme="dark"] :is(.lab-failed,.lab-form-error,.lab-match-failed){color:#e7a69f!important}
 :root[data-lab-theme="dark"] :is(a,button,input,select,textarea,summary):focus-visible{outline-color:var(--accent-color)}
 [hidden]{display:none!important}
 .lab-ownerbar{max-width:var(--max-width);margin:16px auto 0;padding:0 20px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -232,6 +232,10 @@ button.preview-ts-item{width:100%;padding:0;border:0;background:none;text-align:
 .lab-match-label .ts-link{padding:0;margin:0;font-size:12px;background:none;color:var(--accent-color);font-variant-numeric:tabular-nums}
 .lab-match-players{display:block;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:11px}
 .lab-match-row .tag{font-size:10px;line-height:1.4;padding:1px 5px;margin:4px 3px 0 0}
+/* 盤面復元に失敗した試合（赤字にしすぎず、バッジだけで示す） */
+.lab-match-failed{display:inline-block;margin:4px 0 0;padding:0 6px;border-radius:999px;font-size:10px;line-height:1.6;color:#8a4b3f;background:color-mix(in srgb,#b56a5a 12%,transparent);border:1px solid color-mix(in srgb,#b56a5a 32%,transparent);white-space:nowrap}
+.lab-match-timeline .lab-match-row-failed{border-color:color-mix(in srgb,#b56a5a 32%,var(--border-color))}
+.lab-match-tools>a.btn-outline[aria-disabled="true"]{opacity:.45;cursor:default;text-decoration:none}
 .lab-match-timeline .lab-help-text{white-space:nowrap;margin:8px}
 .lab-comparison .lab-replay-caption{display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap}
 .lab-replay-caption h3,.lab-comparison .lab-replay-caption .lab-position{margin:0}
@@ -270,6 +274,11 @@ button.preview-ts-item{width:100%;padding:0;border:0;background:none;text-align:
 .lab-crown path{fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 :root[data-lab-theme="dark"] .lab-crown path{fill:currentColor;stroke:none}
 .lab-crown-review{opacity:.55}
+
+/* 引き分け（終了3クラス版）。王冠の代わりに小さなラベルを出す。 */
+.lab-draw-badge{margin-left:6px;padding:0 6px;border-radius:999px;border:1px solid var(--border-color);
+  font-size:10px;line-height:1.7;color:var(--text-muted);background:var(--bg-color);
+  white-space:nowrap;vertical-align:1px}
 
 /* 特集（仮想動画）: 出どころバッジと前後送り */
 .lab-source-badge{display:inline-block;border:1px solid var(--border-color);border-radius:999px;padding:0 6px;font-size:10px;line-height:1.7;color:var(--text-muted);background:var(--bg-color);white-space:nowrap;font-variant-numeric:tabular-nums}

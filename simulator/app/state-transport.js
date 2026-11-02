@@ -100,7 +100,41 @@ if (gameMode === '2P') {
     return data;
 }
 
-function replayCollectionToGameState(collection) {
+// A replay link carries every position of the match, but the simulator needs
+// one board + queue.  ``?page=N`` (the 1-based convention the board viewer
+// already uses) selects the position to start from; without it the first
+// position of the replay is imported, which for a recovered match is the empty
+// board at the start of the game.
+const REPLAY_PAGE_PARAM = 'page';
+
+function requestedReplayPage() {
+    try {
+        const value = Number.parseInt(new URLSearchParams(window.location.search).get(REPLAY_PAGE_PARAM), 10);
+        return Number.isInteger(value) && value > 0 ? value : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// Rebuild a v2 game state from one decoded replay page.  The viewer stores the
+// placement that produces the following page, so the active piece of a page is
+// the type of that operation followed by the visible NEXT queue.
+function replayPageToPlayerState(page) {
+    const empty = () => Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(null));
+    const sanitize = value => String(value || '').replace(/[^IOTLSJZ]/gi, '');
+    const source = page || {};
+    const operation = source.operation || source.o;
+    const active = operation && typeof operation === 'object'
+        ? String(operation.type || operation.piece || '')
+        : '';
+    return {
+        b: boardToString(source.board || empty()),
+        n: sanitize(`${active}${source.next || ''}`),
+        h: sanitize(source.hold || '')
+    };
+}
+
+function replayCollectionToGameState(collection, pageNumber) {
     if (typeof TetrisEventCodec !== 'undefined' && TetrisEventCodec.isEventReplay(collection)) {
         collection = TetrisEventCodec.decodeCollection(collection);
     }
@@ -113,6 +147,18 @@ function replayCollectionToGameState(collection) {
         n: String(initial?.sequence || '').replace(/[^IOTLSJZ]/gi, ''),
         h: String(initial?.hold || '').replace(/[^IOTLSJZ]/gi, '')
     });
+    const pages = Array.isArray(activeCase.pages) ? activeCase.pages : [];
+    const requested = Number.isInteger(pageNumber) && pageNumber > 0 ? pageNumber - 1 : -1;
+    if (requested >= 0 && pages.length) {
+        const page = pages[Math.max(0, Math.min(requested, pages.length - 1))] || {};
+        const pageResult = {
+            v: 2,
+            m: activeCase.gameMode || collection.m || '1P',
+            p1: replayPageToPlayerState(page.p1)
+        };
+        if (pageResult.m === '2P') pageResult.p2 = replayPageToPlayerState(page.p2);
+        return pageResult;
+    }
     const result = {
         v: 2,
         m: activeCase.gameMode || collection.m || '1P',
@@ -122,10 +168,10 @@ function replayCollectionToGameState(collection) {
     return result;
 }
 
-function applyGameState(data) {
+function applyGameState(data, pageNumber) {
     try {
         if (data?.v === 3 || (typeof TetrisEventCodec !== 'undefined' && TetrisEventCodec.isEventReplay(data))) {
-            data = replayCollectionToGameState(data);
+            data = replayCollectionToGameState(data, pageNumber);
         }
         if (!data || (data.v !== 1 && data.v !== 2)) {
             alert('無効または非対応のデータです。');
@@ -178,7 +224,7 @@ function loadStateFromURL() {
             autoStartParams.nh = !!data.nh;
             autoStartParams.hb = !!data.hb;
 
-            if (applyGameState(data)) {
+            if (applyGameState(data, requestedReplayPage())) {
                 //alert('URLから盤面を読み込みました。');
                 if (autoStartParams.ss) {
                     setTimeout(() => document.getElementById('startGameBtn').click(), 100);
