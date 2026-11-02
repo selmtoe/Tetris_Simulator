@@ -1269,3 +1269,116 @@ html[data-readonly] .lab-replay-navigation { display: none !important; }
 
 .ppt-yt-holder { width: 100%; aspect-ratio: 16 / 9; background: #000; }
 .ppt-yt-holder iframe { width: 100%; height: 100%; border: 0; }
+
+/* ---- Lab の中で開く（設定「リンクの開き方」= このウィンドウ内） ---------- */
+/* 画面全体を覆う固定パネル。ヘッダー＋iframe だけの単純な作りにして、
+   ライト／ダークどちらも既存の色変数だけで崩れないようにする。 */
+.ppt-inline-frame {
+  position: fixed;
+  inset: 0;
+  /* 通知（.ppt-toasts は 300）より下に置き、トーストは見えるままにする */
+  z-index: 250;
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-color);
+  color: var(--text-main);
+  font-family: var(--font-main);
+}
+.ppt-inline-frame[hidden] { display: none; }
+.ppt-inline-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface-color);
+}
+.ppt-inline-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: none;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface-color);
+}
+.ppt-inline-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ppt-inline-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text-main);
+}
+.ppt-inline-url {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.ppt-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.ppt-inline-hint {
+  max-width: 260px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.ppt-inline-hint[hidden] { display: none; }
+.ppt-inline-body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--bg-color);
+}
+.ppt-inline-iframe {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: #ffffff;
+}
+:root[data-theme="dark"] .ppt-inline-iframe {
+  background: #1b1b1d;
+}
+.ppt-inline-blocked {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  background: var(--bg-color);
+  color: var(--text-main);
+}
+.ppt-inline-blocked[hidden] { display: none; }
+.ppt-inline-blocked-text {
+  margin: 0;
+  max-width: 480px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+@media (max-width: 720px) {
+  .ppt-inline-head { gap: 8px; padding: 8px 10px; }
+  .ppt-inline-url,
+  .ppt-inline-hint { display: none; }
+}

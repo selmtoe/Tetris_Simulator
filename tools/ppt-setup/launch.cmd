@@ -12,6 +12,7 @@ for %%I in ("%HERE%..\..") do set "ROOT=%%~fI"
 set "PORT=8765"
 if not "%~1"=="" set "PORT=%~1"
 set "URL=http://127.0.0.1:%PORT%/ppt-lab/"
+set "API=http://127.0.0.1:%PORT%/api"
 set "HEALTH=http://127.0.0.1:%PORT%/api/health"
 set "SERVER=%ROOT%\tools\ppt-lab\server.py"
 set "PYW="
@@ -69,8 +70,17 @@ powershell -NoProfile -Command "for($i=0;$i -lt 60;$i++){ try{ if((Invoke-RestMe
 if errorlevel 1 goto :fail
 
 :open
+rem Read the launch mode from the Lab settings (app window / browser tab).
+set "LAUNCH=app"
+if exist "%HERE%get-launch-mode.ps1" for /f "usebackq delims=" %%M in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%HERE%get-launch-mode.ps1" -Port %PORT%`) do set "LAUNCH=%%M"
+if /i "%LAUNCH%"=="tab" goto :open_tab
 if defined EDGE86 if exist "%EDGE86%\Microsoft\Edge\Application\msedge.exe" goto :open_edge86
 if exist "%EDGE64%\Microsoft\Edge\Application\msedge.exe" goto :open_edge64
+start "" "%URL%"
+exit /b 0
+
+:open_tab
+rem The default browser, as a normal tab.
 start "" "%URL%"
 exit /b 0
 

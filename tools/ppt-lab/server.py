@@ -60,7 +60,10 @@ SETTINGS_SCHEMA = [
      'default': 'videos', 'options': [['videos', '動画一覧'], ['last', '前回の画面']]},
     {'key': 'openLinks', 'group': '一般', 'label': 'リンクの開き方', 'type': 'enum',
      'default': 'newTab', 'options': [['newTab', '新しいブラウザ'], ['sameWindow', 'このウィンドウ内']],
-     'note': '「このウィンドウ内」は準備中です（選んでも新しいタブで開きます）'},
+     'note': '「このウィンドウ内」は、シミュレータや盤面ビューワーをLabの中で開きます（画面共有で見せたいとき用）'},
+    {'key': 'launchMode', 'group': '一般', 'label': '起動したときの開き方', 'type': 'enum',
+     'default': 'app', 'options': [['app', 'アプリのウィンドウ'], ['tab', 'ブラウザのタブ']],
+     'note': 'デスクトップの「PPT Lab」から起動したときの開き方です（次回の起動から反映）'},
     {'key': 'notifyAnalysis', 'group': '一般', 'label': '解析完了の通知', 'type': 'bool', 'default': True},
     {'key': 'tagPromptOnSave', 'group': '一般', 'label': '保存時にタグ選択を出す', 'type': 'bool', 'default': True},
     {'key': 'theme', 'group': '表示', 'label': 'テーマ', 'type': 'enum', 'default': 'light',
@@ -430,8 +433,6 @@ def model_options() -> list[list[str]]:
                for item in models_registry.list_models(MODELS_DIR)]
     if not options:
         options = [[models_registry.DEFAULT_MODEL_ID, 'Tetrace-V1.0-PPT']]
-    # 別ゲーム用（profiles.json の設定）も従来どおり選べるようにする。
-    options.append(['other-game', 'ぷよテト以外'])
     return options
 
 

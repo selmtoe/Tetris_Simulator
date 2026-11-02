@@ -1252,6 +1252,10 @@
         link.target = '_blank';
         link.rel = 'noopener';
         link.setAttribute('aria-label', (item.title || 'テト譜') + ' を開く');
+        // 設定が「このウィンドウ内」なら、Lab の上に重ねて開く
+        link.addEventListener('click', event => {
+            openLinkInLab(event, item.url, item.title || 'テト譜');
+        });
         const canvas = node('canvas', null, 'ppt-tetofu-canvas');
         canvas.width = TETOFU_PREVIEW_WIDTH;
         canvas.height = TETOFU_PREVIEW_HEIGHT;
@@ -1559,8 +1563,15 @@
                 select.append(element);
             });
             select.value = String(value);
-            select.addEventListener('change', () => {
-                saveSetting(item.key, item.type === 'int' ? Number(select.value) : select.value);
+            select.addEventListener('change', async () => {
+                const next = item.type === 'int' ? Number(select.value) : select.value;
+                await saveSetting(item.key, next);
+                // 「このウィンドウ内」を選んだ直後に、どう変わるかを伝える
+                if (item.key === 'openLinks' && String(setting('openLinks')) === String(next)) {
+                    notify(next === 'sameWindow'
+                        ? 'これからは Lab の中で開きます（画面共有でも見えます）。'
+                        : 'これからは新しいタブで開きます。');
+                }
             });
             return select;
         }
@@ -1627,11 +1638,6 @@
             option.value = String(entry[0]);
             select.append(option);
         });
-        if (!entries.some(entry => String(entry[0]) === 'other-game')) {
-            const other = node('option', 'ぷよテト以外');
-            other.value = 'other-game';
-            select.append(other);
-        }
         const values = Array.from(select.options).map(option => option.value);
         const preferred = modelIdForSelect();
         select.value = values.indexOf(preferred) >= 0 ? preferred : (values[0] || '');
@@ -1685,8 +1691,6 @@
             }
             list.append(row);
         });
-        list.append(node('span', '.tetracemodel を追加すると、解析モデルとして選べます。',
-            'ppt-setting-note'));
         return list;
     }
 
@@ -2167,6 +2171,211 @@
         const value = String(url || '');
         if (!value || !value.startsWith(PUBLIC_BASE)) return value;
         return SITE_BASE + value.slice(PUBLIC_BASE.length);
+    }
+
+    // ---- Lab の中で開く（設定「リンクの開き方」= このウィンドウ内） --------
+    // 画面共有で Lab だけを見せていると、シミュレータやビューワーが別タブ・
+    // 別ウィンドウで開いたときに共有相手に見えない。そういうときは同じ
+    // ウィンドウの上に固定パネルを重ね、その中の iframe で開く。
+    // 盤面ビューワー（#detail-viewer）はこれまでどおりページ内に置いたまま。
+    const INLINE_BLOCKED_MESSAGE =
+        'このページはLabの中では開けません。新しいタブで開いてください。';
+    const INLINE_OUTSIDE_HINT =
+        'Lab の外のページです。表示されないときは「新しいタブで開く」から開いてください。';
+    // iframe の読み込みを待つ上限（過ぎたら「開けない」案内に切り替える）
+    const INLINE_LOAD_TIMEOUT = 12000;
+
+    // 設定が「このウィンドウ内」か（既定は新しいタブ）
+    function opensInLab() {
+        return setting('openLinks') === 'sameWindow';
+    }
+
+    // iframe に渡す URL を決める。公開サイト（PUBLIC_BASE）の URL は、
+    // いま開いているサイトの同じ場所（SITE_BASE）へ置き換える。
+    // 同一オリジンのページは X-Frame-Options に邪魔されず、中身も確認できる。
+    function inlineUrl(url) {
+        const value = String(url || '').trim();
+        if (!value || value === '#') return { src: '', sameOrigin: false };
+        let src = value;
+        if (value.startsWith(PUBLIC_BASE)) src = SITE_BASE + value.slice(PUBLIC_BASE.length);
+        let sameOrigin = false;
+        try {
+            const parsed = new URL(src, location.href);
+            sameOrigin = parsed.origin === location.origin;
+            src = parsed.href;
+        } catch (error) {
+            sameOrigin = false;
+        }
+        return { src, sameOrigin };
+    }
+
+    // 「このページは開けません」の案内を出す（iframe の上に重ねる）
+    function showInlineBlocked(overlay, message) {
+        const blocked = overlay.querySelector('.ppt-inline-blocked');
+        if (!blocked) return;
+        const text = blocked.querySelector('.ppt-inline-blocked-text');
+        if (text) text.textContent = message;
+        blocked.hidden = false;
+    }
+
+    // オーバーレイは1枚だけ作って使い回す（毎回作り直すと iframe が増える）
+    function inlineOverlay() {
+        let overlay = document.getElementById('ppt-inline-frame');
+        if (overlay) return overlay;
+
+        overlay = node('div', null, 'ppt-inline-frame');
+        overlay.id = 'ppt-inline-frame';
+        overlay.hidden = true;
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-labelledby', 'ppt-inline-title');
+
+        const panel = node('div', null, 'ppt-inline-panel');
+
+        // ヘッダー: タイトル / URL / 新しいタブで開く / 閉じる
+        const head = node('div', null, 'ppt-inline-head');
+        const heading = node('div', null, 'ppt-inline-heading');
+        const title = node('h2', '', 'ppt-inline-title');
+        title.id = 'ppt-inline-title';
+        const urlLine = node('p', '', 'ppt-inline-url');
+        heading.append(title, urlLine);
+        head.append(heading);
+
+        const actions = node('div', null, 'ppt-inline-actions');
+        const hint = node('span', INLINE_OUTSIDE_HINT, 'ppt-inline-hint');
+        hint.hidden = true;
+        const external = node('a', '新しいタブで開く', 'btn-outline ppt-inline-external');
+        external.target = '_blank';
+        external.rel = 'noopener';
+        const close = node('button', '閉じる', 'btn-outline ppt-inline-close');
+        close.type = 'button';
+        actions.append(hint, external, close);
+        head.append(actions);
+        panel.append(head);
+
+        // 本体: iframe と、開けなかったときの案内
+        const body = node('div', null, 'ppt-inline-body');
+        const frame = node('iframe', null, 'ppt-inline-iframe');
+        // シミュレータの再生（全画面・自動再生）をそのまま使えるようにする
+        frame.setAttribute('allow', 'fullscreen; autoplay');
+        frame.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
+        const blocked = node('div', null, 'ppt-inline-blocked');
+        blocked.hidden = true;
+        const blockedText = node('p', INLINE_BLOCKED_MESSAGE, 'ppt-inline-blocked-text');
+        const blockedLink = node('a', '新しいタブで開く', 'btn-outline');
+        blockedLink.target = '_blank';
+        blockedLink.rel = 'noopener';
+        blocked.append(blockedText, blockedLink);
+        body.append(frame, blocked);
+        panel.append(body);
+
+        overlay.append(panel);
+        document.body.append(overlay);
+
+        // 背景（パネルの外）のクリックでは閉じない。誤って閉じるのを防ぐ。
+        close.addEventListener('click', () => closeInlineFrame());
+
+        frame.addEventListener('load', () => {
+            if (!overlay.__open) return;
+            clearTimeout(overlay.__timer);
+            overlay.__timer = null;
+            // 待ち時間切れで案内を出していても、実際に読み込めたら引っ込める
+            const blocked = overlay.querySelector('.ppt-inline-blocked');
+            if (blocked) blocked.hidden = true;
+            // 別オリジンのページは中身を覗けない（X-Frame-Options で表示を
+            // 断られても検知できない）。その場合はヘッダーの案内に任せる。
+            if (!overlay.__sameOrigin) return;
+            let doc = null;
+            try { doc = frame.contentDocument; } catch (error) { doc = null; }
+            if (!doc || !doc.body) showInlineBlocked(overlay, INLINE_BLOCKED_MESSAGE);
+        });
+
+        return overlay;
+    }
+
+    // Lab の上に重ねて開く（設定が「このウィンドウ内」のときだけ呼ぶ）
+    function openInlineFrame(rawUrl, options) {
+        const opts = options || {};
+        const resolved = inlineUrl(rawUrl);
+        if (!resolved.src) {
+            toast('開けるリンクがありません。');
+            return false;
+        }
+        const overlay = inlineOverlay();
+        const frame = overlay.querySelector('.ppt-inline-iframe');
+        const title = opts.title || 'Lab の中で開いています';
+
+        overlay.querySelector('.ppt-inline-title').textContent = title;
+        const urlLine = overlay.querySelector('.ppt-inline-url');
+        urlLine.textContent = resolved.src;
+        urlLine.title = resolved.src;
+        overlay.querySelector('.ppt-inline-external').href = resolved.src;
+        overlay.querySelector('.ppt-inline-blocked a').href = resolved.src;
+        overlay.querySelector('.ppt-inline-blocked').hidden = true;
+        // 同一オリジンに無いページは、表示できないときに自分で気づけるようにする
+        overlay.querySelector('.ppt-inline-hint').hidden = resolved.sameOrigin;
+        frame.title = title;
+
+        overlay.__sameOrigin = resolved.sameOrigin;
+        overlay.__open = true;
+        clearTimeout(overlay.__timer);
+        overlay.__timer = setTimeout(() => {
+            overlay.__timer = null;
+            if (overlay.__open) showInlineBlocked(overlay, INLINE_BLOCKED_MESSAGE);
+        }, INLINE_LOAD_TIMEOUT);
+
+        if (overlay.hidden) {
+            // 開いている間は背後のスクロールを止める
+            overlay.__previousOverflow = document.body.style.overflow;
+            overlay.__returnFocus = document.activeElement;
+        }
+        overlay.hidden = false;
+        document.body.style.overflow = 'hidden';
+
+        // 同じ URL を開き直したときも読み込み直す
+        frame.removeAttribute('src');
+        frame.src = resolved.src;
+
+        // Esc は iframe の中に焦点があると親に届かない。開いたら閉じるボタンへ
+        // 焦点を移しておく（iframe を触ったあとは「閉じる」で閉じる）。
+        setTimeout(() => {
+            try {
+                overlay.querySelector('.ppt-inline-close').focus({ preventScroll: true });
+            } catch (error) {
+                /* 焦点を移せなくても表示は続ける */
+            }
+        }, 0);
+        return true;
+    }
+
+    function closeInlineFrame() {
+        const overlay = document.getElementById('ppt-inline-frame');
+        if (!overlay || overlay.hidden) return;
+        overlay.__open = false;
+        clearTimeout(overlay.__timer);
+        overlay.__timer = null;
+        overlay.hidden = true;
+        const frame = overlay.querySelector('.ppt-inline-iframe');
+        // 音や再生を止めるため、閉じたら中身を捨てる
+        if (frame) frame.src = 'about:blank';
+        document.body.style.overflow = overlay.__previousOverflow || '';
+        overlay.__previousOverflow = '';
+        const back = overlay.__returnFocus;
+        overlay.__returnFocus = null;
+        if (back && back.isConnected && typeof back.focus === 'function') {
+            try { back.focus({ preventScroll: true }); } catch (error) { /* 焦点は戻せなくてもよい */ }
+        }
+    }
+
+    // クリックを横取りして Lab の中で開く（設定が newTab のときは何もしない）。
+    // 開ける URL がまだ無いときは横取りせず、今までどおりの動きに任せる。
+    function openLinkInLab(event, url, title) {
+        if (!opensInLab()) return false;
+        const resolved = inlineUrl(url);
+        if (!resolved.src) return false;
+        event.preventDefault();
+        openInlineFrame(resolved.src, { title });
+        return true;
     }
 
     function createViewerBridge(frame) {
@@ -2950,7 +3159,14 @@
             if (!state.currentMatch) return;
             try {
                 const urls = await replayUrls(state.currentMatch.index);
-                window.open(simulatorLink(urls.combined, (state.pageIndex || 0) + 1), '_blank', 'noopener');
+                const url = simulatorLink(urls.combined, (state.pageIndex || 0) + 1);
+                if (!url) {
+                    toast('この試合はシミュレータで開けません（盤面データがありません）。');
+                    return;
+                }
+                // 設定が「このウィンドウ内」なら、Lab の上に重ねて開く
+                if (opensInLab()) openInlineFrame(url, { title: 'シミュレータ' });
+                else window.open(url, '_blank', 'noopener');
             } catch (error) {
                 toast(error.message);
             }
@@ -3190,12 +3406,23 @@
         viewerLink.target = '_blank';
         viewerLink.rel = 'noopener';
         viewerLink.href = '#';
-        // 解析に失敗した試合では、押しても開けない理由を出す（href は外してある）
+        // 解析に失敗した試合では、押しても開けない理由を出す（href は外してある）。
+        // 設定が「このウィンドウ内」なら、押したときに Lab の上へ重ねて開く
+        // （target は残す。Ctrl+クリックなどは今までどおり新しいタブで開く）。
         [simLink, viewerLink].forEach(link => {
             link.addEventListener('click', event => {
-                if (link.getAttribute('aria-disabled') !== 'true') return;
-                event.preventDefault();
-                toast(FAILED_MATCH_REASON);
+                if (link.getAttribute('aria-disabled') === 'true') {
+                    event.preventDefault();
+                    toast(FAILED_MATCH_REASON);
+                    return;
+                }
+                const href = link.getAttribute('href');
+                if (!href || href === '#') {
+                    // まだ試合を読み込んでいる途中（href が用意できていない）
+                    event.preventDefault();
+                    return;
+                }
+                openLinkInLab(event, href, link.textContent);
             });
         });
         tools.append(simLink, viewerLink);
@@ -4044,7 +4271,11 @@
         else state.filters.query = value;
         render();
     });
-    window.addEventListener('hashchange', route);
+    window.addEventListener('hashchange', () => {
+        // 画面を移ったら、Lab の中で開いているパネルは閉じる
+        closeInlineFrame();
+        route();
+    });
     // 動作確認用: 連続再生と盤面同期の状態をまとめて見る
     window.__pptDebug = () => ({
         view: state.view,
@@ -4089,7 +4320,14 @@
         closeTetofuMenu();
     });
     document.addEventListener('keydown', event => {
-        if (event.key === 'Escape') closeTetofuMenu();
+        if (event.key !== 'Escape') return;
+        // Lab の中で開いているパネルがあれば、それを閉じる（最前面を優先）
+        const overlay = document.getElementById('ppt-inline-frame');
+        if (overlay && !overlay.hidden) {
+            closeInlineFrame();
+            return;
+        }
+        closeTetofuMenu();
     });
     window.addEventListener('message', event => {
         const bridge = state.bridge;
