@@ -38,6 +38,37 @@ MIN_DRAW_EVIDENCE_SECONDS = 1.0
 # P1/P2 は短い票でも、はっきり偏っていれば決めてよい（結果画面が短い試合がある）。
 MIN_SIDE_EVIDENCE_SECONDS = 0.25
 MIN_SIDE_MARGIN = 0.60
+# 結果画面の証拠がこれ未満なら「要確認」にする（境界ズレの疑い）。
+WEAK_EVIDENCE_SECONDS = 0.5
+# 引き分けの裏取り（10クラスの end_p1 / end_p2）に必要な秒数。
+ORIGINAL_TIEBREAK_SECONDS = 0.30
+# ハードラベルの多数決が誤読に弱い判定。動画から確率を平均し直す二重チェック
+# （ppt-end3-winner.py --only-matches ... --merge）の対象にする。
+SECOND_OPINION_STATUSES = ('review', 'undetermined')
+
+
+def needs_second_opinion(winner, status) -> bool:
+    """動画方式で見直すべき判定か（引き分け / 要確認 / 判定不能）。"""
+    if winner in (None, 'draw'):
+        return True
+    return status in SECOND_OPINION_STATUSES
+
+
+def original_label_tiebreak(original_p1: int, original_p2: int, fps: float):
+    """引き分け判定の裏取り。
+
+    終了3クラスは「結果画面の見た目」に引っ張られて引き分けを出しやすい。
+    読み替える前のシーン10クラス（80_end_p1 / 90_end_p2）が片側だけを
+    はっきり出していれば、その側の勝ちとして扱う。
+    """
+    need = ORIGINAL_TIEBREAK_SECONDS * fps
+    if original_p1 >= need and original_p2 < need:
+        share = original_p1 / (original_p1 + original_p2)
+        return 'p1', ('ok' if share >= CONF_OK else 'review'), round(share, 4)
+    if original_p2 >= need and original_p1 < need:
+        share = original_p2 / (original_p1 + original_p2)
+        return 'p2', ('ok' if share >= CONF_OK else 'review'), round(share, 4)
+    return None
 
 
 def decide_end_state(p1: int, p2: int, draw: int, fps: float):
@@ -55,7 +86,12 @@ def decide_end_state(p1: int, p2: int, draw: int, fps: float):
     confidence = round(abs(p1 - p2) / total, 4)
     if total < MIN_SIDE_EVIDENCE_SECONDS * fps or confidence < MIN_SIDE_MARGIN:
         return None, 'undetermined', 0.0
-    return winner, ('ok' if confidence >= CONF_OK else 'review'), confidence
+    status = 'ok' if confidence >= CONF_OK else 'review'
+    if total < WEAK_EVIDENCE_SECONDS * fps:
+        # 0.5秒未満しか結果画面が入っていない＝境界がずれている疑い。
+        # 勝敗は書くが「要確認」にして、動画方式の二重チェックに回す。
+        status = 'review'
+    return winner, status, confidence
 # 3秒窓に結果画面が入らない試合だけ、end の手前までこの秒数だけ遡って
 # 最後の結果画面ブロックを探す（境界が結果画面より後ろへずれた試合の救済）。
 BACKTRACK_SECONDS = 40.0
@@ -118,7 +154,10 @@ def build(detection: Path, min_determined_ratio: float) -> dict:
         low = max(0, int(end_frame - WINDOW_SECONDS * fps))
         high = int(end_frame + FORWARD_SECONDS * fps)
         p1 = p2 = draw = end_any = 0
-        for start, stop, label, *_ in items:
+        # 読み替え前のシーン10クラス（80_end_p1 / 90_end_p2）。引き分けの裏取りだけに使う。
+        original_p1 = original_p2 = 0
+        for item in items:
+            start, stop, label = item[0], item[1], item[2]
             if stop <= low or start >= high:
                 continue
             overlap = min(stop, high) - max(start, low)
@@ -131,9 +170,24 @@ def build(detection: Path, min_determined_ratio: float) -> dict:
                     draw += overlap
                 else:
                     end_any += overlap
+            if end_state and len(item) > 5:
+                original = int(item[5])
+                if original == 8:
+                    original_p1 += overlap
+                elif original == 9:
+                    original_p2 += overlap
         backtrack = ''
+        tiebreak = ''
         total = p1 + p2 + draw
         winner, status, confidence = decide_end_state(p1, p2, draw, fps)
+        if end_state and winner == 'draw':
+            # 3クラスが「引き分け」と言っても、読み替え前の10クラスが片側だけ
+            # end_p1 / end_p2 を出していれば、その側の勝ちとして扱う。
+            # （3クラスは結果画面の見た目に引っ張られて引き分けを出しやすい）
+            decided = original_label_tiebreak(original_p1, original_p2, fps)
+            if decided:
+                winner, status, confidence = decided
+                tiebreak = 'original-label'
         if end_state and winner is None:
             # 境界が結果画面より後ろへずれると 3秒窓に結果画面が入らない。
             # そのときは end の手前まで遡って最後の結果画面ブロックを探す。
@@ -170,12 +224,17 @@ def build(detection: Path, min_determined_ratio: float) -> dict:
             'endVotes': end_votes,
             'evidenceSeconds': round(evidence, 3),
             'backtrack': backtrack,
+            'tiebreak': tiebreak,
+            'originalP1': original_p1 if end_state else 0,
+            'originalP2': original_p2 if end_state else 0,
             'confidence': confidence,
             'winner': winner,
             'status': status,
             'rawWinner': winner,
+            'needsSecondOpinion': needs_second_opinion(winner, status),
             'source': 'scene-runs-inline' if end_state else 'scene-runs',
         })
+    needs_second = [row['match'] for row in rows if row['needsSecondOpinion']]
     determined = sum(1 for row in rows if row['winner'] is not None)
     ratio = round(determined / len(rows), 4) if rows else 0.0
     return {
@@ -192,7 +251,8 @@ def build(detection: Path, min_determined_ratio: float) -> dict:
                    'minDeterminedRatio': min_determined_ratio,
                    'determinedRatio': ratio,
                    'determinedMatches': determined,
-                   'totalMatches': len(rows)},
+                   'totalMatches': len(rows),
+                   'needsSecondOpinionMatches': needs_second},
         'matches': rows,
     }
 
@@ -227,6 +287,13 @@ def main() -> None:
     ratio = payload['config']['determinedRatio']
     print(f'勝敗（分類ログから）: 確定{ok} / 要確認{review} / 計{len(rows)} '
           f'（P1勝ち={p1} P2勝ち={p2} 引き分け={draw}）')
+    if needs_second := payload['config']['needsSecondOpinionMatches']:
+        shown = ','.join(str(index) for index in needs_second[:20])
+        suffix = '…' if len(needs_second) > 20 else ''
+        print(f'  要二重チェック: {len(needs_second)}試合（{shown}{suffix}）'
+              ' → 動画方式で確認できます（--only-matches ... --merge）')
+    else:
+        print('  要二重チェック: 0試合')
     print(f'  決定率 {determined}/{len(rows)} = {ratio:.1%}'
           f'（しきい値 {args.min_determined_ratio:.0%}）')
     print(f'  saved {out}')

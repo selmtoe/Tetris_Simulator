@@ -299,6 +299,110 @@ function Get-WinnerDetectionState {
     return ''
 }
 
+function Get-BatchVideoPath {
+    # バッチの元動画を返す（無ければ $null）。二重チェックは動画が無いと走らせない。
+    # バッチ名に [ ] が入るので、パスの確認は必ず -LiteralPath を使う。
+    param([string]$Output)
+    $manifestPath = Join-Path $Output 'batch-results.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $null }
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 |
+            ConvertFrom-Json
+    } catch {
+        return $null
+    }
+    $source = [string]$manifest.source
+    if ([string]::IsNullOrWhiteSpace($source)) { return $null }
+    if (-not [IO.Path]::IsPathRooted($source)) {
+        $source = Join-Path $Output $source
+    }
+    if (Test-Path -LiteralPath $source -PathType Leaf) {
+        return [IO.Path]::GetFullPath($source)
+    }
+    return $null
+}
+
+function Get-WinnerDetectionRows {
+    # winner-detection.json の matches を読む（無い・壊れているときは空）。
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
+    try {
+        $payload = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        return @()
+    }
+    return @($payload.matches)
+}
+
+function Show-WinnerDetectionSummary {
+    # winner-detection.json を読み直して、確定 / 要確認 / 引き分けの件数を出す。
+    param([string]$Output, [string]$Label)
+    $rows = @(Get-WinnerDetectionRows -Path (Join-Path $Output 'winner-detection.json'))
+    if ($rows.Count -eq 0) { return }
+    $draw = @($rows | Where-Object { $_.winner -eq 'draw' }).Count
+    $undetermined = @($rows | Where-Object {
+            $_.winner -ne 'draw' -and [string]::IsNullOrWhiteSpace([string]$_.winner)
+        }).Count
+    $review = @($rows | Where-Object {
+            $_.winner -ne 'draw' -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.winner) -and
+            $_.status -ne 'ok'
+        }).Count
+    $ok = $rows.Count - $draw - $undetermined - $review
+    $line = "勝敗（$Label）: 確定$ok / 要確認$review / 引き分け$draw（計$($rows.Count)）"
+    if ($undetermined -gt 0) { $line = "$line / 判定不能$undetermined" }
+    Write-Host $line
+}
+
+function Invoke-WinnerSecondOpinion {
+    # 迷った試合（draw / 要確認 / 判定不能）だけを動画方式で判定し直す。
+    # インラインの票はハードラベルの多数決なので、結果画面の誤読がそのまま勝敗になる。
+    # 同じ区間を動画から切り出して確率を平均すると誤読が薄まるため、該当試合だけ
+    # ppt-end3-winner.py --only-matches <番号> --merge で差し替える。
+    # 動画が無いバッチは何も変えず、その旨を出して続行する（解析全体は止めない）。
+    param(
+        [string]$Output,
+        [string]$PythonExe,
+        [string]$End3Script
+    )
+    if (-not (Test-Path -LiteralPath $End3Script -PathType Leaf)) { return }
+    if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) { return }
+    # PPT_WINNER_MODE=runs / replay は「動画方式を使わない」指定なので従う。
+    if ($env:PPT_WINNER_MODE -in @('runs', 'replay')) { return }
+    $winnerJson = Join-Path $Output 'winner-detection.json'
+    $rows = @(Get-WinnerDetectionRows -Path $winnerJson)
+    if ($rows.Count -eq 0) { return }
+    $targets = @($rows | Where-Object { $_.needsSecondOpinion -eq $true } |
+            ForEach-Object { [int]$_.match } | Sort-Object -Unique)
+    if ($targets.Count -eq 0) { return }
+
+    Write-Host ''
+    Write-Host "勝敗の二重チェック: $($targets.Count)試合（$($targets -join ',')）を動画から判定し直します"
+    $video = Get-BatchVideoPath -Output $Output
+    if ([string]::IsNullOrWhiteSpace([string]$video)) {
+        Write-Host '動画が無いため二重チェックを省略しました' -ForegroundColor Yellow
+        Show-WinnerDetectionSummary -Output $Output -Label '現状'
+        return
+    }
+    $matchList = $targets -join ','
+    try {
+        & $PythonExe -X utf8 $End3Script --batch-dir $Output --video $video `
+            --workers 6 --only-matches $matchList --merge
+        $secondExitCode = $LASTEXITCODE
+    } catch {
+        Write-Host "二重チェックを実行できませんでした: $($_.Exception.Message)" `
+            -ForegroundColor Yellow
+        return
+    }
+    if ($secondExitCode -ne 0) {
+        Write-Host "二重チェックは終了コード $secondExitCode で終わりました（判定は元のままです）" `
+            -ForegroundColor Yellow
+        Show-WinnerDetectionSummary -Output $Output -Label '現状'
+        return
+    }
+    Show-WinnerDetectionSummary -Output $Output -Label '二重チェック後'
+}
+
 function Invoke-WinnerDetection {
     # Winner detection (decide the match winner from the result screen).
     # 2026-11-02〜: 終了3クラスモデル（引き分け/P1/P2）を結果画面にだけ適用する。
@@ -343,6 +447,9 @@ function Invoke-WinnerDetection {
             $runsExitCode = $LASTEXITCODE
             if ($runsExitCode -eq 0) {
                 $done = $true
+                # 迷った試合だけ、動画の平均確率で二重チェックする（任意）。
+                Invoke-WinnerSecondOpinion -Output $Output -PythonExe $pythonExe `
+                    -End3Script $end3Script
             } elseif ($runsExitCode -eq 2) {
                 Write-Host 'インラインの3クラス票では決められない試合が多すぎます。動画方式に切り替えます。' `
                     -ForegroundColor Yellow
