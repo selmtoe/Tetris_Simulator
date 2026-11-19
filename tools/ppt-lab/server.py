@@ -1459,8 +1459,16 @@ def _publish_worker() -> None:
             PUBLISH.update({'ok': True, 'message': '変更はありませんでした（公開中のものが最新です）。'})
             return
         stamp = dt.datetime.now().strftime('%Y-%m-%d %H:%M')
-        _run(['git', 'commit', '-q', '-m', f'Sync from PPT Lab ({stamp}, {len(changed)} files)'], repo, 'コミット')
-        _run(['git', 'push', '-q', 'origin', 'HEAD:main'], repo, 'GitHub へ push', timeout=600)
+        # 履歴は持たない: 毎回、親の無い1コミットを作って main を置き換える（強制 push）。
+        # 同期のたびに再生データ・統計が書き換わり、履歴だけが増えていくため。
+        tree = _run(['git', 'write-tree'], repo, 'コミット').strip().splitlines()[-1].strip()
+        commit = _run(['git', 'commit-tree', tree, '-m', f'Sync from PPT Lab ({stamp}, {len(changed)} files)'],
+                      repo, 'コミット').strip().splitlines()[-1].strip()
+        _run(['git', 'update-ref', 'HEAD', commit], repo, 'コミット')
+        _run(['git', 'push', '-q', '--force', 'origin', 'HEAD:main'], repo, 'GitHub へ push', timeout=600)
+        # 置き換えた古いコミットを手元からも消す（容量を増やさない）
+        _run(['git', 'reflog', 'expire', '--expire=now', '--all'], repo, '後片付け')
+        _run(['git', 'gc', '--prune=now', '-q'], repo, '後片付け', timeout=600)
         head = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=str(repo), capture_output=True,
                               creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout.decode().strip()
         PUBLISH.update({'ok': True, 'commit': head,

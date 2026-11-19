@@ -26,6 +26,9 @@ SITE_BASE = '/Tetris_Simulator/'
 FILES = ('index.html', 'app.js', 'static-api.js', 'manifest.webmanifest',
          'favicon.ico', 'favicon.png', 'icon-192.png', 'icon-512.png')
 DIRECTORIES = ('theme', 'vendor')
+# 公開サイトが読み込まないもの（手元のデスクトップ版でも使っていない）。載せない
+SKIP_FILES = {'theme/lab-writer.css', 'vendor/viewer-render.js'}
+SKIP_DATA = ('downloads',)
 
 
 def version(html: str) -> str:
@@ -56,7 +59,10 @@ def main() -> int:
         shutil.copyfile(WEB / name, OUT / name)
     for name in DIRECTORIES:
         shutil.copytree(WEB / name, OUT / name)
-    shutil.copytree(DATA, OUT / 'data')
+    for name in SKIP_FILES:
+        (OUT / name).unlink(missing_ok=True)
+    shutil.copytree(DATA, OUT / 'data', ignore=lambda folder, names: [
+        item for item in names if Path(folder) == DATA and item in SKIP_DATA])
     index = OUT / 'index.html'
     html = index.read_text(encoding='utf-8-sig')
     marker = (f'<script>window.PPT_STATIC=true;window.PPT_SITE_BASE={json.dumps(SITE_BASE)};'
