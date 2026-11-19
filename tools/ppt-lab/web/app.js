@@ -1079,24 +1079,54 @@
 
     const TETOFU_DECODER = new TextDecoder();
 
+    // 保存したURLの # 以降（共有データ）。エディタの共有リンクは gzip 圧縮（z1.〜）になっている
+    function tetofuFragment(item) {
+        let hash = String(item.url || '').split('#')[1] || '';
+        try { hash = decodeURIComponent(hash); } catch (error) { /* そのまま使う */ }
+        return hash.replace(/\s+/g, '');
+    }
+
+    function tetofuBase64Bytes(text) {
+        let normalized = String(text || '').replace(/-/g, '+').replace(/_/g, '/');
+        while (normalized.length % 4) normalized += '=';
+        return Uint8Array.from(atob(normalized), ch => ch.charCodeAt(0));
+    }
+
+    // 圧縮されたリンク（z1.）を伸ばして JSON にする（非同期）
+    async function tetofuInflate(fragment) {
+        const bytes = tetofuBase64Bytes(fragment.slice(3));
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+        return JSON.parse(await new Response(stream).text());
+    }
+
     // 保存したURLを、カードに出す1ページぶんだけ復号する。
     // ページ列を丸ごと抱えると重いので、盤面とNEXTだけ残す。
-    function tetofuPageData(item) {
-        const hash = String(item.url || '').split('#')[1];
-        if (!hash) return null;
+    // 対応する形: PPT Lab が作るリンク、シミュレータの共有リンク（v2）、エディタの共有リンク（圧縮あり・なし）
+    function tetofuPageData(item, parsed) {
         try {
-            const binary = atob(hash.replace(/-/g, '+').replace(/_/g, '/'));
-            const json = JSON.parse(TETOFU_DECODER.decode(Uint8Array.from(binary, ch => ch.charCodeAt(0))));
+            let json = parsed;
+            if (json === undefined) {
+                const hash = tetofuFragment(item);
+                if (!hash || hash.startsWith('z1.')) return null;
+                json = JSON.parse(TETOFU_DECODER.decode(tetofuBase64Bytes(hash)));
+            }
             if (window.TetrisEventCodec && window.TetrisEventCodec.isEventReplay(json)) {
                 const decoded = window.TetrisEventCodec.decodeCollection(json, { compactBoards: true });
                 const target = decoded.cases[decoded.currentCase || 0];
                 const pages = (target && target.pages) || [];
                 if (!pages.length) return null;
-                const requested = Number((String(item.url).match(/[?&]page=(\d+)/) || [])[1] || 1);
-                // 試合全体は1ページ目が空の盤面なので、プレビューは試合の中ほどを出す
-                const index = item.scope === 'match'
-                    ? Math.floor((pages.length - 1) / 2)
-                    : Math.max(0, Math.min(requested - 1, pages.length - 1));
+                const pinned = (String(item.url).match(/[?&]page=(\d+)/) || [])[1];
+                let index;
+                if (item.scope === 'match') {
+                    // 試合全体は1ページ目が空の盤面なので、プレビューは試合の中ほどを出す
+                    index = Math.floor((pages.length - 1) / 2);
+                } else if (pinned) {
+                    index = Math.max(0, Math.min(Number(pinned) - 1, pages.length - 1));
+                } else {
+                    // ページの指定が無い外部リンクは1ページ目。空の盤面なら最後のページを出す
+                    const filled = page => /[^_\s]/.test(String((page.p1 && page.p1.board) || ''));
+                    index = filled(pages[0]) || pages.length === 1 ? 0 : pages.length - 1;
+                }
                 const page = pages[index];
                 const pick = player => (player ? {
                     board: String(player.board || ''),
@@ -1104,7 +1134,7 @@
                 } : null);
                 return { p1: pick(page.p1), p2: page.p2 ? pick(page.p2) : null };
             }
-            // 旧形式（v2のスナップショット）は盤面とNEXTがそのまま入っている
+            // シミュレータの共有リンク（v2のスナップショット）は盤面とNEXTがそのまま入っている
             const snapshot = panel => {
                 if (!panel || typeof panel !== 'object') return null;
                 const board = panel.b !== undefined ? panel.b : panel.board;
@@ -1150,9 +1180,27 @@
     };
     const tetofuPreviewCache = new Map();
 
-    function tetofuPreviewData(item) {
+    // 圧縮リンクは伸ばし終わるまで null を返し、終わったら onReady で描き直す
+    const tetofuInflating = new Map();
+    function tetofuPreviewData(item, onReady) {
         const key = String(item.id || '') + '|' + String(item.url || '');
         if (tetofuPreviewCache.has(key)) return tetofuPreviewCache.get(key);
+        const fragment = tetofuFragment(item);
+        if (fragment.startsWith('z1.') && typeof DecompressionStream === 'function') {
+            if (!tetofuInflating.has(key)) {
+                tetofuInflating.set(key, tetofuInflate(fragment)
+                    .then(json => tetofuPageData(item, json))
+                    .catch(() => null)
+                    .then(data => {
+                        if (tetofuPreviewCache.size > 300) tetofuPreviewCache.clear();
+                        tetofuPreviewCache.set(key, data);
+                        tetofuInflating.delete(key);
+                        return data;
+                    }));
+            }
+            if (onReady) tetofuInflating.get(key).then(data => { if (data) onReady(); });
+            return null;
+        }
         const data = tetofuPageData(item);
         if (tetofuPreviewCache.size > 300) tetofuPreviewCache.clear();
         tetofuPreviewCache.set(key, data);
@@ -1258,7 +1306,9 @@
         ctx.clearRect(0, 0, width, height);
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
-        const data = tetofuPreviewData(item);
+        const data = tetofuPreviewData(item, () => {
+            if (canvas.isConnected) drawTetofuPreview(canvas, item);
+        });
         const panels = data ? [data.p1, data.p2].filter(Boolean) : [];
         if (!panels.length) {
             drawTetofuPlaceholder(ctx, width, height);
@@ -1455,7 +1505,7 @@
         observeTetofuPreview(frame, item);
     }
     // テト譜の種類（絞り込み用）。動画から保存したものは scope、手で登録したものは「手動登録」
-    const TETOFU_KINDS = [['', 'すべて'], ['match', '試合全体'], ['all', '決着盤面'],
+    const TETOFU_KINDS = [['', 'すべて'], ['match', '試合全体'], ['all', '全体盤面'],
         ['p1', 'P1の局面'], ['p2', 'P2の局面'], ['manual', '手動登録']];
 
     function tetofuKindOf(item) {
@@ -3658,13 +3708,13 @@
             const pages = (state.pages && state.pages.length) ? state.pages.length : 1;
             const current = (state.pageIndex || 0) + 1;
             const target = kind === 'p1' ? urls.p1 : kind === 'p2' ? urls.p2 : urls.combined;
-            // 試合全体は最初の局面から開く（局面は持たない）
-            const page = kind === 'all' ? pages : kind === 'match' ? 1 : current;
+            // 試合全体は最初の局面から開く（局面は持たない）。盤面の保存は開いている局面
+            const page = kind === 'match' ? 1 : current;
             const url = pinPage(target, page);
             if (!url) throw new Error('この盤面のリンクを作れませんでした');
             const label = kind === 'match' ? '試合' : kind === 'all' ? '全体盤面'
                 : kind.toUpperCase() + '盤面';
-            const note = kind === 'match' ? '' : kind === 'all' ? '（決着時）' : '（局面 ' + page + '/' + pages + '）';
+            const note = kind === 'match' ? '' : '（局面 ' + page + '/' + pages + '）';
             // 元の動画のどこか（試合全体は試合の始まり、局面はその局面の時刻）
             const pageInfo = (state.pages || [])[page - 1];
             const seconds = kind === 'match' || !pageInfo
