@@ -1,0 +1,32 @@
+{
+  "component": "sfinder",
+  "base_revision": "e1316c3fd1ec6994b46fef226206fce1c53b26b7",
+  "source_note": "The ZIP is the build-time source snapshot, including uncommitted modifications. base_revision alone is not its identity.",
+  "source_archive_sha256": "13d9c30ab3814494a39ae09acaeebf985b48b9c20c0a700a049750da1ac175a3",
+  "source_files": {
+    "LICENSE": "308f2d9cebbeeee949068411b86339efb113bcf28f88925d46f08092b2732e37",
+    "THIRD_PARTY_NOTICES.md": "91efdad9ee318e10af697e5003d53086bb77401245a7b9627af41c13f1967c87",
+    "licenses/sfinder-dependencies.txt": "b56a9d93a72396c95575fe5a651f93475ee98c934b30472e955b35d36aca6761",
+    "simulator/pc-solver/pc_solver_api.cpp": "fedaec0664905638f88fe3fc27c1b267be962614b82f2724ea927e051be7dac0",
+    "third_party/sfinder-cpp-master/LICENSE": "d75ffb8648ec9c5e90dfabc510d3dbb112a258da50bb74a8c2f6ac088f2054fb",
+    "third_party/sfinder-cpp-master/src/core/bits.cpp": "80f91cc1e39da56eb4521985d71a37b444ffa4ed780cf34559e9ab68343bfa0f",
+    "third_party/sfinder-cpp-master/src/core/bits.hpp": "305e8977b846e7a6bfe6273ebae9c6c9c8af165c6c58bed8209d3b33ee4d4ff7",
+    "third_party/sfinder-cpp-master/src/core/field.cpp": "f3d3f7c33e389761fd22f6682563cc0f871ad7343a74ea0bd883c3db3b7c0d28",
+    "third_party/sfinder-cpp-master/src/core/field.hpp": "bb9d8767cd0eab4a7826365b753534b028c65cca9fcd53c3ee1678b6815580b4",
+    "third_party/sfinder-cpp-master/src/core/moves.cpp": "8024b83dd05a97fedafa6601ba2c109afa50ab2ef0543a800b10f5b12e9ff751",
+    "third_party/sfinder-cpp-master/src/core/moves.hpp": "bcfbbcd42a924097b3557993bfc00142af6f900b80cf97984a3c6f781c7608ed",
+    "third_party/sfinder-cpp-master/src/core/piece.cpp": "c406d01876fe19b968603db1e3a9863676cdb6f8abb5be7b2fd08d91b98fdf47",
+    "third_party/sfinder-cpp-master/src/core/piece.hpp": "0e60434550b124e32e44b5d282d662cadd7e9341483712303c674873c9ba2906",
+    "third_party/sfinder-cpp-master/src/core/srs.cpp": "7dcc66225870c37cffe0852277238e536a3b952f138bb2c0c9b1a6721bdfb980",
+    "third_party/sfinder-cpp-master/src/core/srs.hpp": "5a245a55e31da15a284f8748876c5a5fe8fec4f783c9e5223668cc4d1985cceb",
+    "third_party/sfinder-cpp-master/src/core/types.hpp": "04d0baf4884651242843ea5c76e78c885ee0b90aeb7b6982b9f3d5a8588fbfee",
+    "third_party/sfinder-cpp-master/src/finder/perfect.cpp": "c2ed44040dcf5ac757a4c34f3daee3ef8798f998d1fdec947f86bb7d9d7061b4",
+    "third_party/sfinder-cpp-master/src/finder/perfect.hpp": "3a6464f6b19a9e161a25db8b95c6d5b621e2cbc802422ea0a7b201e2a1224d65",
+    "tools/build-pc-solver-wasm.ps1": "e5c46e261c88894d202e874a1851bc05c26fdd6c8538177079666ab3c187b692",
+    "tools/package-ai-licenses.py": "67bf15269720016a1b1e885fd10e7266124b5b126f3a8276572449b58d981734"
+  },
+  "binaries": {
+    "simulator/pc-solver/sfinder-pc.js": "04c276d84766483ac0aba1d3dea7cd02298bcaebab9f79802bb42aab95aa044c",
+    "simulator/pc-solver/sfinder-pc.wasm": "b3b63930106c0562e6d9d4a8a3a149eceb8edd63f99bf83c927cfe56da760f57"
+  }
+}

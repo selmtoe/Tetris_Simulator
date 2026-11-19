@@ -1,0 +1,224 @@
+/* Cold Clear by MinusKelvin and contributors; Rust/WASM covered code: MPL-2.0.
+ * Full license and corresponding modified source: ../../licenses/index.html
+ * Direct source download: ../../licenses/cold-clear-source.zip
+ */
+/* Raw WASM bridge for the reference Cold Clear Standard bot. */
+
+'use strict';
+
+const COLD_CLEAR_MOVE_SIZE = 60;
+const COLD_CLEAR_TIMING_MOVE_SIZE = 64;
+
+class ColdClearWasmBridge {
+    constructor(instance) {
+        this.instance = instance;
+        this.exports = instance.exports;
+        this.memory = this.exports.memory;
+        this.moveSize = this.exports.cc_move_size ? this.exports.cc_move_size() : COLD_CLEAR_MOVE_SIZE;
+        this.candidateSize = this.exports.cc_candidate_size ? this.exports.cc_candidate_size() : 20;
+        this.supportsDecisionTopUp = Boolean(this.exports.cc_begin_decision);
+        if (!this.memory || !this.exports.cc_create || !this.exports.cc_alloc) {
+            throw new Error('Cold Clear WASM ABI is incomplete.');
+        }
+    }
+
+    static async load(wasmPath = './cold-clear.wasm?v=search-draws-v4') {
+        const url = new URL(wasmPath, self.location.href);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Cold Clear WASM HTTP ${response.status}`);
+        const bytes = await response.arrayBuffer();
+        const result = await WebAssembly.instantiate(bytes, {});
+        return new ColdClearWasmBridge(result.instance);
+    }
+
+    allocBytes(bytes) {
+        const ptr = this.exports.cc_alloc(bytes.length);
+        if (!ptr) throw new Error(`Cold Clear WASM allocation failed (${bytes.length}).`);
+        new Uint8Array(this.memory.buffer, ptr, bytes.length).set(bytes);
+        return ptr;
+    }
+
+    free(ptr, bytes) {
+        this.exports.cc_dealloc(ptr, bytes.length);
+    }
+
+    create(snapshot) {
+        const boardBytes = new Uint8Array(400);
+        for (let y = 0; y < 40; y++) {
+            const row = Array.isArray(snapshot.board?.[y]) ? snapshot.board[y] : [];
+            for (let x = 0; x < 10; x++) boardBytes[y * 10 + x] = row[x] == null ? 0 : 1;
+        }
+        const current = new TextEncoder().encode(String(snapshot.currentPiece || ''))[0] || 0;
+        const nextBytes = new TextEncoder().encode((snapshot.nextQueue || []).join(''));
+        const hold = new TextEncoder().encode(String(snapshot.holdPiece || ''))[0] || 0;
+        const weights = new TextEncoder().encode(JSON.stringify(snapshot.weights || {}));
+        const boardPtr = this.allocBytes(boardBytes);
+        const nextPtr = nextBytes.length ? this.allocBytes(nextBytes) : 0;
+        const weightsPtr = weights.length ? this.allocBytes(weights) : 0;
+        try {
+            const handle = this.exports.cc_create(
+                boardPtr,
+                current,
+                nextPtr,
+                nextBytes.length,
+                hold,
+                snapshot.canHold === false ? 0 : 1,
+                snapshot.isB2B ? 1 : 0,
+                Number.isFinite(snapshot.ren) ? snapshot.ren : -1,
+                Math.max(1, snapshot.nodeLimit | 0),
+                weightsPtr,
+                weights.length
+            );
+            if (!handle) throw new Error('Cold Clear WASM could not create a bot.');
+            return handle;
+        } finally {
+            this.free(boardPtr, boardBytes);
+            if (nextPtr) this.free(nextPtr, nextBytes);
+            if (weightsPtr) this.free(weightsPtr, weights);
+        }
+    }
+
+    nodeCount(handle) {
+        return this.exports.cc_node_count(handle) >>> 0;
+    }
+
+    beginDecision(handle, nodeBudget, incoming = 0) {
+        // Keep the checked-in production binary loadable while the candidate
+        // ABI is evaluated. Without the new export the old absolute max still
+        // applies (and telemetry will expose zero work); only the separately
+        // built candidate receives true retained-DAG top-ups.
+        if (!this.supportsDecisionTopUp) {
+            return (this.nodeCount(handle) + Math.max(1, nodeBudget | 0)) >>> 0;
+        }
+        return this.exports.cc_begin_decision(
+            handle,
+            Math.max(1, nodeBudget | 0),
+            Math.max(0, incoming | 0)
+        ) >>> 0;
+    }
+
+    candidates(handle) {
+        if (!this.exports.cc_candidate_count || !this.exports.cc_write_candidates) return [];
+        const count = this.exports.cc_candidate_count(handle) >>> 0;
+        if (!count) return [];
+        const ptr = this.exports.cc_alloc(count * this.candidateSize);
+        if (!ptr) throw new Error('Cold Clear WASM candidate allocation failed.');
+        try {
+            const written = Math.min(count, this.exports.cc_write_candidates(handle, ptr, count) >>> 0);
+            const view = new DataView(this.memory.buffer, ptr, written * this.candidateSize);
+            const candidates = [];
+            for (let index = 0; index < written; index++) {
+                const offset = index * this.candidateSize;
+                candidates.push({
+                    piece: String.fromCharCode(view.getUint8(offset)),
+                    hold: view.getUint8(offset + 1) !== 0,
+                    rotation: view.getUint8(offset + 2),
+                    tspin: view.getUint8(offset + 3) === 2 ? 'full' : (view.getUint8(offset + 3) === 1 ? 'mini' : null),
+                    x: view.getInt32(offset + 4, true),
+                    y: view.getInt32(offset + 8, true),
+                    value: view.getInt32(offset + 12, true),
+                    spike: view.getInt32(offset + 16, true)
+                });
+            }
+            return candidates;
+        } finally {
+            this.exports.cc_dealloc(ptr, count * this.candidateSize);
+        }
+    }
+
+    plan(handle, limit = 12) {
+        if (!this.exports.cc_write_plan) return [];
+        const capacity = Math.max(1, Math.min(40, Math.floor(limit)));
+        const ptr = this.exports.cc_alloc(capacity * this.candidateSize);
+        if (!ptr) throw new Error('Cold Clear WASM plan allocation failed.');
+        try {
+            const count = Math.min(capacity, this.exports.cc_write_plan(handle, ptr, capacity) >>> 0);
+            const view = new DataView(this.memory.buffer, ptr, count * this.candidateSize);
+            return Array.from({ length: count }, (_, index) => {
+                const offset = index * this.candidateSize;
+                return {
+                    piece: String.fromCharCode(view.getUint8(offset)),
+                    hold: view.getUint8(offset + 1) !== 0,
+                    rotation: view.getUint8(offset + 2),
+                    tspin: view.getUint8(offset + 3) === 2 ? 'full' : (view.getUint8(offset + 3) === 1 ? 'mini' : null),
+                    x: view.getInt32(offset + 4, true),
+                    y: view.getInt32(offset + 8, true)
+                };
+            });
+        } finally {
+            this.exports.cc_dealloc(ptr, capacity * this.candidateSize);
+        }
+    }
+
+    think(handle, milliseconds, decisionNodeLimit) {
+        const before = this.nodeCount(handle);
+        const deadline = performance.now() + Math.max(1, milliseconds);
+        let calls = 0;
+        let after = before;
+        while (performance.now() < deadline && after < decisionNodeLimit) {
+            const remaining = Math.max(1, decisionNodeLimit - after);
+            const batch = Math.min(256, remaining);
+            const previous = after;
+            after = this.exports.cc_think(handle, batch) >>> 0;
+            calls += batch;
+            if (after <= previous) break;
+        }
+        return { iterations: calls, nodesAdded: Math.max(0, after - before), count: after };
+    }
+
+    suggest(handle, incoming) {
+        return this.readMove(ptr => this.exports.cc_suggest(handle, Math.max(0, incoming | 0), ptr));
+    }
+
+    // Candidate indices are valid only until the next DAG mutation.
+    select(handle, index, incoming = 0) {
+        if (!this.exports.cc_select) throw new Error('Cold Clear WASM is missing cc_select; rebuild the candidate artifact.');
+        if (!Number.isInteger(index) || index < 0 || index > 0xffffffff) throw new RangeError('Invalid candidate index.');
+        return this.readMove(ptr => this.exports.cc_select(handle, index, Math.max(0, incoming | 0), ptr));
+    }
+
+    suggestLegal(handle, incoming = 0) {
+        if (!this.exports.cc_suggest_legal) throw new Error('Cold Clear WASM is missing cc_suggest_legal.');
+        return this.readMove(ptr => this.exports.cc_suggest_legal(handle, Math.max(0, incoming | 0), ptr));
+    }
+
+    readMove(write) {
+        const ptr = this.exports.cc_alloc(this.moveSize);
+        if (!ptr) throw new Error('Cold Clear WASM move allocation failed.');
+        try {
+            if (!write(ptr)) return null;
+            const view = new DataView(this.memory.buffer, ptr, this.moveSize);
+            const bytes = new Uint8Array(this.memory.buffer, ptr, this.moveSize);
+            return {
+                piece: String.fromCharCode(bytes[4]),
+                hold: bytes[5] !== 0,
+                rotation: bytes[6],
+                tspin: bytes[7] === 2 ? 'full' : (bytes[7] === 1 ? 'mini' : null),
+                x: view.getInt32(8, true),
+                y: view.getInt32(12, true),
+                inputs: Array.from(bytes.slice(17, 17 + bytes[16])).map(value => String.fromCharCode(value)),
+                nodes: view.getUint32(52, true),
+                depth: view.getUint32(56, true),
+                controllerInputs: this.moveSize >= COLD_CLEAR_TIMING_MOVE_SIZE
+                    ? view.getUint32(60, true)
+                    : null
+            };
+        } finally {
+            this.exports.cc_dealloc(ptr, this.moveSize);
+        }
+    }
+
+    commit(handle) {
+        return this.exports.cc_commit(handle) !== 0;
+    }
+
+    addNextPiece(handle, piece) {
+        return this.exports.cc_add_next_piece(handle, String(piece || '').charCodeAt(0)) !== 0;
+    }
+
+    destroy(handle) {
+        if (handle) this.exports.cc_destroy(handle);
+    }
+}
+
+self.ColdClearWasmBridge = ColdClearWasmBridge;

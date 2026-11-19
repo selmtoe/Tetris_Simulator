@@ -1,0 +1,11 @@
+﻿このフォルダーの ffmpeg（共有ライブラリ版）は LGPL v2.1 以降で提供されています。
+取得元: 
+https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip
+ビルド: 
+n9.0.2-45-g1e65c6cd5d-20261102
+ (BtbN/FFmpeg-Builds)
+ソースコード: https://github.com/FFmpeg/FFmpeg
+ビルドスクリプト: https://github.com/BtbN/FFmpeg-Builds
+
+再配布するときは、このライセンス文と入手元 URL を一緒に配ってください。
+LGPL は「動的リンクのまま配布する」ことが条件なので、DLL を同梱して exe から読み込む形は問題ありません。

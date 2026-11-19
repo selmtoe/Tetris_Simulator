@@ -1,0 +1,15 @@
+{
+  "name": "PPT Lab",
+  "short_name": "PPT Lab",
+  "description": "配信解析・テト譜・タグをまとめたローカル研究ツール",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f9f9f9",
+  "theme_color": "#f9f9f9",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

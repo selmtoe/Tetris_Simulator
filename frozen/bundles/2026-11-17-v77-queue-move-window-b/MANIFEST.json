@@ -1,0 +1,313 @@
+{
+ "label": "v77-queue-move-window-b",
+ "files": {
+  "config/tetris_recover.ini": {
+   "sha256": "f9edabafcb4fcaeb92b43280e386c113947e2ff9a5bcb3c689291d68f835f484",
+   "bytes": 3406
+  },
+  "engine/TetrisVideoRecovery_stream.exe": {
+   "sha256": "2b1a04aca1cb7a0a0af28d59c086c4bcbab15391e45be192f116b48f98f26e1b",
+   "bytes": 2703872
+  },
+  "env.json": {
+   "sha256": "876ec246c567e02af331f2a000c941f41b16b3750e387bb457e7f215676debb3",
+   "bytes": 890
+  },
+  "models/board/tetris.onnx": {
+   "sha256": "da60d1c9a32939f0d607a0393db842b994d801f877c5e24dcfaca5d301d5b7f2",
+   "bytes": 467255
+  },
+  "models/next/next_hold.onnx": {
+   "sha256": "b32435fa64aa54dbf96cad33d702524bb9f531933c24989acba52b5e6fbb5d65",
+   "bytes": 1525032
+  },
+  "models/ppt-lab/end3/manifest.json": {
+   "sha256": "e890cb8c0513ea9bfdbdb08a417e4835c630b9502baecdabc8e38eacc17c3373",
+   "bytes": 1247
+  },
+  "models/ppt-lab/end3/model-contract.json": {
+   "sha256": "0abba16f1a6ba6d7e06453e872c1d4c7f27b3bf020f19921616074bfb74e5ce8",
+   "bytes": 1196
+  },
+  "models/ppt-lab/end3/scene-classifier.onnx": {
+   "sha256": "71f08e1b9d36d321041429bd2cf2b5aebc6e6dcbfa410853fda140692ae4ebf3",
+   "bytes": 66075
+  },
+  "models/ppt-lab/fast320/manifest.json": {
+   "sha256": "822c4b2efed638ee36ce9e92e4ff00cb92a02215a60ffe91042efbdddebb2381",
+   "bytes": 855
+  },
+  "models/ppt-lab/fast320/next_hold.onnx": {
+   "sha256": "b32435fa64aa54dbf96cad33d702524bb9f531933c24989acba52b5e6fbb5d65",
+   "bytes": 1525032
+  },
+  "models/ppt-lab/fast320/scene-classifier.onnx": {
+   "sha256": "55efd493f8e01e3c96b2e104f2e35540c2321c603d3ec66335222393b7e1dd39",
+   "bytes": 1500731
+  },
+  "models/ppt-lab/fast320/tetris.onnx": {
+   "sha256": "da60d1c9a32939f0d607a0393db842b994d801f877c5e24dcfaca5d301d5b7f2",
+   "bytes": 467255
+  },
+  "models/run/next_hold.onnx": {
+   "sha256": "b32435fa64aa54dbf96cad33d702524bb9f531933c24989acba52b5e6fbb5d65",
+   "bytes": 1525032
+  },
+  "models/run/tetris.onnx": {
+   "sha256": "da60d1c9a32939f0d607a0393db842b994d801f877c5e24dcfaca5d301d5b7f2",
+   "bytes": 467255
+  },
+  "models/scene-main56/scene-classifier.onnx": {
+   "sha256": "55efd493f8e01e3c96b2e104f2e35540c2321c603d3ec66335222393b7e1dd39",
+   "bytes": 1500731
+  },
+  "README.md": {
+   "sha256": "ef5c80fa25b19a383876e163da7386d4f150f6db7c2a8195d525bb3f6b9535f5",
+   "bytes": 3003
+  },
+  "results/golden/v77-queue-move-window-b/half--FwFgRJbw0Q.golden.json": {
+   "sha256": "5cd929533f77b6c2c0491191d07710096764d95bf3a792a7cc973c9fd1a5ab42",
+   "bytes": 569905
+  },
+  "results/golden/v77-queue-move-window-b/half-bTL5xEH5OJA.golden.json": {
+   "sha256": "33e619cb2206cc2414fa129181098da72a3bed48e88ae9b769f1c14eff8e6995",
+   "bytes": 731072
+  },
+  "results/golden/v77-queue-move-window-b/half-uRZnHoDG508.golden.json": {
+   "sha256": "be67e7aad9ab27ac1008871c896edb263dbb827534d2fc6af2d0ea3f8757fb02",
+   "bytes": 706862
+  },
+  "results/golden/v77-queue-move-window-b/main56.golden.json": {
+   "sha256": "b430bd436eeadce3686c2c7e6707e41ff50a2afc3bc2dadcb681a97fe6ab87f2",
+   "bytes": 473490
+  },
+  "results/regression-record.json": {
+   "sha256": "9636366c2a58fe30d649e0a512b04b9f4dfd0cc66901f0bb4e94b8961a1c3ab7",
+   "bytes": 3123
+  },
+  "results/runs/v77-queue-move-window-b/half--FwFgRJbw0Q/batch-results.json": {
+   "sha256": "3171f2f6888cc65d500d6b55b9567287ad9256723523a050553884cdc3d9c997",
+   "bytes": 155450
+  },
+  "results/runs/v77-queue-move-window-b/half--FwFgRJbw0Q/quality-warnings.json": {
+   "sha256": "061530d66dac17e37e133d8d9e5879b253785d99dca2db72b4639e4f20950d25",
+   "bytes": 32537
+  },
+  "results/runs/v77-queue-move-window-b/half--FwFgRJbw0Q/replay-validation.json": {
+   "sha256": "16db159b42d9ce7c04dc05ada453f949bec4f308d6488742a49638ef5e440cd5",
+   "bytes": 33412
+  },
+  "results/runs/v77-queue-move-window-b/half--FwFgRJbw0Q/segments.matches.json": {
+   "sha256": "bc3f6deb3a5d6730b613813c5f8e011a1c55ce0a89fbd7ce77ca1c9216900517",
+   "bytes": 356082
+  },
+  "results/runs/v77-queue-move-window-b/half-bTL5xEH5OJA/batch-results.json": {
+   "sha256": "d57b0271fdb89b5cb17b5f0cd72f5cf157b8b969f7f55be2b05ef8ff4206020c",
+   "bytes": 189400
+  },
+  "results/runs/v77-queue-move-window-b/half-bTL5xEH5OJA/golden-compare.json": {
+   "sha256": "8aaedd151af1ebc0e08497a34b6215fcc1301fc71388f41924f234d4272356fb",
+   "bytes": 3711
+  },
+  "results/runs/v77-queue-move-window-b/half-bTL5xEH5OJA/quality-warnings.json": {
+   "sha256": "694afa5d8420c83bd40379383f927ac2a3bb520e22673a7c825959966d29de1f",
+   "bytes": 39679
+  },
+  "results/runs/v77-queue-move-window-b/half-bTL5xEH5OJA/replay-validation.json": {
+   "sha256": "efc25803fcd9f26e449f9a50dfb079e023a123b2b9e777b50a2e408222948602",
+   "bytes": 43620
+  },
+  "results/runs/v77-queue-move-window-b/half-bTL5xEH5OJA/segments.matches.json": {
+   "sha256": "9d97b1caafd7aab6d935f5edc1c8e253f8aa6f703acbba8dda952e1db515fe4a",
+   "bytes": 382208
+  },
+  "results/runs/v77-queue-move-window-b/half-uRZnHoDG508/batch-results.json": {
+   "sha256": "93933296eee246e2cf21caedc0729651bf952b47c2e0f0cc43bf6ec738ecb6e6",
+   "bytes": 181747
+  },
+  "results/runs/v77-queue-move-window-b/half-uRZnHoDG508/quality-warnings.json": {
+   "sha256": "10fc4a552f60086b35913129aa8cb554c38ccabab35982e125b711fbb0dd3507",
+   "bytes": 38026
+  },
+  "results/runs/v77-queue-move-window-b/half-uRZnHoDG508/replay-validation.json": {
+   "sha256": "32f8e44a491019eda52c2dc832f9e8df46e4b3f1cb68c5c8ac2296fc0c31d904",
+   "bytes": 40577
+  },
+  "results/runs/v77-queue-move-window-b/half-uRZnHoDG508/segments.matches.json": {
+   "sha256": "acf867cd9d0daa514ae95c8a268c002f3981240ede34cc769e5e6ada7c6f5ecd",
+   "bytes": 384396
+  },
+  "results/runs/v77-queue-move-window-b/main56/batch-results.json": {
+   "sha256": "42e0acf0ae2c62d10cf79ce9d14121e80122bc7caecc4a8792bd7739bd794c26",
+   "bytes": 144484
+  },
+  "results/runs/v77-queue-move-window-b/main56/golden-compare.json": {
+   "sha256": "9b7908dc5dc5b71bda76bfbce9d2714dc79586d46b2b079b2c500da06d1a2e77",
+   "bytes": 3665
+  },
+  "results/runs/v77-queue-move-window-b/main56/quality-warnings.json": {
+   "sha256": "67cfdc3a08cc3a707bc2540e31b9a1069cca8f700b9542ccb4b3528ca5491c14",
+   "bytes": 30875
+  },
+  "results/runs/v77-queue-move-window-b/main56/replay-validation.json": {
+   "sha256": "826ea3e547f02b497b00460ee99809fbd243f2a4213571803eed9aa48893cd44",
+   "bytes": 28914
+  },
+  "results/runs/v77-queue-move-window-b/main56/segments.matches.json": {
+   "sha256": "10815ab52c7df4ac4e1f0de09ec7cd81656c83f974f4cea8ce6da8c7d999c947",
+   "bytes": 137337
+  },
+  "results/runs/v77-queue-move-window-b/regress-record.json": {
+   "sha256": "d07d88d791cb75709c1ab2a4025b1c09757ddd1a03dcdb2377f587be91ff6ffe",
+   "bytes": 2993
+  },
+  "runtime/avcodec-63.dll": {
+   "sha256": "846a75718bd5d6b39d4b1f4768551b0a2f66e85d496022da8d7f37a91b90841a",
+   "bytes": 13783552
+  },
+  "runtime/avdevice-63.dll": {
+   "sha256": "e4ad2fe72df12b29029dc6e13d3174d1c0d291842c2bf20b2dadddf4861ce94a",
+   "bytes": 5008384
+  },
+  "runtime/avfilter-12.dll": {
+   "sha256": "ff8c43ea64c2e2e07a3db53eaeb8b47ea1b51e8aca3a5370ea9ec6ddfc4953cf",
+   "bytes": 31876096
+  },
+  "runtime/avformat-63.dll": {
+   "sha256": "e1d50d7e7eaca0e95f0178e794336e42425538ae1bd54c8a217b3ed331f6c595",
+   "bytes": 2575872
+  },
+  "runtime/avutil-61.dll": {
+   "sha256": "82461e77fc3208f0af10c4ec79aa9de00717748215cd254e502b23e69892c6d3",
+   "bytes": 881152
+  },
+  "runtime/cublas64_13.dll": {
+   "sha256": "8c6bac24474af29627ec96500025a5d410a1b7e8ffa00e1fe13b1781fc6b3ddc",
+   "bytes": 52697712
+  },
+  "runtime/cublasLt64_13.dll": {
+   "sha256": "e323abd89e0f03c1db91a09d7aeb1928de08e1f86192cc713b335fefe3e368a9",
+   "bytes": 463655536
+  },
+  "runtime/cudart64_13.dll": {
+   "sha256": "b00ca6f53699120da815bf3e06e2e4285fae2f201235b883dcbb50eec51e2a2a",
+   "bytes": 551024
+  },
+  "runtime/cudnn64_9.dll": {
+   "sha256": "99a529a5c252fbc1efcb2f51860498aed053be878090f2094ac86638d4765021",
+   "bytes": 266352
+  },
+  "runtime/cudnn_adv64_9.dll": {
+   "sha256": "8c99fc46ce20a206309e936d029a10c68f3b40b027e6eb41b2b08dca34e2c1a7",
+   "bytes": 88123936
+  },
+  "runtime/cudnn_cnn64_9.dll": {
+   "sha256": "c3c2aacf2b61563c72b14d2466da403c99c13d17dddddf62af2f5a1a299aa3a6",
+   "bytes": 1428080
+  },
+  "runtime/cudnn_engines_precompiled64_9.dll": {
+   "sha256": "c329d58cb49e3a1574d2bbdde12c6a53f787c12f813efa9db7efa8d16c4207fb",
+   "bytes": 188558368
+  },
+  "runtime/cudnn_engines_runtime_compiled64_9.dll": {
+   "sha256": "9d0cafc368b1998811f49509b031a4d69c5972a91a3210d89ae183ba7a918719",
+   "bytes": 19942944
+  },
+  "runtime/cudnn_graph64_9.dll": {
+   "sha256": "bd641fd259e877928ae9469efae7a40666d0b4db71ea1df18a40479378b75dfe",
+   "bytes": 2285600
+  },
+  "runtime/cudnn_heuristic64_9.dll": {
+   "sha256": "c81c3cd1d76fade865512ceb5318f793b1871097aa92afefcddf5e4dd6cbd924",
+   "bytes": 53315104
+  },
+  "runtime/cudnn_ops64_9.dll": {
+   "sha256": "92c09220f486c3eb3a456106e069667253f153792b2e8e91cba49db110a74f5e",
+   "bytes": 29970976
+  },
+  "runtime/cufft64_12.dll": {
+   "sha256": "35e531c8b4796b1a073948447dba618069fc839ded3da625416dfc7de496c1a1",
+   "bytes": 256092784
+  },
+  "runtime/onnxruntime.dll": {
+   "sha256": "cff64bb69859ba556218d64fe3acbc444b971bac9b71b1cb30e8559b277000fb",
+   "bytes": 15837496
+  },
+  "runtime/onnxruntime_providers_cuda.dll": {
+   "sha256": "872d2af0de752f8448907863051962cef2ad615702d2784ca9fc1fe72bd1898c",
+   "bytes": 245956960
+  },
+  "runtime/onnxruntime_providers_shared.dll": {
+   "sha256": "fbc024360a17ae4948900d2be392fbeafdfc1a8ffd42e32a76eeff09f85c182f",
+   "bytes": 21856
+  },
+  "runtime/pkgconf-8.dll": {
+   "sha256": "178815e31553b6ab27ed0c47781a920ec339b86577bfb6f7df251e3ca45df3be",
+   "bytes": 90112
+  },
+  "runtime/swresample-7.dll": {
+   "sha256": "e385fff12f82d405e3696ca6b20a452b81a7fc7bccbe0114575192ced6ce5382",
+   "bytes": 747008
+  },
+  "runtime/swscale-10.dll": {
+   "sha256": "779e062ae3771ba5a4b6822f77c8659c3f7d89233b7997f42f71d467e4b62789",
+   "bytes": 2343936
+  },
+  "source/ppt-lab-7cafc69db0d4.zip": {
+   "sha256": "50cd6517a67816264b73f6b07e5716c28bd8bb90ef3e949a30585ff6d1280767",
+   "bytes": 9798834
+  },
+  "source/video-recovery-source-7cafc69db0d4.zip": {
+   "sha256": "38af934efdac2d4bef998710f3fa4ed514ccb0ad7d60838c89a7cc15468276b9",
+   "bytes": 430465
+  },
+  "tools/frozen/golden/suites.json": {
+   "sha256": "e4d08b51cb00ccd64d38f5f31c746f65f2ff88f15ca7d5eda5b9b9105d7339be",
+   "bytes": 7281
+  },
+  "tools/tools/compare_warnings.py": {
+   "sha256": "5840c6af37b0cd72b392496ec7dc68aef1d54b3e069265bca4d0d4b31f051074",
+   "bytes": 2124
+  },
+  "tools/tools/freeze_bundle.py": {
+   "sha256": "a1554010cf661fd904278938e3959678c2405a590b09995842d93297663f5fe1",
+   "bytes": 13962
+  },
+  "tools/tools/golden_trace.py": {
+   "sha256": "2dc4be07deb1ce41cc6b9f90ba05d9a3f6e707569f266e2d8c9d3252e5e9816f",
+   "bytes": 12684
+  },
+  "tools/tools/ppt-end3-winner.py": {
+   "sha256": "213f7f78fe6bc30f5c77c7ed7642ac3b1173355372c41a25dcd279894e297d4b",
+   "bytes": 21707
+  },
+  "tools/tools/ppt-winner-from-runs.py": {
+   "sha256": "4106b644c08e30b24255793f936ba3613b44dae1f7e826a3f3025631abbaf431",
+   "bytes": 17733
+  },
+  "tools/tools/regress.py": {
+   "sha256": "ef548000637ef73921cbf22359c85aa543240ccc683732b504014b54804a13a8",
+   "bytes": 21983
+  },
+  "tools/tools/replay_validator.py": {
+   "sha256": "5a22d0531a470f967ab7776c9028aea9a2f6fb034974405ab5bf7cca35895f98",
+   "bytes": 20632
+  },
+  "tools/tools/run-ppt-stream-analysis.ps1": {
+   "sha256": "dabd16afb1ec168104dff0f37d976de9e7e8fb89295672213f642dc354920368",
+   "bytes": 46406
+  },
+  "tools/tools/snapshot_engine.py": {
+   "sha256": "2f16ae77965520ed0837bf8816edd7a5ffc3081ca2561fff1353e07baf4adaea",
+   "bytes": 3190
+  },
+  "tools/tools/video-recovery-source/build_cuda.ps1": {
+   "sha256": "f38c3c77322639e5bb8a1c0e110e2888493b140058673b1ae4d759856f825145",
+   "bytes": 16520
+  },
+  "verify.py": {
+   "sha256": "99c961250cfc2c10a84ffc4de2a74d8820647e2234f24a3d2d2e269ff6022357",
+   "bytes": 662
+  }
+ }
+}

@@ -1,0 +1,51 @@
+{
+  "schema": "ppt-scene-model-contract/v1",
+  "crop": "largest-centered-16:9",
+  "input": {
+    "name": "frames",
+    "shape": [
+      "batch",
+      1,
+      90,
+      160
+    ],
+    "dtype": "float32"
+  },
+  "normalization": "luma uint8 / 127.5 - 1.0",
+  "output": {
+    "name": "logits",
+    "shape": [
+      "batch",
+      3
+    ]
+  },
+  "labels": [
+    {
+      "index": 0,
+      "folder": "60_end_draw",
+      "name_ja": "引き分け",
+      "shortcut": "1",
+      "color": "#8d6e63",
+      "description": "結果画面でどちらの勝ちも分からない画面（両者とも負けの絵）"
+    },
+    {
+      "index": 1,
+      "folder": "80_end_p1",
+      "name_ja": "1P勝利",
+      "shortcut": "2",
+      "color": "#b23a48",
+      "description": "結果画面で左のプレイヤーの勝ちが分かる画面"
+    },
+    {
+      "index": 2,
+      "folder": "90_end_p2",
+      "name_ja": "2P勝利",
+      "shortcut": "3",
+      "color": "#e07b39",
+      "description": "結果画面で右のプレイヤーの勝ちが分かる画面"
+    }
+  ],
+  "single_frame_events": [],
+  "architecture": "tiny",
+  "flip_end_labels": true
+}

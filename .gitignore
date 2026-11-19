@@ -1,0 +1,23 @@
+﻿scratch/
+_archive/
+tools/video-recovery-runtime/data/
+frozen/**/*.zip
+frozen/**/*.onnx
+frozen/**/*.exe
+
+# large generated review media
+review/warning-matches/clips/
+review/warning-clips/clips/
+
+# generated forensic reports
+review/forensics/
+review/warning-matches/
+
+# 凍結一式: 中身（DLL・exe・モデル・zip・結果）は git に入れない。README/MANIFEST/env/verify だけ記録する
+frozen/bundles/*/*/
+frozen/**/*.tetracemodel
+frozen/models/*/engine/
+frozen/models/*/*.zip
+
+# PPT Lab ブラウザ版の書き出し（tools/build-lab.py が公開Lab 用に組み立てる。公開データは Lab リポジトリで持つ）
+tools/ppt-lab/webdata/

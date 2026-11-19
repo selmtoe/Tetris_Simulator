@@ -1,0 +1,221 @@
+{
+ "baseline": "v77-queue-move-window-b",
+ "runtime": {
+  "scene": "frozen/models/Tetrace-V1.0-PPT/models/scene-classifier.onnx",
+  "board": "frozen/models/Tetrace-V1.0-PPT/models/tetris.onnx",
+  "next": "frozen/models/Tetrace-V1.0-PPT/models/next_hold.onnx",
+  "ini": "tools/video-recovery-runtime/config/tetris_recover.ini"
+ },
+ "suites": {
+  "main56": {
+   "video": "scratch/labsite/media/yD_ZukVrgHY.mkv",
+   "mode": "detect",
+   "matches": 56,
+   "note": "HANDOFF benchmark: 360p30, all 56 matches"
+  },
+  "lab-toN1cDiaH58": {
+   "video": "scratch/labsite/media/toN1cDiaH58.mp4",
+   "mode": "detect",
+   "limit": 12,
+   "matches": 12,
+   "note": "Lab site video, first 12 matches"
+  },
+  "lab-pSMZ_7Avwxo": {
+   "video": "scratch/labsite/media/pSMZ_7Avwxo.mp4",
+   "mode": "detect",
+   "limit": 12,
+   "matches": 12,
+   "note": "Lab site video, first 12 matches"
+  },
+  "lab-J-upNUb6kwE": {
+   "video": "scratch/labsite/media/J-upNUb6kwE.mp4",
+   "mode": "detect",
+   "limit": 12,
+   "matches": 12,
+   "note": "Lab site video, first 12 matches"
+  },
+  "lab-IWskrghK-gc": {
+   "video": "scratch/labsite/media/IWskrghK-gc.mp4",
+   "mode": "detect",
+   "limit": 12,
+   "matches": 12,
+   "note": "Lab site video, first 12 matches"
+  },
+  "half--FwFgRJbw0Q": {
+   "video": "scratch/labsite/media/-FwFgRJbw0Q.mp4",
+   "mode": "detect",
+   "limit": 59,
+   "matches": 59,
+   "note": "Lab site video, first half (59/117 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-4Qu6MEQegeg": {
+   "video": "scratch/labsite/media/4Qu6MEQegeg.mp4",
+   "mode": "detect",
+   "limit": 13,
+   "matches": 13,
+   "note": "Lab site video, first half (13/25 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-5dPPsUOrcpE": {
+   "video": "scratch/labsite/media/5dPPsUOrcpE.mp4",
+   "mode": "detect",
+   "limit": 20,
+   "matches": 20,
+   "note": "Lab site video, first half (20/39 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-6UGCAPzd50M": {
+   "video": "scratch/labsite/media/6UGCAPzd50M.mp4",
+   "mode": "detect",
+   "limit": 37,
+   "matches": 37,
+   "note": "Lab site video, first half (37/73 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-FMhM5akSQWk": {
+   "video": "scratch/labsite/media/FMhM5akSQWk.mp4",
+   "mode": "detect",
+   "limit": 51,
+   "matches": 51,
+   "note": "Lab site video, first half (51/101 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-GXr4f0dXrow": {
+   "video": "scratch/labsite/media/GXr4f0dXrow.mp4",
+   "mode": "detect",
+   "limit": 14,
+   "matches": 14,
+   "note": "Lab site video, first half (14/27 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-IWskrghK-gc": {
+   "video": "scratch/labsite/media/IWskrghK-gc.mp4",
+   "mode": "detect",
+   "limit": 15,
+   "matches": 15,
+   "note": "Lab site video, first half (15/30 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-J-upNUb6kwE": {
+   "video": "scratch/labsite/media/J-upNUb6kwE.mp4",
+   "mode": "detect",
+   "limit": 61,
+   "matches": 61,
+   "note": "Lab site video, first half (61/121 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-bTL5xEH5OJA": {
+   "video": "scratch/labsite/media/bTL5xEH5OJA.mp4",
+   "mode": "detect",
+   "limit": 72,
+   "matches": 72,
+   "note": "Lab site video, first half (72/144 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-dXk_Z8lx0mc": {
+   "video": "scratch/labsite/media/dXk_Z8lx0mc.mp4",
+   "mode": "detect",
+   "limit": 16,
+   "matches": 16,
+   "note": "Lab site video, first half (16/32 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-pSMZ_7Avwxo": {
+   "video": "scratch/labsite/media/pSMZ_7Avwxo.mp4",
+   "mode": "detect",
+   "limit": 41,
+   "matches": 41,
+   "note": "Lab site video, first half (41/81 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-r8NZlHTZ0-Q": {
+   "video": "scratch/labsite/media/r8NZlHTZ0-Q.mp4",
+   "mode": "detect",
+   "limit": 34,
+   "matches": 34,
+   "note": "Lab site video, first half (34/67 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-roDwsl-ppJo": {
+   "video": "scratch/labsite/media/roDwsl-ppJo.mp4",
+   "mode": "detect",
+   "limit": 72,
+   "matches": 72,
+   "note": "Lab site video, first half (72/144 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-toN1cDiaH58": {
+   "video": "scratch/labsite/media/toN1cDiaH58.mp4",
+   "mode": "detect",
+   "limit": 19,
+   "matches": 19,
+   "note": "Lab site video, first half (19/38 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-uRZnHoDG508": {
+   "video": "scratch/labsite/media/uRZnHoDG508.mp4",
+   "mode": "detect",
+   "limit": 69,
+   "matches": 69,
+   "note": "Lab site video, first half (69/137 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-yeiPMErPCjo": {
+   "video": "scratch/labsite/media/yeiPMErPCjo.mp4",
+   "mode": "detect",
+   "limit": 70,
+   "matches": 70,
+   "note": "Lab site video, first half (70/139 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-zFXxWHx0yWo": {
+   "video": "scratch/labsite/media/zFXxWHx0yWo.mp4",
+   "mode": "detect",
+   "limit": 65,
+   "matches": 65,
+   "note": "Lab site video, first half (65/130 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  },
+  "half-zebCVQwyhdk": {
+   "video": "scratch/labsite/media/zebCVQwyhdk.mp4",
+   "mode": "detect",
+   "limit": 18,
+   "matches": 18,
+   "note": "Lab site video, first half (18/35 matches); first 12 comparable with frozen/runs/labsite-360p30-12matches"
+  }
+ },
+ "groups": {
+  "lab4": [
+   "lab-toN1cDiaH58",
+   "lab-pSMZ_7Avwxo",
+   "lab-J-upNUb6kwE",
+   "lab-IWskrghK-gc"
+  ],
+  "all": [
+   "main56",
+   "lab-toN1cDiaH58",
+   "lab-pSMZ_7Avwxo",
+   "lab-J-upNUb6kwE",
+   "lab-IWskrghK-gc"
+  ],
+  "labhalf": [
+   "half--FwFgRJbw0Q",
+   "half-4Qu6MEQegeg",
+   "half-5dPPsUOrcpE",
+   "half-6UGCAPzd50M",
+   "half-FMhM5akSQWk",
+   "half-GXr4f0dXrow",
+   "half-IWskrghK-gc",
+   "half-J-upNUb6kwE",
+   "half-bTL5xEH5OJA",
+   "half-dXk_Z8lx0mc",
+   "half-pSMZ_7Avwxo",
+   "half-r8NZlHTZ0-Q",
+   "half-roDwsl-ppJo",
+   "half-toN1cDiaH58",
+   "half-uRZnHoDG508",
+   "half-yeiPMErPCjo",
+   "half-zFXxWHx0yWo",
+   "half-zebCVQwyhdk"
+  ]
+ },
+ "history": [
+  {
+   "at": "2026-11-11T03:10:00+09:00",
+   "from": null,
+   "to": "v48-d05916a22e15",
+   "reason": "initial golden from frozen v48 runs (goexit-360p30-stride1-8warn, labsite-360p30-12matches)"
+  },
+  {
+   "at": "2026-11-17T11:53:42+09:00",
+   "from": "v76-queue-move-start",
+   "to": "v77-queue-move-window-b",
+   "reason": "Tetrace-V1.0-PPT = v77 (queue-move window GO-exit ±1 s, earlier start allowed)"
+  }
+ ],
+ "runtimeNote": "main56 baseline (goexit-360p30-stride1-8warn) used scene dc4c652e7ef3 (final-full). tools/video-recovery-runtime/models/scene-classifier.onnx is the OLD 7b62e3e24116 model, as is the path in HANDOFF section 4 and labsite_analyze.ps1. Lab goldens were produced with the old model, so lab suites override it."
+}

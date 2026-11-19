@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cold Clear JS vs WASM benchmark</title>
+<style>body{font:14px monospace;background:#111;color:#eee;padding:20px}pre{white-space:pre-wrap}</style>
+<h1>Cold Clear JS vs reference WASM</h1>
+<pre id="output">Running…</pre>
+<script src="../simulator/workers/cold-clear-core.js"></script>
+<script src="../simulator/workers/cold-clear-wasm.js"></script>
+<script>
+(async () => {
+    const output = document.getElementById('output');
+    const empty = Array.from({ length: 40 }, () => Array(10).fill(null));
+    const snapshot = {
+        board: empty,
+        currentPiece: 'T',
+        nextQueue: ['I', 'O', 'L', 'J', 'S', 'Z', 'T', 'I'],
+        holdPiece: null,
+        canHold: true,
+        isB2B: false,
+        ren: -1,
+        incoming: 0,
+        weights: {}
+    };
+    const jsCore = globalThis.ColdClearSimulatorCore;
+    const bridge = await ColdClearWasmBridge.load('../simulator/workers/cold-clear.wasm');
+
+    function runJs(milliseconds) {
+        const search = new jsCore.Search();
+        search.analyze({ ...snapshot, thinkTimeMs: 1, nodeLimit: 1 });
+        const before = search.nodeCount;
+        const start = performance.now();
+        search.think(milliseconds, 1000000);
+        const elapsedMs = performance.now() - start;
+        return { elapsedMs, nodes: search.nodeCount - before };
+    }
+
+    function runWasm(milliseconds) {
+        const handle = bridge.create({ ...snapshot, nodeLimit: 1000000 });
+        const before = bridge.nodeCount(handle);
+        const start = performance.now();
+        const result = bridge.think(handle, milliseconds, 1000000);
+        const elapsedMs = performance.now() - start;
+        bridge.destroy(handle);
+        return { elapsedMs, nodes: result.count - before };
+    }
+
+    // Warm up both engines, then take three samples so a single JIT/GC pause
+    // does not decide the reported ratio.
+    runJs(20);
+    runWasm(20);
+    const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+    const rows = [50, 100, 250].map(milliseconds => {
+        const jsSamples = Array.from({ length: 3 }, () => runJs(milliseconds));
+        const wasmSamples = Array.from({ length: 3 }, () => runWasm(milliseconds));
+        const jsNodes = median(jsSamples.map(sample => sample.nodes));
+        const wasmNodes = median(wasmSamples.map(sample => sample.nodes));
+        const jsNodesPerMs = median(jsSamples.map(sample => sample.nodes / Math.max(0.001, sample.elapsedMs)));
+        const wasmNodesPerMs = median(wasmSamples.map(sample => sample.nodes / Math.max(0.001, sample.elapsedMs)));
+        return {
+            milliseconds,
+            jsNodes,
+            wasmNodes,
+            increase: (wasmNodes / Math.max(1, jsNodes)).toFixed(2) + 'x',
+            jsNodesPerMs: jsNodesPerMs.toFixed(1),
+            wasmNodesPerMs: wasmNodesPerMs.toFixed(1)
+        };
+    });
+    globalThis.coldClearBenchmark = { passed: true, samples: rows };
+    output.textContent = JSON.stringify(globalThis.coldClearBenchmark, null, 2);
+})().catch(error => {
+    document.getElementById('output').textContent = String(error && error.stack || error);
+});
+</script>

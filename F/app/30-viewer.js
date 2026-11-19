@@ -1,0 +1,277 @@
+function getShape(p, r) { 
+    if(!p) return []; 
+    if (!TETROMINOS[p]) {
+        console.error('CRITICAL ERROR in getShape: Invalid piece type detected.', 'Value:', p, 'Type:', typeof p);
+        throw new Error('Invalid piece type: ' + p);
+    }
+    const o=TETROMINOS[p].shape; 
+    if(r===0||p==='O')return o; 
+    const c=TETROMINOS[p].center;
+    return o.map(b=>{
+        let [x,y]=[b[0]-c[0],b[1]-c[1]]; 
+        for(let i=0;i<r;i++){[x,y]=[-y,x];} 
+        return [x+c[0]+(p==='O'?0.5:0),y+c[1]+(p==='O'?0.5:0)];
+    });
+}
+
+function drawViewerBlock(ctx, p, x, y, alpha = 1.0) {
+    if(y < -BLOCK_SIZE) return;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = NEXT_COLORS[p] || '#FFF';
+    ctx.fillRect(x, y, BLOCK_SIZE, BLOCK_SIZE);
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x, y, BLOCK_SIZE, BLOCK_SIZE);
+    ctx.globalAlpha = 1.0;
+}
+
+function drawViewerPiece(ctx, s, x, y, p, alpha) {
+    s.forEach(b => {
+        const px = Math.floor(x + b[0]) * BLOCK_SIZE;
+        const py = (Math.floor(y + b[1]) - (BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT)) * BLOCK_SIZE; 
+        drawViewerBlock(ctx, p, px, py, alpha);
+    });
+}
+
+function drawViewerUI(ctx, playerPageData, offsetX, nextOverride) {
+    ctx.save();
+    ctx.translate(offsetX, 0);
+    
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#FFF'; 
+    ctx.font = `bold ${BLOCK_SIZE * 0.8}px "Orbitron"`;
+
+    ctx.fillText('HOLD', HOLD_AREA_WIDTH / 2, 40);
+    const holdPiece = playerPageData.hold;
+    if (holdPiece) { 
+        const s = getShape(holdPiece, 0); 
+        s.forEach(b => { 
+            const px = (HOLD_AREA_WIDTH / 2) - (TETROMINOS[holdPiece].center[0] * BLOCK_SIZE) + (b[0] * BLOCK_SIZE);
+            const py = 70 - (TETROMINOS[holdPiece].center[1] * BLOCK_SIZE) + (b[1] * BLOCK_SIZE); 
+            drawViewerBlock(ctx, holdPiece, px, py); 
+        });
+    }
+
+    const rX = PLAYFIELD_X_OFFSET + PLAYFIELD_WIDTH + PADDING + NEXT_AREA_WIDTH / 2;
+    ctx.fillStyle = '#FFF';
+ctx.fillText('NEXT', rX, 40);
+    const nextQueue = (typeof nextOverride === 'string'
+        ? nextOverride
+        : (typeof displayNextForPage === 'function'
+            ? displayNextForPage(offsetX === 0 ? 'p1' : 'p2')
+            : String(playerPageData.next || ''))).split('');
+    const nextSpacing = Math.min(2.5, (CANVAS_HEIGHT - 90) / (BLOCK_SIZE * Math.max(1, Math.min(nextQueue.length, 10) - 1)));
+    const nextSize = nextQueue.length > 8 ? BLOCK_SIZE * 0.85 : BLOCK_SIZE;
+    for (let i = 0; i < Math.min(nextQueue.length, 10); i++) {
+        const pT = nextQueue[i];
+        if (!pT) continue;
+        const s = getShape(pT, 0);
+        const center = nextSize === BLOCK_SIZE ? TETROMINOS[pT].center : [
+            (Math.min(...s.map(cell => cell[0])) + Math.max(...s.map(cell => cell[0]))) / 2,
+            (Math.min(...s.map(cell => cell[1])) + Math.max(...s.map(cell => cell[1]))) / 2
+        ];
+        s.forEach(b => {
+            const px = rX - (center[0] * nextSize) + (b[0] * nextSize);
+            const py = 70 + (i * BLOCK_SIZE * nextSpacing) - (center[1] * nextSize) + (b[1] * nextSize);
+            ctx.save(); ctx.translate(px, py); ctx.scale(nextSize / BLOCK_SIZE, nextSize / BLOCK_SIZE);
+            drawViewerBlock(ctx, pT, 0, 0); ctx.restore();
+        });
+    }
+    
+    ctx.restore();
+}
+
+function drawViewer() {
+    if (!viewerCtx) return;
+    
+    viewerCtx.clearRect(0, 0, viewerCanvas.width, viewerCanvas.height);
+    const page = fumenPages[currentPageIndex];
+    const playersToDraw = (gameMode === '1P') ? ['p1'] : ['p1', 'p2'];
+    
+    playersToDraw.forEach((pid, index) => {
+        const offsetX = index * PLAYER_CANVAS_WIDTH;
+        const playerData = page[pid];
+        
+        viewerCtx.save();
+        viewerCtx.translate(offsetX, 0);
+
+        drawViewerUI(viewerCtx, playerData, index === 0 ? 0 : 1);
+
+        viewerCtx.save();
+        viewerCtx.translate(PLAYFIELD_X_OFFSET, 0.5 * BLOCK_SIZE);
+
+
+        viewerCtx.fillStyle = 'rgba(0,0,0,0.5)';
+        viewerCtx.fillRect(0, 0, PLAYFIELD_WIDTH, BOARD_VISIBLE_HEIGHT * BLOCK_SIZE);
+        
+        viewerCtx.strokeStyle = '#444';
+        viewerCtx.lineWidth = 0.5;
+        for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
+            for (let x = 0; x < BOARD_WIDTH; x++) {
+      
+          viewerCtx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+            }
+        }
+
+        viewerCtx.strokeStyle = '#4b4b7c';
+        viewerCtx.lineWidth = 2; 
+        viewerCtx.strokeRect(1, 1, PLAYFIELD_WIDTH - 2, (BOARD_VISIBLE_HEIGHT * BLOCK_SIZE) - 2);
+
+        const viewY = BOARD_HEIGHT - BOARD_VISIBLE_HEIGHT;
+        for (let y = 0; y < BOARD_VISIBLE_HEIGHT; y++) {
+            const boardY = y + viewY;
+            
+            let isLineClear = true;
+            if (playerData.board[boardY]) {
+                for (let xCheck = 0; xCheck < BOARD_WIDTH; xCheck++) {
+                    if (!playerData.board[boardY][xCheck]) {
+                        isLineClear = false;
+                        break;
+                    }
+                }
+            } else {
+                isLineClear = false;
+            }
+
+            for (let x = 0; x < BOARD_WIDTH; x++) { 
+if (playerData.board[boardY]?.[x]) { 
+                    const pieceType = playerData.board[boardY][x];
+                    const drawX = x * BLOCK_SIZE;
+                    const drawY = y * BLOCK_SIZE;
+                    
+                    viewerCtx.globalAlpha = 1.0;
+                    viewerCtx.fillStyle = COLORS[pieceType] || '#FFF';
+                    viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
+                    
+                    if (isLineClear) {
+                        viewerCtx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                        viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
+                    }
+                    
+                    viewerCtx.strokeStyle = '#444';
+                    viewerCtx.lineWidth = 0.5;
+                    viewerCtx.strokeRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
+                    viewerCtx.globalAlpha = 1.0;
+} 
+            } 
+        }
+
+        const operation = typeof operationForPage === 'function' ? operationForPage(playerData) : null;
+        if (operation && typeof operationCells === 'function') {
+            operationCells(operation).forEach(([x, boardY]) => {
+                const visibleY = boardY - viewY;
+                if (x < 0 || x >= BOARD_WIDTH || visibleY < 0 || visibleY >= BOARD_VISIBLE_HEIGHT) return;
+                const drawX = x * BLOCK_SIZE;
+                const drawY = visibleY * BLOCK_SIZE;
+                viewerCtx.fillStyle = NEXT_COLORS[operation.type] || '#fff';
+                viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
+                viewerCtx.fillStyle = 'rgba(255,255,255,.16)';
+                viewerCtx.fillRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
+                viewerCtx.strokeStyle = '#444';
+                viewerCtx.lineWidth = 0.5;
+                viewerCtx.strokeRect(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE);
+            });
+        }
+        
+        viewerCtx.restore();
+        viewerCtx.restore();
+    });
+}
+
+function viewerLoop() {
+    drawViewer();
+    viewerLoopHandle = requestAnimationFrame(viewerLoop);
+}
+
+function sendToSimulator() {
+    const currentPage = fumenPages[currentPageIndex];
+    const sanitize = (str) => String(str || '').replace(/[^IOTLSJZ]/gi, '');
+
+    // Always export the page currently shown in the viewer.  Exporting the
+    // whole replay collection here restarted the simulator from page 0, so
+    // terrain and NEXT appeared to be lost when the user transferred a later
+    // page.  replayStateAtPage resolves the active piece, queue, and HOLD for
+    // that exact page, including HOLD swaps.
+    const playerStateForSimulator = playerId => {
+        const page = currentPage?.[playerId] || {};
+        const pageNext = sanitize(typeof displayNextForPage === 'function'
+            ? displayNextForPage(playerId, currentPageIndex)
+            : page.next || '');
+        const operation = typeof operationForPage === 'function' ? operationForPage(page) : null;
+        let sequence = `${operation?.type || ''}${pageNext}`;
+        let hold = page.hold || '';
+
+        if (typeof currentCaseIsReplay === 'function' && currentCaseIsReplay() &&
+            typeof replayStateAtPage === 'function') {
+            const replayState = replayStateAtPage(currentCase(), playerId, currentPageIndex);
+            if (replayState?.current) {
+                sequence = `${replayState.current}${(replayState.queue || []).join('')}`;
+                hold = replayState.hold || hold;
+            }
+        }
+
+        return {
+            b: boardToString(page.board),
+            n: sanitize(sequence),
+            h: sanitize(hold)
+        };
+    };
+
+    const stateData = {
+        v: 2,
+        m: gameMode,
+        p1: playerStateForSimulator('p1')
+    };
+
+    if (gameMode === '2P') {
+        stateData.p2 = playerStateForSimulator('p2');
+    }
+
+    if (window.TetrisWorkspace) {
+        window.TetrisWorkspace.practice(stateData);
+        return;
+    }
+
+    const jsonString = JSON.stringify(stateData);
+    // Do not pass a full replay-sized Uint8Array to Function#apply.  A
+    // 2P/replay collection is large enough to overflow the JavaScript call
+    // stack; the shared codec already has a chunked UTF-8 Base64 encoder.
+    const base64Data = typeof encodeBase64Utf8 === 'function'
+        ? encodeBase64Utf8(jsonString)
+        : (() => {
+            const bytes = new TextEncoder().encode(jsonString);
+            let binary = '';
+            const chunkSize = 0x8000;
+            for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+                binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+            }
+            return btoa(binary);
+        })();
+    
+    let simulatorURL = '../index.html';
+    try {
+        const path = window.location.pathname;
+const parentPath = path.substring(0, path.lastIndexOf('/') + 1);
+        simulatorURL = parentPath + '../index.html';
+} catch(e) { /* fallback to '../index.html' */ }
+
+    // Hub検知: 親ウィンドウが存在し、自分自身でない場合
+    if (window.parent !== window) {
+        window.parent.postMessage({
+            target: 'sim',
+            type: 'loadState',
+            data: stateData // JSONオブジェクトをそのまま送信
+        }, '*');
+    } else {
+        location.href = `${simulatorURL}#${base64Data}`;
+    }
+}
+
+
+// --- 圧縮ロジック (RLE & 差分) ---
+
+/**
+ * 1次元配列をランレングス圧縮する
+ * @param {Array<string>} data - 1次元配列 ('_' を含む)
+ * @returns {Array<[string, number]>} 圧縮データ [[value, count], ...]
+ */

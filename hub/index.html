@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <script defer src="../shared/link-file.js" data-app="workspace"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#e9e9e9">
+    <title>Simulator</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="stylesheet" href="../tools/tetris-lab/preview-theme.css">
+    <link rel="stylesheet" href="./workspace.css?v=workflow-v2">
+    <script type="module" src="./js/workspace.js?v=workflow-v2"></script>
+</head>
+<body data-mode="simulator">
+    <main id="workspace-panes" aria-label="プレイと振り返り">
+        <section id="simulator-pane" class="workspace-pane" aria-label="シミュレータ">
+            <iframe id="iframe-sim" title="シミュレータ" allow="gamepad; clipboard-read; clipboard-write; fullscreen"></iframe>
+        </section>
+        <div id="workspace-divider" role="separator" aria-label="左右の幅を調整" aria-orientation="vertical" aria-valuemin="15" aria-valuemax="85" aria-valuenow="50" tabindex="0" hidden>
+            <span id="divider-grip" aria-hidden="true">⋮</span>
+        </div>
+        <section id="viewer-pane" class="workspace-pane" aria-label="リプレイビューワー" hidden>
+            <iframe id="iframe-editor-custom" title="リプレイビューワー" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+        </section>
+    </main>
+    <button id="pane-edge" type="button" hidden><span aria-hidden="true">⋮</span></button>
+    <p id="divider-hint" aria-live="polite"></p>
+    <aside id="interrupted-notice" hidden><span>中断前の記録が残っています</span><button id="open-interrupted">記録を見る</button><button id="dismiss-interrupted" aria-label="案内を閉じる">×</button></aside>
+    <p id="workspace-status" role="status" aria-live="polite" hidden></p>
+</body>
+</html>

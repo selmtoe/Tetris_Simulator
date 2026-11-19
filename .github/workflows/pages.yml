@@ -1,0 +1,56 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify GA policy and AI integration
+        run: |
+          node --test ai-lab/test-policy.cjs ai-lab/test-worker.cjs ai-lab/test-integration.cjs
+          node tools/test-ai-no-legal-move.js
+          node tools/test-ai-garbage-replan.js
+
+      - name: Build public web tools
+        run: python3 tools/build-web.py
+
+      - name: Verify licenses and public artifact
+        run: |
+          python3 tools/test-ai-licenses.py
+          python3 tools/test-web-build.py
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/pages
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

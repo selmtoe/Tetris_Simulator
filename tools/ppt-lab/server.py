@@ -1,0 +1,2748 @@
+"""PPT Lab のローカルサーバ（127.0.0.1 のみ）。
+
+起動:  python server.py [--port 8765] [--data <dir>] [--open]
+画面:  web/index.html をそのまま配信し、/api/* で JSON を返す。
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import base64
+import json
+import mimetypes
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import threading
+import time
+import uuid
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+
+
+def _dir_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    total = 0
+    for item in path.rglob('*'):
+        if item.is_file():
+            try:
+                total += item.stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def data_info() -> dict:
+    """データ管理タブに出す情報。"""
+    data_dir = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'PPTLab'
+    db = data_dir / 'pptlab.sqlite3'
+    batches = ROOT_RUNTIME / 'data' / 'batches'
+    caches = list(batches.rglob('analysis-cache.v1.json')) if batches.exists() else []
+    return {
+        'version': VERSION,
+        'dataDir': str(data_dir),
+        'dbSize': db.stat().st_size if db and db.is_file() else 0,
+        'mediaSize': _dir_size(data_dir / 'media'),
+        'cropSize': _dir_size(CROP_DIR),
+        'analysisCacheSize': sum(item.stat().st_size for item in caches if item.is_file()),
+        'analysisCacheCount': len(caches),
+        'videos': len(STORE.videos()),
+        'matches': sum(int(item.get('matchCount') or 0) for item in STORE.videos()),
+    }
+
+SETTINGS_SCHEMA = [
+    {'key': 'startView', 'group': '一般', 'label': '起動時に開く画面', 'type': 'enum',
+     'default': 'videos', 'options': [['videos', '動画一覧'], ['last', '前回の画面']]},
+    {'key': 'openLinks', 'group': '一般', 'label': 'リンクの開き方', 'type': 'enum',
+     'default': 'newTab', 'options': [['newTab', '新しいブラウザ'], ['sameWindow', 'このウィンドウ内']],
+     'note': '「このウィンドウ内」は、シミュレータや盤面ビューワーをLabの中で開きます（画面共有で見せたいとき用）'},
+    {'key': 'launchMode', 'group': '一般', 'label': '起動したときの開き方', 'type': 'enum',
+     'default': 'app', 'options': [['app', 'アプリのウィンドウ'], ['tab', 'ブラウザのタブ']],
+     'note': 'デスクトップの「PPT Lab」から起動したときの開き方です（次回の起動から反映）'},
+    {'key': 'notifyAnalysis', 'group': '一般', 'label': '解析完了の通知', 'type': 'bool', 'default': True},
+    {'key': 'tagPromptOnSave', 'group': '一般', 'label': '保存時にタグ選択を出す', 'type': 'bool', 'default': True},
+    {'key': 'theme', 'group': '表示', 'label': 'テーマ', 'type': 'enum', 'default': 'light',
+     'options': [['light', 'ライト'], ['dark', 'ダーク']]},
+    {'key': 'pageSize', 'group': '表示', 'label': '1ページの件数', 'type': 'int', 'default': 40,
+     'options': [[20, '20'], [40, '40'], [60, '60'], [100, '100']]},
+    {'key': 'playbackRate', 'group': '表示', 'label': '既定の再生速度', 'type': 'enum', 'default': '1',
+     'options': [['0.25', 'x0.25'], ['0.5', 'x0.5'], ['1', 'x1.0'], ['1.5', 'x1.5']]},
+    {'key': 'sortOrder', 'group': '表示', 'label': '既定の並び順', 'type': 'enum', 'default': 'new',
+     'options': [['new', '新しい順'], ['old', '古い順'], ['matches', '試合数が多い順'], ['title', '名前順']]},
+    {'key': 'showOpeningOnCards', 'group': '表示', 'label': '試合カードにテンプレを表示', 'type': 'bool', 'default': False},
+    {'key': 'labRepoDir', 'group': '一般', 'label': 'GitHub Pages（公開Lab）のリポジトリのフォルダ', 'type': 'path',
+     'default': str(Path.home() / 'Documents' / 'Lab')},
+    {'key': 'downloadQualitySaved', 'group': '解析', 'label': '動画保存時の取得解像度', 'type': 'enum',
+     'default': '1080',
+     'options': [['1080', '1080p（推奨）'], ['720', '720p'], ['480', '480p'], ['360', '360p']],
+     'note': '動画をPCに保存するときの解像度です（大きいほどきれいで容量も増えます）'},
+    {'key': 'downloadQualityStream', 'group': '解析', 'label': '動画非保存時の取得解像度', 'type': 'enum',
+     'default': '360',
+     'options': [['1080', '1080p'], ['720', '720p'], ['480', '480p'], ['360', '360p（推奨）']],
+     'note': '解析のためだけに取得するときの解像度です（360pが最速）'},
+    {'key': 'downloadDir', 'group': '解析', 'label': '動画の保存先', 'type': 'path', 'default': ''},
+    {'key': 'downloadVideo', 'group': '解析', 'label': 'YouTubeの動画をPCに保存', 'type': 'bool',
+     'default': False,
+     'note': 'オンにすると、解析後に音声も取得して映像と結合し、PCに保存します（追加画面のチェックの初期値）'},
+    {'key': 'analysisProfile', 'group': '解析', 'label': '解析モデル', 'type': 'enum',
+     # 選択肢は settings_schema() がインストール済みモデルから作り直す。
+     'default': 'tetrace-v1.0-ppt',
+     'options': [['tetrace-v1.0-ppt', 'Tetrace-V1.0-PPT']],
+     'note': '変えると次回の解析は最初からやり直しになります'},
+    {'key': 'analysisOutputDir', 'group': '解析', 'label': '解析の出力先', 'type': 'path', 'default': ''},
+    {'key': 'useRamDisk', 'group': '解析', 'label': 'RAMディスクを使う', 'type': 'bool', 'default': False},
+    {'key': 'detailedLog', 'group': '解析', 'label': '詳細ログを残す', 'type': 'bool', 'default': False},
+    {'key': 'autoApplyNames', 'group': '名前とタグ', 'label': 'プレイヤー名の記憶を自動適用', 'type': 'bool', 'default': True},
+    {'key': 'autoTags', 'group': '名前とタグ', 'label': '自動タグを付ける', 'type': 'bool', 'default': True},
+    {'key': 'videoStorage', 'group': 'データ管理', 'label': '動画ファイルの扱い', 'type': 'enum', 'default': 'reference',
+     'options': [['reference', '元の場所を参照'], ['copy', 'アプリ内にコピー']]},
+    {'key': 'missingVideoAction', 'group': 'データ管理', 'label': '元ファイルが見つからないとき', 'type': 'enum',
+     'default': 'warn', 'options': [['warn', '警告を出す'], ['refetch', '自動で再取得'], ['ignore', '無視']]},
+]
+SETTING_DEFAULTS = {item['key']: item['default'] for item in SETTINGS_SCHEMA}
+SETTING_TYPES = {item['key']: item['type'] for item in SETTINGS_SCHEMA}
+
+PROFILES = []
+try:
+    PROFILES = json.loads((Path(__file__).with_name('profiles.json')).read_text(encoding='utf-8')).get('profiles') or []
+except (OSError, json.JSONDecodeError):
+    PROFILES = []
+
+
+ROOT_RUNTIME = Path(__file__).resolve().parents[1] / 'video-recovery-runtime'
+VERSION = '0.1.0'
+CROP_DIR = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'PPTLab' / 'name-crops'
+
+VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.webm', '.mov', '.avi', '.ts', '.m4v', '.flv'}
+from urllib.parse import parse_qs, unquote, urlsplit
+
+APP_ROOT = Path(__file__).resolve().parent
+TOOLS_ROOT = APP_ROOT.parent
+RUNTIME = TOOLS_ROOT / 'video-recovery-runtime'
+WEB_ROOT = APP_ROOT / 'web'
+# 画面は公開版と同じ /ppt-lab/ に置き、盤面ビューワー（F/）とシミュレータは
+# 同じサイトのもの（＝ネットに取りに行かない）を配信する。
+# ルート側は GitHub Pages と同じビルド（dist/pages）を優先して使う。
+SITE_ROOT = APP_ROOT.parents[1]
+SITE_BUILD = SITE_ROOT / 'dist' / 'pages'
+LAB_PREFIX = '/ppt-lab'
+SITE_DIRS = ('F', 'hub', 'simulator', 'shared', 'styles', 'icons', 'ai-lab', 'Load PPT')
+SITE_FILES = ('index.html', 'manifest.webmanifest', 'sw.js')
+SITE_EXTRA = ('tools/tetris-lab/preview-theme.css',)
+SITE_TYPES = {'.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm',
+              '.json': 'application/json', '.webmanifest': 'application/manifest+json',
+              '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.onnx': 'application/octet-stream'}
+DEFAULT_DATA = Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'PPTLab'
+VERSION = '0.1.0'
+STARTED_AT = time.time()
+
+sys.path.insert(0, str(APP_ROOT))
+from store import Store  # noqa: E402
+from playerstats import MoveTimes, player_stats  # noqa: E402
+from boarddrift import DriftCache, recovered_file  # noqa: E402
+from openings import OpeningCache, key_of as opening_key_of, PIECES as OPENING_PIECES  # noqa: E402
+import models_registry  # noqa: E402
+from jobs import JobManager, ensure_ram_disk, ram_disk_info  # noqa: E402
+from jobs import batch_folder_name, find_ram_disk  # noqa: E402
+from namereview import NameReview, read_player_names, apply_names  # noqa: E402
+from namereview import SAME_IMAGE_THRESHOLD, _correlation, crop_vector, require_imaging  # noqa: E402
+
+# 解析モデル（models\<id>\manifest.json）の置き場所。
+MODELS_DIR = models_registry.MODELS_DIR
+from namereview import save_name_crops  # noqa: E402
+# 表記ゆれの畳み方と「いちばん多い表記」は namereview と共通（同じ規則でまとめる）
+from namereview import fold_name, most_common, name_groups  # noqa: E402
+
+STORE: Store | None = None
+JOBS: JobManager | None = None
+REVIEW: NameReview | None = None
+_RAM_SETUP = threading.Event()
+
+
+# ---- 動画の削除（DB の行と、それに紐づくファイルをまとめて消す）-----------
+# 解析結果（runtime\data\batches\<バッチ>）とダウンロード動画
+# （<データ>\media\<video_id> / R:\PPTLab\media\<video_id>）を消す。
+# 消し先は必ず「基準フォルダの直下」だけを許可する（.. や絶対パスで外に出さない）。
+BATCHES_ROOT = RUNTIME / 'data' / 'batches'
+MB = 1024 * 1024
+
+
+def cleanup_log_path() -> Path:
+    """削除・点検の記録先（データフォルダ配下）。"""
+    base = Path(JOBS.data) if JOBS is not None else DEFAULT_DATA
+    return base / 'logs' / 'cleanup.log'
+
+
+def log_cleanup(message: str) -> None:
+    """削除の結果を stderr とログファイルの両方に残す（失敗しても処理は続ける）。"""
+    line = f'{time.strftime("%Y-%m-%d %H:%M:%S")} {message}'
+    # pythonw（デスクトップのアイコンから起動）には stderr が無い
+    if sys.stderr is not None:
+        try:
+            sys.stderr.write(line + '\n')
+        except (OSError, ValueError):
+            pass
+    try:
+        path = cleanup_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('a', encoding='utf-8') as handle:
+            handle.write(line + '\n')
+    except OSError:
+        pass
+
+
+def direct_child(base: Path, candidate: Path) -> Path | None:
+    """base の**直下**のフォルダだけを返す（外を指していたら None）。"""
+    try:
+        base_path = Path(base).resolve()
+        target = Path(candidate).resolve()
+    except (OSError, RuntimeError):
+        return None
+    if target == base_path or target.parent != base_path:
+        return None
+    if target.name in ('', '.', '..'):
+        return None
+    return target
+
+
+def remove_tree(target: Path) -> str:
+    """フォルダを丸ごと消す。消せなかったときだけ理由を返す。"""
+    try:
+        shutil.rmtree(target)
+        return ''
+    except OSError as first:
+        problem = str(first)
+    # 読み取り専用のファイルが混じっていると消せないので、属性を外して一度だけやり直す
+    for root, dirs, files in os.walk(target, topdown=False):
+        for name in list(files) + list(dirs):
+            try:
+                os.chmod(os.path.join(root, name), stat.S_IWRITE)
+            except OSError:
+                pass
+    try:
+        shutil.rmtree(target)
+        return ''
+    except OSError as error:
+        return str(error) or problem
+
+
+def media_roots() -> list[Path]:
+    """ダウンロード動画を置き得るフォルダ（重複なし）。
+
+    通常のデータフォルダ、設定 downloadDir、RAM ディスク（R:\\PPTLab\\media）を見る。
+    """
+    roots: list[Path] = [Path(JOBS.data if JOBS is not None else DEFAULT_DATA) / 'media']
+    try:
+        configured = str(STORE.settings().get('downloadDir') or '').strip() if STORE else ''
+    except Exception:
+        configured = ''
+    if configured:
+        roots.append(Path(configured))
+    try:
+        ram = find_ram_disk()
+    except Exception:
+        ram = None
+    if ram is not None:
+        roots.append(Path(ram) / 'PPTLab' / 'media')
+    if Path('R:\\').is_dir():
+        roots.append(Path('R:\\PPTLab\\media'))
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        try:
+            key = str(Path(root).resolve()).lower()
+        except OSError:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(Path(root))
+    return unique
+
+
+def batch_candidates(video: dict) -> list[Path]:
+    """その動画の解析結果フォルダの候補（manifest 優先、無ければタイトルから推定）。"""
+    manifest = str(video.get('manifest') or '').strip()
+    if manifest:
+        path = Path(manifest)
+        if path.name.lower() != 'batch-results.json':
+            # 取り込み（imported\...\manifest.json）はバッチではないので対象外
+            return []
+        if path.parent.is_dir():
+            return [path.parent]
+        # manifest の置き場所ごと消えている → タイトルから推定する
+    title = str(video.get('title') or '').strip() or str(video.get('id') or '').strip()
+    if not title:
+        return []
+    # 解析側（jobs.batch_folder_name）と同じ規則で名前を推定する。
+    # タイトルは 40 文字に切り、末尾に動画IDを残す（表示タイトルは DB のまま）。
+    return [BATCHES_ROOT / batch_folder_name(
+        title, source=str(video.get('source') or ''),
+        video_id=str(video.get('id') or ''), root=BATCHES_ROOT)]
+
+
+def batch_used_by_other(video_id: str, target: Path) -> str:
+    """対象フォルダを別の動画が参照していたら、その動画の id を返す。"""
+    assert STORE is not None
+    for row in STORE.videos():
+        if row['id'] == video_id:
+            continue
+        manifest = str(row.get('manifest') or '').strip()
+        if not manifest:
+            continue
+        try:
+            path = Path(manifest).resolve()
+        except OSError:
+            continue
+        if target == path.parent or target in path.parents:
+            return str(row['id'])
+    return ''
+
+
+def purge_video_files(video: dict) -> dict:
+    """動画に紐づくファイルを消す（DB の行を消したあとに呼ぶ）。
+
+    消せないものがあっても例外にせず、`warnings` に入れて返す。
+    """
+    video_id = str(video.get('id') or '').strip()
+    removed: list[str] = []
+    warnings: list[str] = []
+    freed = 0
+
+    # 解析が走っている最中に書き込み先を消さない（DB 行はもう消えている）
+    active = ''
+    try:
+        job = JOBS.latest_for_video(video_id) if JOBS is not None else None
+        if job and job.get('status') in ('queued', 'running', 'analyzing'):
+            active = str(job.get('status'))
+    except Exception:
+        active = ''
+    if active:
+        message = f'解析中（{active}）のためファイルは残しました: {video_id}'
+        log_cleanup(f'skip(active) id={video_id} status={active}')
+        return {'removed': removed, 'warnings': [message], 'freedBytes': freed}
+
+    # 1) 解析結果（バッチ）のフォルダ
+    for candidate in batch_candidates(video):
+        target = direct_child(BATCHES_ROOT, candidate)
+        if target is None:
+            warnings.append(f'バッチの場所が想定外のため削除しません: {candidate}')
+            log_cleanup(f'skip(outside) id={video_id} path={candidate}')
+            continue
+        if not target.is_dir():
+            continue
+        owner = batch_used_by_other(video_id, target)
+        if owner:
+            warnings.append(f'別の動画（{owner}）が使っているため残しました: {target}')
+            log_cleanup(f'skip(shared) id={video_id} with={owner} path={target}')
+            continue
+        size = _dir_size(target)
+        problem = remove_tree(target)
+        if problem:
+            warnings.append(f'バッチを消せませんでした: {target.name}（{problem}）')
+            log_cleanup(f'batch failed id={video_id} path={target} error={problem}')
+        else:
+            removed.append(str(target))
+            freed += size
+            log_cleanup(f'batch removed id={video_id} path={target} mb={size / MB:.1f}')
+
+    # 2) ダウンロードした動画（データフォルダ / RAM ディスク）
+    if video_id:
+        for root in media_roots():
+            target = direct_child(root, Path(root) / video_id)
+            if target is None or target.name != video_id:
+                warnings.append(f'動画フォルダの場所が不正です: {root} / {video_id}')
+                log_cleanup(f'skip(outside) id={video_id} path={root} / {video_id}')
+                continue
+            if not target.is_dir():
+                continue
+            size = _dir_size(target)
+            problem = remove_tree(target)
+            if problem:
+                warnings.append(f'動画フォルダを消せませんでした: {target}（{problem}）')
+                log_cleanup(f'media failed id={video_id} path={target} error={problem}')
+            else:
+                removed.append(str(target))
+                freed += size
+                log_cleanup(f'media removed id={video_id} path={target} mb={size / MB:.1f}')
+
+    return {'removed': removed, 'warnings': warnings, 'freedBytes': freed}
+
+
+def orphan_batches() -> list[dict]:
+    """videos から参照されていないバッチを列挙する（**消さない**）。"""
+    assert STORE is not None
+    referenced: set[str] = set()
+    for row in STORE.videos():
+        manifest = str(row.get('manifest') or '').strip()
+        if not manifest:
+            continue
+        try:
+            path = Path(manifest).resolve()
+        except OSError:
+            continue
+        if path.name.lower() == 'batch-results.json':
+            referenced.add(str(path.parent).lower())
+    result: list[dict] = []
+    if not BATCHES_ROOT.is_dir():
+        return result
+    for item in sorted(BATCHES_ROOT.iterdir()):
+        if not item.is_dir():
+            continue
+        try:
+            key = str(item.resolve()).lower()
+        except OSError:
+            continue
+        if key in referenced:
+            continue
+        result.append({'path': str(item), 'mb': round(_dir_size(item) / MB, 1)})
+    return result
+
+
+def report_orphan_batches() -> list[dict]:
+    """起動時に未参照バッチを調べる（**自動削除はしない**。一覧をログに残すだけ）。"""
+    orphans = orphan_batches()
+    total = sum(item['mb'] for item in orphans)
+    log_cleanup(f'orphan-scan dirs={len(orphans)} mb={total:.1f} '
+                '（自動削除はしません。一覧は --orphans で確認できます）')
+    return orphans
+
+
+def scan_orphans_quietly() -> None:
+    """起動直後に裏で点検する（失敗してもサーバーは止めない）。"""
+    try:
+        report_orphan_batches()
+    except Exception as error:
+        log_cleanup(f'orphan-scan failed error={error!r}')
+
+
+def ram_disk_note(info: dict) -> str:
+    """設定画面の「RAMディスクを使う」に出す注記（状態で書き分ける）。"""
+    if info.get('available'):
+        total = (info.get('totalMB') or 0) / 1024
+        free = (info.get('freeMB') or 0) / 1024
+        return (f'{info.get("drive") or ""} 使用中（{total:.1f}GB 中 空き {free:.1f}GB）。'
+                '動画はここだけに置き、SSD には書きません')
+    if info.get('busy'):
+        return '作成しています…（管理者の確認が出たら「はい」を選んでください）'
+    if info.get('error'):
+        return f'{info["error"]}。もう一度オンにすると再試行します'
+    if info.get('task'):
+        return 'オンにすると自動作成します（ログオン時の自動再作成も登録済み）'
+    return ('オンにすると管理者の確認（UAC）が1回出て、RAM ディスクを作成します。'
+            '以後はログオン時に自動で作り直します')
+
+
+def model_options() -> list[list[str]]:
+    """「解析モデル」の選択肢を、インストール済みモデルから作る。"""
+    options = [[item['id'], item['name']]
+               for item in models_registry.list_models(MODELS_DIR)]
+    if not options:
+        options = [[models_registry.DEFAULT_MODEL_ID, 'Tetrace-V1.0-PPT']]
+    return options
+
+
+def active_model_id() -> str:
+    """いま選ばれているモデル id（旧プロファイル id は読み替える）。"""
+    try:
+        value = STORE.settings().get('analysisProfile') if STORE else ''
+    except Exception:
+        value = ''
+    return models_registry.canonical_model_id(value)
+
+
+def models_payload() -> dict:
+    """設定画面に出すモデル一覧（表示名・版・サイズ）と選択中 id。"""
+    models = []
+    for item in models_registry.list_models(MODELS_DIR):
+        models.append({key: item.get(key) for key in
+                       ('id', 'name', 'version', 'description', 'files',
+                        'builtin', 'size')})
+    return {'models': models, 'active': active_model_id()}
+
+
+def settings_schema() -> list[dict]:
+    """設定画面のスキーマ。状態で変わる行（RAM ディスク・解析モデル）を差し込む。"""
+    info = ram_disk_info()
+    options = model_options()
+    rows = []
+    for item in SETTINGS_SCHEMA:
+        row = dict(item)
+        if row.get('key') == 'useRamDisk':
+            row['note'] = ram_disk_note(info)
+        elif row.get('key') == 'analysisProfile':
+            row['options'] = options
+            row['default'] = models_registry.DEFAULT_MODEL_ID
+        rows.append(row)
+    return rows
+
+
+def start_ram_disk_setup(wait_seconds: float = 180.0) -> bool:
+    """RAM ディスクの用意を裏で始める（UAC が出るのは初回だけ）。"""
+    info = ram_disk_info()
+    if info.get('available') or info.get('busy') or _RAM_SETUP.is_set():
+        return False
+    _RAM_SETUP.set()
+
+    def work() -> None:
+        try:
+            ensure_ram_disk(wait_seconds=wait_seconds, elevate=True)
+        finally:
+            _RAM_SETUP.clear()
+
+    threading.Thread(target=work, daemon=True, name='ramdisk-setup').start()
+    return True
+
+
+def engine_path() -> Path:
+    return RUNTIME / 'bin' / 'TetrisVideoRecovery_stream.exe'
+
+
+def site_root() -> Path:
+    """公開版（GitHub Pages）と同じビルドがあればそれを使う。無ければリポジトリ直下。"""
+    if (SITE_BUILD / 'index.html').is_file():
+        return SITE_BUILD.resolve()
+    return SITE_ROOT.resolve()
+
+
+def site_build_stale(marker: Path) -> bool:
+    try:
+        stamp = marker.stat().st_mtime
+    except OSError:
+        return True
+    # sw.js / hub/sw.js は tools/web-service-worker.js から作る。ここを見落とすと
+    # テンプレートを直しても配信中の Service Worker が変わらず、ブラウザは
+    # 更新に気づけない（＝古いキャッシュのまま居座る）。
+    for name in ('index.html', 'F/index.html', 'hub/index.html', 'manifest.webmanifest',
+                 'tools/web-service-worker.js', 'tools/build-web.py'):
+        path = SITE_ROOT / name
+        try:
+            if path.is_file() and path.stat().st_mtime > stamp:
+                return True
+        except OSError:
+            continue
+    for folder in ('F/app', 'simulator/app', 'shared', 'styles', 'hub/js'):
+        base = SITE_ROOT / folder
+        if not base.is_dir():
+            continue
+        for path in base.rglob('*'):
+            try:
+                if path.is_file() and path.stat().st_mtime > stamp:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def ensure_site_build() -> None:
+    """dist/pages が無い／本体より古いときに、公開版と同じビルドを作り直す。
+
+    ビルドは appearance / motion / ラベルの差し込みを含むので、これが無いと
+    ローカルのシミュレータだけ古い見た目になる。失敗しても配信は続ける。
+    """
+    if os.environ.get('PPT_LAB_SKIP_BUILD'):
+        return
+    script = TOOLS_ROOT / 'build-web.py'
+    if not script.is_file():
+        return
+    marker = SITE_BUILD / 'index.html'
+    if marker.is_file() and not site_build_stale(marker):
+        return
+    try:
+        subprocess.run([sys.executable, str(script)], cwd=str(SITE_ROOT), timeout=600,
+                       capture_output=True,
+                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+_ENV_CACHE: dict = {'at': 0.0, 'value': None}
+
+
+_THUMB_SLOTS = threading.Semaphore(3)
+_THUMB_LOCK = threading.Lock()
+
+
+def video_thumbnail(video: dict) -> Path | None:
+    """ローカル動画の一覧用サムネイル（1試合目の途中の1コマ）。一度作れば使い回す。"""
+    if REVIEW is None:
+        return None
+    video_id = str(video.get('id') or '')
+    if not video_id or not re.fullmatch(r'[\w-]+', video_id):
+        return None
+    target = REVIEW.cache_root.parent / 'thumbs' / (video_id + '.jpg')
+    if target.is_file() and target.stat().st_size > 0:
+        return target
+    source = Path(str(video.get('source') or ''))
+    ffmpeg = find_ffmpeg()
+    if ffmpeg is None or source.suffix.lower() not in VIDEO_EXTENSIONS or not source.is_file():
+        return None
+    seconds = 60.0
+    try:
+        data = json.loads(Path(str(video.get('manifest') or '')).read_text(encoding='utf-8-sig'))
+        first = (data.get('matches') or [{}])[0].get('source_range') or {}
+        start = float(first.get('start_seconds') or 0)
+        end = float(first.get('end_seconds') or start)
+        seconds = start + min(20.0, max(0.0, (end - start) / 2))
+    except (OSError, ValueError, TypeError, IndexError, AttributeError, json.JSONDecodeError):
+        pass
+    with _THUMB_SLOTS:
+        with _THUMB_LOCK:
+            if target.is_file() and target.stat().st_size > 0:
+                return target
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp = target.with_suffix('.tmp.jpg')
+        try:
+            subprocess.run([str(ffmpeg), '-v', 'error', '-y', '-ss', f'{seconds:.2f}', '-i', str(source),
+                            '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '4', str(temp)],
+                           capture_output=True, timeout=30,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if not temp.is_file() or temp.stat().st_size == 0:
+            return None
+        os.replace(temp, target)
+    return target
+
+
+def find_ffmpeg() -> Path | None:
+    for candidate in (RUNTIME / 'bin' / 'ffmpeg.exe', Path(shutil.which('ffmpeg') or '')):
+        if candidate and Path(candidate).is_file():
+            return Path(candidate)
+    return None
+
+
+def gpu_available() -> bool:
+    """NVDEC と CUDA のONNXが使えるかを、DLLとドライバの有無で判定する。
+
+    nvcuvid.dll は NVIDIA ドライバが System32 に入れるものなので、
+    runtime\\bin ではなくシステム側を見る。
+    """
+    bin_dir = RUNTIME / 'bin'
+    needed = ('onnxruntime_providers_cuda.dll', 'cudnn64_9.dll')
+    if not all((bin_dir / name).is_file() for name in needed):
+        return False
+    system32 = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32'
+    if not (system32 / 'nvcuvid.dll').is_file():
+        return False
+    try:
+        result = subprocess.run(['nvidia-smi', '-L'], capture_output=True, timeout=5,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+PICK_SCRIPT = r"""
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+# ブラウザの後ろに隠れないよう、最前面のダミー親ウィンドウを所有者にする
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+$owner.StartPosition = 'CenterScreen'
+$owner.Size = New-Object System.Drawing.Size(1, 1)
+$owner.Opacity = 0
+$owner.Show()
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Title = '解析する動画を選ぶ'
+$d.Filter = '動画ファイル|*.mp4;*.mkv;*.webm;*.mov;*.avi;*.m4v;*.ts|すべてのファイル|*.*'
+$d.RestoreDirectory = $true
+$result = $d.ShowDialog($owner)
+$owner.Close()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    [Console]::Write($d.FileName)
+}
+"""
+
+
+_PLAYER_CACHE: dict[str, tuple[tuple, list[str]]] = {}
+# batch-results.json の試合ごとの解析状態（盤面復元に失敗した試合の表示に使う）
+_MATCH_ANALYSIS_CACHE: dict[str, tuple[float, dict[int, dict]]] = {}
+# 名前画像の指紋を第一キーにする。グループ数が多すぎる（＝画像の分かれ方が
+# 破綻している）ときだけ従来の文字ベースに戻す。
+# 実測: 124試合・配信者1人＋対戦相手4人の動画は正しく5組に分かれるため、
+# 3では正解を捨ててしまう（MT6 のハロウィン動画で 14表記に分裂した）。
+_CROP_VECTORS: dict[str, tuple[tuple[int, int], tuple | None]] = {}
+
+
+# 表記ゆれの畳み方と「いちばん多い表記」は namereview と共通（同じ規則でまとめる）
+_fold_name = fold_name
+_most_common = most_common
+
+
+def _crop_vector(fingerprint: str) -> tuple | None:
+    """name-crops/<指紋>.png の比較用ベクトル（無ければ None）。
+
+    画像は 142x11 のサムネイルなので、動画が無くても同じ人かどうかを
+    namereview と同じ相関（SAME_IMAGE_THRESHOLD）で判定できる。
+    """
+    if not fingerprint:
+        return None
+    path = CROP_DIR / f'{fingerprint}.png'
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    stamp = (int(info.st_size), int(info.st_mtime_ns))
+    cached = _CROP_VECTORS.get(fingerprint)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    vector = crop_vector(path)
+    if len(_CROP_VECTORS) > 4000:        # 増え続けないよう、あふれたら捨てる
+        _CROP_VECTORS.clear()
+    _CROP_VECTORS[fingerprint] = (stamp, vector)
+    return vector
+
+
+def _group_display_name(group: dict) -> str:
+    """名前確認画面に出ている名前（過去の確定名 > 代表名 > 最多の表記）を返す。
+
+    画面の入力欄は `entry.guess || entry.name` を出している。タグも同じ名前で
+    揃えないと「画面では ぶぶ、タグは JS」のようにズレる。
+    """
+    def clean(text: str) -> str:
+        text = str(text or '').strip()
+        # 「???」「?????」のような OCR 失敗の残骸は名前として扱わない。
+        return '' if text.strip('?？ ') == '' else text
+
+    variants = {clean(item.get('text')) for item in group.get('variants') or []}
+    variants.discard('')
+    guess = clean(group.get('guess'))
+    if guess:
+        # 確定した名前（名前の記憶）は、OCR の表記のどれかと同じでも優先する。
+        # 以前は表記と一致すると最多の表記が勝ち、「いんたい)」がタグに残っていた。
+        return guess
+    name = clean(group.get('name'))
+    if name:
+        return name
+    counts: dict[str, int] = {}
+    for item in group.get('variants') or []:
+        text = clean(item.get('text'))
+        if text:
+            counts[text] = counts.get(text, 0) + int(item.get('count') or 0)
+    if not counts:
+        return ''
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+
+
+def _image_player_names(manifest: Path, video_id: str = '') -> list[str] | None:
+    """名前画像の指紋で同じ人をまとめ、画面に出ている名前を返す。
+
+    指紋がまだ無い解析（この機能より前の解析）でも、元の動画が残っていれば
+    その場で切り出す（初回だけ数秒〜十数秒かかり、結果は次回から使う）。
+    画像が1つも取れない動画だけ None を返し、呼び出し側を従来の文字ベースに戻す。
+    人数の上限は設けない（グループ数を理由に正解を捨てない）。
+    """
+    # 名前確認画面と同じ組・同じ名前を使う（過去の確定名が OCR より優先）。
+    if video_id and REVIEW is not None:
+        try:
+            payload = REVIEW.load(video_id, manifest)
+        except Exception:
+            payload = None
+        names: list[str] = []
+        for group in (payload or {}).get('groups') or []:
+            name = _group_display_name(group)
+            if name and name not in names:
+                names.append(name)
+        if names:
+            return names
+    try:
+        rows = save_name_crops(manifest, find_ffmpeg(), CROP_DIR).get('rows') or []
+    except Exception:
+        return None
+    if not rows:
+        return None
+    # まとめ方は名前確認画面（NameReview）とまったく同じ（namereview.name_groups）。
+    entries = name_groups(rows, _crop_vector)
+    if not any(entry['group'] for entry in entries):
+        return None
+    names = []
+    for entry in entries:
+        name = entry.get('representative') or _most_common(entry['texts'])
+        if name and name not in names:
+            names.append(name)
+    return names or None
+
+
+def group_guesses(groups: list[dict], matches: list[dict]) -> list[dict]:
+    """組（＝画面の1エントリ）ごとの候補名と「この動画だけ」の印を作り直す。
+
+    「この動画だけ」の上書きは試合の行（p1Guess / p1Override）に載るので、
+    組の表示もその行に合わせる（保存の形式は変えない）。
+    """
+    rows = {int(row.get('index') or 0): row for row in matches}
+    result = []
+    for group in groups:
+        item = dict(group)
+        # 候補名は組の中で一番多い表記にする（先頭の試合の表記だと、誤読が代表になることがある）。
+        # 「この動画だけ」の上書きがあれば、それを最優先する。
+        counts: dict[str, int] = {}
+        overridden: dict[str, int] = {}
+        override = False
+        for record in group.get('records') or []:
+            row = rows.get(int(record.get('index') or 0)) or {}
+            side = str(record.get('side') or '')
+            guess = str(row.get(side + 'Guess') or '')
+            if guess:
+                counts[guess] = counts.get(guess, 0) + 1
+            if row.get(side + 'Override'):
+                override = True
+                if guess:
+                    overridden[guess] = overridden.get(guess, 0) + 1
+        pool = overridden or counts
+        item['guess'] = max(pool, key=lambda name: pool[name]) if pool else ''
+        item['override'] = override
+        result.append(item)
+    return result
+
+
+def video_players(manifest: str, video_id: str = '') -> list[str]:
+    """登場プレイヤー名。名前を確認済みならその名前を使い、OCR の揺れは畳む。
+
+    名前画像（解析直後に切り出した <指紋>.png）が残っていれば、それを第一キーに
+    同じ人をまとめる。画像が1枚も無い動画だけ、従来の文字ベースにする
+    （人数の上限は設けない。名前確認画面とも同じまとめ方を使う）。
+    """
+    if not manifest:
+        return []
+    path = Path(manifest)
+    try:
+        stamp = path.stat().st_mtime
+    except OSError:
+        return []
+    # 作り直すのは解析結果が変わったときと、名前を保存・変更したとき（forget_video_players）だけ。
+    # 1本の名前を登録するたびに全動画を作り直すと、保存のたびに数秒〜数十秒固まる。
+    # 名前の記憶の版も入れる（改名・統合したら作り直す）
+    signature = 'image-groups-v2|' + _name_signature()
+    cached = _PLAYER_CACHE.get(manifest)
+    if cached and cached[0] == (stamp, signature):
+        return cached[1]
+    # 起動し直した直後でも速く出せるよう、前回の結果をファイルから使う
+    # （解析結果の更新時刻と名前の記憶の版が同じときだけ）。
+    saved = _load_player_disk().get(manifest)
+    if saved and saved.get('stamp') == stamp and saved.get('sig') == signature:
+        names = [str(name) for name in saved.get('names') or []]
+        _PLAYER_CACHE[manifest] = ((stamp, signature), names)
+        return names
+    names = _compute_video_players(path, video_id)
+    _PLAYER_CACHE[manifest] = ((stamp, signature), names)
+    _save_player_disk(manifest, {'stamp': stamp, 'sig': signature, 'names': names})
+    return names
+
+
+# プレイヤー名一覧のファイル保存（起動直後の一覧表示を速くする）
+PLAYER_DISK_FILE: Path | None = None
+_PLAYER_DISK: dict | None = None
+_PLAYER_DISK_LOCK = threading.Lock()
+
+
+def _name_signature() -> str:
+    try:
+        return STORE.name_signature() if STORE is not None else ''
+    except Exception:
+        return ''
+
+
+def _load_player_disk() -> dict:
+    global _PLAYER_DISK
+    with _PLAYER_DISK_LOCK:
+        if _PLAYER_DISK is None:
+            _PLAYER_DISK = {}
+            if PLAYER_DISK_FILE is not None:
+                try:
+                    loaded = json.loads(PLAYER_DISK_FILE.read_text(encoding='utf-8'))
+                    if isinstance(loaded, dict):
+                        _PLAYER_DISK = loaded
+                except (OSError, json.JSONDecodeError):
+                    pass
+        return _PLAYER_DISK
+
+
+def _save_player_disk(manifest: str, entry: dict) -> None:
+    disk = _load_player_disk()
+    with _PLAYER_DISK_LOCK:
+        disk[manifest] = entry
+        if PLAYER_DISK_FILE is None:
+            return
+        try:
+            PLAYER_DISK_FILE.parent.mkdir(parents=True, exist_ok=True)
+            temp = PLAYER_DISK_FILE.with_suffix('.tmp')
+            temp.write_text(json.dumps(disk, ensure_ascii=False), encoding='utf-8')
+            os.replace(temp, PLAYER_DISK_FILE)
+        except OSError:
+            pass
+
+
+def forget_all_names() -> None:
+    """名前の記憶を変えたとき（名前の変更・統合・削除）に、全動画の名前を作り直させる。"""
+    forget_video_players()
+    if REVIEW is not None and STORE is not None:
+        for row in STORE.videos():
+            REVIEW.forget(str(row['id']))
+
+
+def forget_video_players(manifest: str | None = None) -> None:
+    """プレイヤー名一覧を作り直させる（manifest を省くと全動画）。"""
+    schedule_summary_warm()
+    disk = _load_player_disk()
+    with _PLAYER_DISK_LOCK:
+        if manifest is None:
+            _PLAYER_CACHE.clear()
+            disk.clear()
+        else:
+            _PLAYER_CACHE.pop(manifest, None)
+            disk.pop(manifest, None)
+
+
+def _compute_video_players(path: Path, video_id: str) -> list[str]:
+    try:
+        data = json.loads(path.read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    # 1) 名前画像（解析直後に切り出した <指紋>.png）を第一キーにする。
+    #    動画を消した後でも、残した画像と指紋だけで同じ人をまとめられる。
+    image_names = _image_player_names(path, video_id)
+    if image_names:
+        return image_names
+
+    # 2) 画像が無いときは、確認済みの名前（autosave）を優先する
+    confirmed: list[str] = []
+    for match in data.get('matches') or []:
+        autosave = match.get('autosave')
+        if not autosave:
+            continue
+        saved = path.parent / str(autosave)
+        try:
+            payload = read_player_names(saved)
+        except Exception:
+            continue
+        for side in ('p1', 'p2'):
+            text = str(payload.get(side) or '').strip()
+            if text and text not in confirmed:
+                confirmed.append(text)
+    if confirmed:
+        return confirmed
+
+    # 3) 画像もautosaveも無いときは、OCR 名を文字で畳む（従来どおり）
+    counter: dict[str, list] = {}
+    for match in data.get('matches') or []:
+        for side in ('p1', 'p2'):
+            value = (match.get('player_names') or {}).get(side)
+            text = value.get('text') if isinstance(value, dict) else value
+            text = str(text or '').strip()
+            if not text:
+                continue
+            key = _fold_name(text)
+            entry = counter.setdefault(key, [0, {}])
+            entry[0] += 1
+            entry[1][text] = entry[1].get(text, 0) + 1
+    names = []
+    for _key, (count, variants) in sorted(counter.items(), key=lambda item: -item[1][0]):
+        best = max(variants.items(), key=lambda item: item[1])[0]
+        names.append(best)
+    return names
+
+AUTO_APPLY_NAMES = [True]
+MOVE_TIMES: MoveTimes | None = None
+DRIFT: DriftCache | None = None
+
+
+# 動画ごとの試合のまとめ（プレイヤー集計用）。
+# 1試合 = [番号, P1 の名前, P2 の名前, 勝者, autosave]。名前は名前確認の組の名前。
+# 組の名前を出すには名前画像の照合が要り、全動画で十数秒かかる。そこで動画ごとに
+# 結果をファイルに残し、解析結果か名前の記憶が変わったときだけ作り直す。
+MATCH_SUMMARY_FILE: Path | None = None
+_MATCH_SUMMARY: dict | None = None
+_MATCH_SUMMARY_LOCK = threading.Lock()
+
+
+def _summary_stamp(manifest: Path) -> list:
+    stamps = []
+    for path in (manifest, manifest.parent / 'winner-detection.json', manifest.parent / 'winners.json'):
+        try:
+            stamps.append(path.stat().st_mtime_ns)
+        except OSError:
+            stamps.append(0)
+    return stamps
+
+
+def _load_match_summary() -> dict:
+    global _MATCH_SUMMARY
+    with _MATCH_SUMMARY_LOCK:
+        if _MATCH_SUMMARY is None:
+            _MATCH_SUMMARY = {}
+            if MATCH_SUMMARY_FILE is not None:
+                try:
+                    loaded = json.loads(MATCH_SUMMARY_FILE.read_text(encoding='utf-8'))
+                    if isinstance(loaded, dict):
+                        _MATCH_SUMMARY = loaded
+                except (OSError, json.JSONDecodeError):
+                    pass
+        return _MATCH_SUMMARY
+
+
+def _save_match_summary() -> None:
+    if MATCH_SUMMARY_FILE is None:
+        return
+    with _MATCH_SUMMARY_LOCK:
+        try:
+            MATCH_SUMMARY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            temp = MATCH_SUMMARY_FILE.with_suffix('.tmp')
+            temp.write_text(json.dumps(_MATCH_SUMMARY or {}, ensure_ascii=False), encoding='utf-8')
+            os.replace(temp, MATCH_SUMMARY_FILE)
+        except OSError:
+            pass
+
+
+def _build_match_summary(video_id: str, manifest: Path) -> list:
+    assert REVIEW is not None
+    payload = REVIEW.load(video_id, manifest)
+    root = json.loads(manifest.read_text(encoding='utf-8-sig'))
+    display = {str(group.get('key') or ''): _group_display_name(group)
+               for group in payload.get('groups') or []}
+    autosaves = {}
+    for item in root.get('matches') or []:
+        if item.get('autosave'):
+            autosave = Path(str(item['autosave']))
+            if not autosave.is_absolute():
+                autosave = manifest.parent / autosave
+            autosaves[int(item.get('index') or 0)] = str(autosave)
+    rows = []
+    for row in payload.get('matches') or []:
+        index = int(row.get('index') or 0)
+
+        def name_of(side: str) -> str:
+            group = int(row.get(side + 'Group') or 0)
+            if group and display.get(f'g{group}'):
+                return display[f'g{group}']
+            return str(row.get(side + 'Guess') or row.get(side) or '').strip()
+
+        rows.append([index, name_of('p1'), name_of('p2'), str(row.get('winner') or ''),
+                     autosaves.get(index, '')])
+    return rows
+
+
+def video_match_summary(video: dict, signature: str | None = None, save: bool = True) -> list | None:
+    """動画1本の試合のまとめ。保存済みが新しければそれを返す。"""
+    manifest_text = str(video.get('manifest') or '')
+    if not manifest_text:
+        return None
+    manifest = Path(manifest_text)
+    if not manifest.is_file():
+        return None
+    stamp = _summary_stamp(manifest)
+    signature = _name_signature() if signature is None else signature
+    cache = _load_match_summary()
+    key = str(video['id'])
+    with _MATCH_SUMMARY_LOCK:
+        hit = cache.get(key)
+    if (hit and hit.get('manifest') == manifest_text and hit.get('stamp') == stamp
+            and hit.get('sig') == signature):
+        return hit.get('rows') or []
+    try:
+        rows = _build_match_summary(key, manifest)
+    except Exception:
+        return None
+    with _MATCH_SUMMARY_LOCK:
+        cache[key] = {'manifest': manifest_text, 'stamp': stamp, 'sig': signature, 'rows': rows}
+    if save:
+        _save_match_summary()
+    return rows
+
+
+def warm_match_summaries() -> None:
+    """全動画のまとめを作っておく（起動直後・名前の変更後に裏で呼ぶ）。"""
+    if STORE is None:
+        return
+    signature = _name_signature()
+    videos = STORE.videos()
+    for video in videos:
+        video_match_summary(video, signature, save=False)
+    # 消えた動画のまとめを捨てる
+    alive = {str(video['id']) for video in videos}
+    cache = _load_match_summary()
+    with _MATCH_SUMMARY_LOCK:
+        for key in [key for key in cache if key not in alive]:
+            cache.pop(key, None)
+    _save_match_summary()
+
+
+_WARM_LOCK = threading.Lock()
+_WARM_PENDING = [False]
+
+
+def schedule_summary_warm(delay: float = 3.0) -> None:
+    """まとめの作り直しを裏で予約する（短い間の連続した変更は1回にまとめる）。"""
+    with _WARM_LOCK:
+        if _WARM_PENDING[0]:
+            return
+        _WARM_PENDING[0] = True
+
+    def run() -> None:
+        time.sleep(delay)
+        with _WARM_LOCK:
+            _WARM_PENDING[0] = False
+        try:
+            warm_match_summaries()
+        except Exception:
+            pass
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+OPENINGS: OpeningCache | None = None
+OPENINGS_WARM = {'running': False, 'done': 0, 'total': 0}
+
+
+def video_openings(manifest_text: str) -> dict[int, dict]:
+    """動画の試合ごとの開幕 {試合番号: {'p1': {...}, 'p2': {...}}}。"""
+    if OPENINGS is None or not manifest_text:
+        return {}
+    manifest = Path(manifest_text)
+    try:
+        root = json.loads(manifest.read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    result = {}
+    for item in root.get('matches') or []:
+        try:
+            index = int(item.get('index') or 0)
+        except (TypeError, ValueError):
+            continue
+        recovered = recovered_file(manifest, index)
+        if recovered is not None:
+            result[index] = OPENINGS.get(recovered)
+    return result
+
+
+def add_openings(data: dict, manifest: Path) -> dict:
+    """試合の行に開幕の名前（p1Opening / p2Opening）とキーを足す。"""
+    sides = video_openings(str(manifest))
+    names = STORE.opening_names() if STORE is not None else {}
+    for row in data.get('matches') or []:
+        try:
+            index = int(row.get('index') or 0)
+        except (TypeError, ValueError):
+            continue
+        for side in ('p1', 'p2'):
+            info = (sides.get(index) or {}).get(side) or {}
+            key = info.get('key') or ''
+            row[side + 'OpeningKey'] = key
+            row[side + 'Opening'] = names.get(key, '') if key else ''
+    return data
+
+
+def warm_openings() -> None:
+    """全試合の開幕を求めておく（初回は全試合の解析結果を読むので1分ほどかかる）。"""
+    if STORE is None or OPENINGS is None or OPENINGS_WARM['running']:
+        return
+    videos = STORE.videos()
+    OPENINGS_WARM.update({'running': True, 'done': 0, 'total': len(videos)})
+    try:
+        for video in videos:
+            video_openings(str(video.get('manifest') or ''))
+            OPENINGS_WARM['done'] += 1
+        OPENINGS.save()
+    finally:
+        OPENINGS_WARM['running'] = False
+
+
+# テンプレの色。利用者が決めた色 > 名前に含まれる語の既定色 > 名前から決まる色。
+# 画面に合う、くすんだ色。メジャーなテンプレは固定（ほかの名前と被らない）
+OPENING_DEFAULT_COLORS = [
+    ('はちみつ', '#8ccbdd'), ('山岳', '#8fb98a'), ('くろみつ', '#a490c4'), ('黒蜜', '#a490c4'),
+    ('迷走', '#647cbc'), ('がむしろ', '#dcbf6a'), ('ガムシロ', '#dcbf6a'),
+    ('PC-Spin', '#df9c88'), ('PCSpin', '#df9c88'), ('PCスピン', '#df9c88'),
+]
+# 名前に当てはまる既定色が無いものへ順に配る色（上の色と被らない同じトーン）
+OPENING_PALETTE = ['#c98fa3', '#7fb3a8', '#c4a27a', '#9aa6b8', '#b8c47f', '#d4a3c4',
+                   '#8fa0c9', '#c9b48f', '#7fa98f', '#d6ad8f', '#a7b8c9', '#bf9a9a']
+OPENING_OTHER_COLOR = '#b8b8b8'
+
+
+def opening_colors() -> dict[str, str]:
+    """全テンプレ名の色。利用者が決めた色 > 名前に含まれる語の既定色 > 空いている色を名前順に配る。"""
+    assert STORE is not None
+    chosen = STORE.opening_colors()
+    names = sorted({item['name'] for item in STORE.opening_templates()} | set(chosen))
+    colors: dict[str, str] = {'その他': OPENING_OTHER_COLOR, '未登録': OPENING_OTHER_COLOR}
+    pending = []
+    for name in names:
+        if chosen.get(name):
+            colors[name] = chosen[name]
+            continue
+        preset = next((color for word, color in OPENING_DEFAULT_COLORS if word in name), '')
+        if preset:
+            colors[name] = preset
+        else:
+            pending.append(name)
+    used = set(colors.values())
+    free = [color for color in OPENING_PALETTE if color not in used]
+    for index, name in enumerate(pending):
+        if free:
+            colors[name] = free.pop(0)
+        else:
+            digest = int(hashlib.sha1(name.encode('utf-8')).hexdigest()[:6], 16)
+            colors[name] = OPENING_PALETTE[digest % len(OPENING_PALETTE)]
+    return colors
+
+
+def openings_overview() -> dict:
+    """全試合の開幕を形ごとにまとめ、回数の多い順に並べる。"""
+    assert STORE is not None and OPENINGS is not None
+    names = STORE.opening_names()
+    groups: dict[str, dict] = {}
+    skipped: dict[str, int] = {}
+    total = 0
+    signature = _name_signature()
+    for video in STORE.videos():
+        sides_by_match = video_openings(str(video.get('manifest') or ''))
+        if not sides_by_match:
+            continue
+        players = {}
+        for row in video_match_summary(video, signature, save=False) or []:
+            players[int(row[0])] = {'p1': row[1], 'p2': row[2], 'winner': row[3]}
+        for index, sides in sides_by_match.items():
+            for side in ('p1', 'p2'):
+                info = sides.get(side) or {}
+                total += 1
+                key = info.get('key')
+                if not key:
+                    reason = str(info.get('reason') or 'unknown')
+                    skipped[reason] = skipped.get(reason, 0) + 1
+                    continue
+                group = groups.setdefault(key, {'key': key, 'count': 0, 'flipped': 0, 'players': {},
+                                                'wins': 0, 'losses': 0, 'examples': [], 'extraKinds': {}})
+                group['count'] += 1
+                extras = info.get('extras') or []
+                if extras:
+                    signature = json.dumps(extras, separators=(',', ':'))
+                    kind = group['extraKinds'].setdefault(signature, {'extras': extras, 'count': 0})
+                    kind['count'] += 1
+                if info.get('flipped'):
+                    group['flipped'] += 1
+                match = players.get(index) or {}
+                who = match.get(side) or ''
+                if who:
+                    group['players'][who] = group['players'].get(who, 0) + 1
+                winner = match.get('winner') or ''
+                if winner == side:
+                    group['wins'] += 1
+                elif winner in ('p1', 'p2'):
+                    group['losses'] += 1
+                if len(group['examples']) < 6:
+                    group['examples'].append({'videoId': video['id'], 'videoTitle': video.get('title') or '',
+                                              'matchIndex': index, 'side': side, 'player': who})
+    OPENINGS.save()
+    items = []
+    for key, group in groups.items():
+        top = sorted(group['players'].items(), key=lambda item: -item[1])[:5]
+        group['players'] = [{'name': name, 'count': count} for name, count in top]
+        group['name'] = names.get(key, '')
+        group['pieces'] = OPENINGS.shape(key) or {}
+        # 7個そろう前に置いた2巡目のミノ（いちばん多い置き方を薄く出す）
+        kinds = sorted(group.pop('extraKinds').values(), key=lambda kind: -kind['count'])
+        group['extras'] = kinds[0]['extras'] if kinds else []
+        group['extrasCount'] = sum(kind['count'] for kind in kinds)
+        items.append(group)
+    items.sort(key=lambda group: -group['count'])
+    classified = sum(group['count'] for group in items)
+    # 形を持たずに保存された名前（形の保存を始める前に付けた名前）に、形を補う
+    without_shape = {item['key'] for item in STORE.opening_templates() if not item['pieces']}
+    for group in items:
+        if group['name'] and group['key'] in without_shape and group['pieces']:
+            STORE.set_opening_name(group['key'], group['name'], group['pieces'])
+    # 名前を付けたのに今の解析結果には出てこない形（読み込んだテンプレなど）も、名前ごとの一覧に出す
+    seen = {group['key'] for group in items}
+    missing = [{'key': item['key'], 'name': item['name'], 'pieces': item['pieces'], 'count': 0,
+                'flipped': 0, 'players': [], 'wins': 0, 'losses': 0, 'examples': [], 'extras': [],
+                'extrasCount': 0}
+               for item in STORE.opening_templates() if item['key'] not in seen and item['pieces']]
+    palette = opening_colors()
+    template_names = sorted({group['name'] for group in items + missing if group['name']})
+    return {'openings': items + missing, 'total': total, 'classified': classified, 'skipped': skipped,
+            'colors': {name: palette.get(name, OPENING_OTHER_COLOR) for name in template_names + ['その他']},
+            'building': bool(OPENINGS_WARM['running']),
+            'progress': {'done': OPENINGS_WARM['done'], 'total': OPENINGS_WARM['total']}}
+
+
+def export_openings() -> dict:
+    palette = opening_colors()
+    templates = [item for item in STORE.opening_templates() if item['pieces']]
+    names = sorted({item['name'] for item in templates})
+    return {'format': 'ppt-opening-templates/v1', 'exportedAt': dt.datetime.now().isoformat(timespec='seconds'),
+            'templates': templates,
+            'colors': {name: palette.get(name, OPENING_OTHER_COLOR) for name in names}}
+
+
+def import_openings(payload: dict, replace: bool) -> dict:
+    if not isinstance(payload, dict) or payload.get('format') != 'ppt-opening-templates/v1':
+        raise ValueError('テンプレ判定のファイルではありません（ppt-opening-templates/v1）')
+    templates = payload.get('templates') or []
+    valid = []
+    for item in templates:
+        pieces = item.get('pieces') or {}
+        name = str(item.get('name') or '').strip()
+        if not name or sorted(pieces.keys()) != sorted(OPENING_PIECES):
+            continue
+        try:
+            key = opening_key_of(pieces)
+        except Exception:
+            continue
+        valid.append((key, name, pieces))
+    if not valid:
+        raise ValueError('読み込めるテンプレがありません')
+    if replace:
+        STORE.clear_opening_names()
+    for key, name, pieces in valid:
+        STORE.set_opening_name(key, name, pieces)
+    for name, color in (payload.get('colors') or {}).items():
+        if isinstance(color, str) and color.startswith('#'):
+            STORE.set_opening_color(str(name), color)
+    return {'ok': True, 'imported': len(valid), 'names': len({name for _, name, _ in valid})}
+
+
+# ---- YouTube に上がった日 ---------------------------------------------------
+UPLOAD_DATE_RUNNING = [False]
+
+
+def youtube_id_of(source: str) -> str:
+    source = str(source or '')
+    for marker in ('watch?v=', 'youtu.be/', '/live/', '/shorts/', '/embed/'):
+        if marker in source:
+            tail = source.split(marker)[-1]
+            candidate = ''.join(ch for ch in tail[:11] if ch.isalnum() or ch in '-_')
+            if len(candidate) == 11:
+                return candidate
+    return ''
+
+
+def fetch_video_meta(youtube_id: str) -> tuple[str, str]:
+    """動画ページから（投稿日, チャンネル名）を返す。取れないものは空。"""
+    import urllib.request
+    request = urllib.request.Request('https://www.youtube.com/watch?v=' + youtube_id,
+                                     headers={'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'ja'})
+    html = urllib.request.urlopen(request, timeout=20).read().decode('utf-8', 'replace')
+    channel = ''
+    owner = (re.search(r'"ownerChannelName":("(?:[^"\\]|\\.)*")', html)
+             or re.search(r'"author":("(?:[^"\\]|\\.)*")', html))
+    if owner:
+        try:
+            channel = str(json.loads(owner.group(1))).strip()
+        except ValueError:
+            channel = ''
+    return upload_date_from_html(html), channel
+
+
+def upload_date_from_html(html: str) -> str:
+    """動画ページの uploadDate（なければ publishDate）を日本時間の日付にして返す。"""
+    found = (re.search(r'"uploadDate":"([^"]+)"', html) or re.search(r'"publishDate":"([^"]+)"', html)
+             or re.search(r'itemprop="(?:uploadDate|datePublished)" content="([^"]+)"', html))
+    if not found:
+        return ''
+    value = found.group(1)
+    try:
+        moment = dt.datetime.fromisoformat(value)
+        if moment.tzinfo is not None:
+            moment = moment.astimezone(dt.timezone(dt.timedelta(hours=9)))
+        return moment.date().isoformat()
+    except ValueError:
+        return value[:10]
+
+
+def fill_upload_dates() -> None:
+    """日付の無い YouTube の動画について、裏で日付を取ってくる（1本ずつ・失敗は次回に回す）。"""
+    if STORE is None or UPLOAD_DATE_RUNNING[0]:
+        return
+    UPLOAD_DATE_RUNNING[0] = True
+    try:
+        for video in STORE.videos():
+            if video.get('uploadDate') and video.get('channel'):
+                continue
+            youtube = youtube_id_of(video.get('source') or '')
+            if not youtube:
+                continue
+            try:
+                date, channel = fetch_video_meta(youtube)
+            except Exception:
+                continue
+            if date and not video.get('uploadDate'):
+                STORE.set_upload_date(str(video['id']), date)
+            if channel and not video.get('channel'):
+                # 配信者タグ（赤）。チャンネル名をそのまま使う
+                STORE.set_channel(str(video['id']), channel)
+            time.sleep(1.0)
+    finally:
+        UPLOAD_DATE_RUNNING[0] = False
+
+
+def schedule_upload_dates() -> None:
+    if not UPLOAD_DATE_RUNNING[0]:
+        threading.Thread(target=fill_upload_dates, daemon=True).start()
+
+
+# プレイヤー統計の期間（YouTube に上がった日で数える）
+PLAYER_PERIODS = {'all': None, 'half': 182, '30d': 30, '7d': 7}
+
+
+# ---- GitHub Pages（公開Lab）と同期 ----------------------------------------------
+# 1. 解析データを書き出す（export_web.py）  2. テンプレ判定（テンプレモデル）を入れる
+# 3. サイトを組み立てる（build-lab.py）  4. Lab リポジトリへ入れて、変更があればコミットして push
+PUBLISH = {'running': False, 'step': '', 'log': [], 'ok': None, 'message': '', 'finishedAt': '', 'commit': ''}
+PUBLISH_LOCK = threading.Lock()
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _publish_log(text: str) -> None:
+    PUBLISH['log'] = (PUBLISH['log'] + [text])[-40:]
+
+
+def _run(command: list[str], cwd: Path, step: str, timeout: float = 1800) -> str:
+    PUBLISH['step'] = step
+    _publish_log('▶ ' + step)
+    completed = subprocess.run(command, cwd=str(cwd), capture_output=True, timeout=timeout,
+                               creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    output = (completed.stdout or b'').decode('utf-8', 'replace') + (completed.stderr or b'').decode('utf-8', 'replace')
+    tail = [line for line in output.strip().splitlines() if line.strip()][-3:]
+    for line in tail:
+        _publish_log('  ' + line[:200])
+    if completed.returncode != 0:
+        raise RuntimeError(f'{step}に失敗しました（{completed.returncode}）: ' + (tail[-1] if tail else ''))
+    return output
+
+
+def _publish_worker() -> None:
+    try:
+        repo = Path(str(STORE.settings().get('labRepoDir') or SETTING_DEFAULTS.get('labRepoDir') or ''))
+        if not (repo / '.git').exists():
+            raise RuntimeError(f'公開Lab のリポジトリが見つかりません: {repo}（設定の「一般」で場所を指定してください）')
+        python = sys.executable.replace('pythonw.exe', 'python.exe')
+        _run([python, str(APP_ROOT / 'export_web.py')], APP_ROOT, '解析データの書き出し')
+        # テンプレ判定（テンプレモデル）。解析モデルは公開しない
+        PUBLISH['step'] = 'テンプレ判定'
+        downloads = APP_ROOT / 'webdata' / 'downloads'
+        downloads.mkdir(parents=True, exist_ok=True)
+        templates = export_openings()
+        templates.pop('exportedAt', None)     # 中身が同じなら差分を出さない
+        (downloads / 'templates.pptopening.json').write_text(
+            json.dumps(templates, ensure_ascii=False, indent=1), encoding='utf-8')
+        _publish_log(f'  テンプレ {len(templates.get("templates") or [])} 形')
+        _run([python, str(REPO_ROOT / 'tools' / 'build-lab.py')], REPO_ROOT, 'サイトの組み立て')
+        # Lab リポジトリの中身を入れ替える（.git 以外）
+        PUBLISH['step'] = '公開Lab へコピー'
+        _publish_log('▶ 公開Lab へコピー')
+        built = REPO_ROOT / 'dist' / 'lab'
+        for item in repo.iterdir():
+            if item.name == '.git':
+                continue
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+        shutil.copytree(built, repo, dirs_exist_ok=True)
+        _run(['git', 'add', '-A'], repo, '変更の確認')
+        status = subprocess.run(['git', 'status', '--porcelain'], cwd=str(repo), capture_output=True,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        changed = [line for line in status.stdout.decode('utf-8', 'replace').splitlines() if line.strip()]
+        if not changed:
+            PUBLISH.update({'ok': True, 'message': '変更はありませんでした（公開中のものが最新です）。'})
+            return
+        stamp = dt.datetime.now().strftime('%Y-%m-%d %H:%M')
+        _run(['git', 'commit', '-q', '-m', f'Sync from PPT Lab ({stamp}, {len(changed)} files)'], repo, 'コミット')
+        _run(['git', 'push', '-q', 'origin', 'HEAD:main'], repo, 'GitHub へ push', timeout=600)
+        head = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=str(repo), capture_output=True,
+                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout.decode().strip()
+        PUBLISH.update({'ok': True, 'commit': head,
+                        'message': f'同期しました（{len(changed)} ファイル）。数分で GitHub Pages に反映されます。'})
+    except Exception as error:
+        PUBLISH.update({'ok': False, 'message': str(error)})
+        _publish_log('✖ ' + str(error)[:200])
+    finally:
+        PUBLISH.update({'running': False, 'step': '', 'finishedAt': dt.datetime.now().isoformat(timespec='seconds')})
+
+
+def start_publish() -> dict:
+    with PUBLISH_LOCK:
+        if PUBLISH['running']:
+            return dict(PUBLISH)
+        PUBLISH.update({'running': True, 'step': '準備', 'log': [], 'ok': None, 'message': '', 'commit': ''})
+    threading.Thread(target=_publish_worker, daemon=True).start()
+    return dict(PUBLISH)
+
+
+def player_page(name: str, period: str = 'all') -> dict:
+    """プレイヤーのタグ1つぶんの集計。名前は動画のタグと同じ「名前確認の組」の名前で数える。"""
+    assert STORE is not None and REVIEW is not None
+    sides: list[dict] = []
+    signature = _name_signature()
+    changed = False
+    opening_names = STORE.opening_names()
+    days = PLAYER_PERIODS.get(period)
+    since = (dt.date.today() - dt.timedelta(days=days)).isoformat() if days else ''
+    for video in STORE.videos():
+        if since and not (video.get('uploadDate') and video['uploadDate'] >= since):
+            continue                  # 期間外（日付の分からない動画は「全体」だけで数える）
+        before = _load_match_summary().get(str(video['id']))
+        rows = video_match_summary(video, signature, save=False)
+        if rows is None:
+            continue
+        openings_by_match = video_openings(str(video.get('manifest') or ''))
+        changed = changed or before is not _load_match_summary().get(str(video['id']))
+        for index, p1, p2, winner, autosave in rows:
+            names = {'p1': p1, 'p2': p2}
+            for side, other in (('p1', 'p2'), ('p2', 'p1')):
+                if names[side] != name:
+                    continue
+                opening_key = ((openings_by_match.get(int(index)) or {}).get(side) or {}).get('key')
+                entry = {'videoId': video['id'], 'videoTitle': video.get('title') or '',
+                         'index': index, 'side': side, 'opponent': names[other],
+                         'winner': winner, 'autosave': autosave}
+                if opening_key:
+                    entry['opening'] = opening_names.get(opening_key, '')
+                sides.append(entry)
+    if changed:
+        _save_match_summary()
+    result = player_stats(name, sides, MOVE_TIMES or MoveTimes(None))
+    palette = opening_colors()
+    for item in result.get('openings') or []:
+        item['color'] = palette.get(item['name'], OPENING_OTHER_COLOR)
+    result['period'] = period if period in PLAYER_PERIODS else 'all'
+    result['since'] = since
+    return result
+
+
+def manifest_player_names(manifest: str) -> set[str]:
+    """manifest に入っている OCR 名（修正前の名前も含む）。"""
+    if not manifest:
+        return set()
+    try:
+        data = json.loads(Path(manifest).read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    names: set[str] = set()
+    for match in data.get('matches') or []:
+        for side in ('p1', 'p2'):
+            value = (match.get('player_names') or {}).get(side)
+            text = value.get('text') if isinstance(value, dict) else value
+            text = str(text or '').strip()
+            if text:
+                names.add(text)
+    return names
+
+
+def _read_quality_warnings(manifest: Path, data: dict) -> dict[int, dict]:
+    """試合ごとの品質警告（quality_warning）を index -> dict で返す。
+
+    batch-results.json の各試合に入っている。古い解析結果など本体に無いときだけ、
+    同じフォルダーの quality-warnings.json を読む（解析結果は読むだけ）。
+    """
+    warnings: dict[int, dict] = {}
+    matches = data.get('matches') or []
+    for item in matches:
+        try:
+            index = int(item.get('index') or 0)
+        except (TypeError, ValueError):
+            continue
+        warning = item.get('quality_warning')
+        if index and isinstance(warning, dict):
+            warnings[index] = warning
+    if len(warnings) >= len(matches):
+        return warnings
+    fallback = manifest.parent / 'quality-warnings.json'
+    if not fallback.is_file():
+        return warnings
+    try:
+        payload = json.loads(fallback.read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError):
+        return warnings
+    for item in payload.get('matches') or []:
+        try:
+            index = int(item.get('index') or 0)
+        except (TypeError, ValueError):
+            continue
+        warning = item.get('quality_warning')
+        if index and index not in warnings and isinstance(warning, dict):
+            warnings[index] = warning
+    return warnings
+
+
+def match_analysis_info(manifest: Path) -> dict[int, dict]:
+    """batch-results.json の試合ごとの解析状態を返す（読むだけで書き換えない）。
+
+    index -> {'status': str, 'opening': bool, 'quality': dict}
+    - status  : complete / needs_correction / failed
+    - opening : 開始盤面のガードが効かなかった試合。start_decision.final_rule が
+                'forced-empty-opening-export' のとき True（開始直後の盤面を読み違え、
+                ゴミが乗った状態から解析が始まっている）。ガード成功は
+                'empty-opening-guard-target' なので False。
+    - quality : quality_warning（suspicious は試合の途中で一致率が低い）。
+    """
+    try:
+        stamp = manifest.stat().st_mtime
+    except OSError:
+        return {}
+    key = str(manifest)
+    cached = _MATCH_ANALYSIS_CACHE.get(key)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    try:
+        data = json.loads(manifest.read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    quality = _read_quality_warnings(manifest, data)
+    info: dict[int, dict] = {}
+    for item in data.get('matches') or []:
+        try:
+            index = int(item.get('index') or 0)
+        except (TypeError, ValueError):
+            continue
+        if not index:
+            continue
+        decision = item.get('start_decision') or {}
+        drift = {}
+        if DRIFT is not None:
+            recovered = recovered_file(manifest, index)
+            if recovered is not None:
+                drift = DRIFT.get(recovered)
+        info[index] = {
+            'status': str(item.get('status') or ''),
+            'opening': str(decision.get('final_rule') or '') == 'forced-empty-opening-export',
+            'quality': quality.get(index) or {},
+            'drift': drift,
+        }
+    if DRIFT is not None:
+        DRIFT.save()
+    _MATCH_ANALYSIS_CACHE[key] = (stamp, info)
+    return info
+
+
+def match_status_map(manifest: Path) -> dict[int, str]:
+    """（互換用）batch-results.json の matches[].status を index -> status で返す。"""
+    return {index: item['status']
+            for index, item in match_analysis_info(manifest).items()
+            if item.get('status')}
+
+
+# 開始盤面の読み取り誤り（ガードが効かなかった試合）の短い説明
+OPENING_FAILED_REASON = '開始時の盤面が空でない（読み取り誤り）'
+
+
+def describe_quality_warning(warning: dict) -> str:
+    """品質警告を、画面にも出せる短い日本語にする（試合の途中の崩れも対象）。"""
+    issues = [item for item in (warning.get('issues') or []) if isinstance(item, dict)]
+    if not issues:
+        return '盤面と読み取った盤面の一致率が低い区間があります'
+
+    def start_of(item) -> float:
+        try:
+            return float(item.get('relative_start_seconds') or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def ratio_of(item) -> float:
+        try:
+            return float(item.get('minimum_match_ratio') or 1.0)
+        except (TypeError, ValueError):
+            return 1.0
+
+    # いちばん一致率が低い区間を例に出す（同じなら早い方）。
+    first = min(issues, key=lambda item: (ratio_of(item), start_of(item)))
+    parts: list[str] = []
+    try:
+        player = int(first.get('player') or 0)
+    except (TypeError, ValueError):
+        player = 0
+    if player in (1, 2):
+        parts.append(f'P{player}')
+    seconds = start_of(first)
+    if seconds > 0:
+        parts.append(f'{seconds:.1f}秒〜')
+    try:
+        ratio = float(first.get('minimum_match_ratio') or 0)
+    except (TypeError, ValueError):
+        ratio = 0.0
+    if ratio > 0:
+        parts.append(f'最低一致率 {ratio * 100:.0f}%')
+    detail = f'（{"・".join(parts)}）' if parts else ''
+    return f'試合の途中で盤面の一致率が低くなっています{detail}'
+
+
+def describe_drift(drift: dict) -> str:
+    """盤面のずれ（boarddrift.py）を短い日本語にする。"""
+    parts = []
+    for player in sorted(drift):
+        item = drift[player] or {}
+        try:
+            seconds = float(item.get('start') or 0)
+        except (TypeError, ValueError):
+            seconds = 0.0
+        parts.append(f"P{player} {seconds:.1f}秒〜 {int(item.get('phases') or 0)}手")
+    return '読み取った盤面と復元した盤面が続けてずれています（' + '・'.join(parts) + '）'
+
+
+_EXCEPTIONS_CACHE: list = [None, {}]
+
+
+def analysis_exceptions(manifest: Path) -> set[int]:
+    """解析失敗の表示を例外的に消す試合（<データ>/analysis-exceptions.json）。
+
+    形式: {"<解析フォルダ名>": [試合番号, ...]}。解析フォルダ名は batch-results.json の
+    親フォルダの名前（例「…【ぷよぷよテトリス２】 [XTveY1Z22jU]」）。配信者が録画を
+    巻き戻したなど、解析では避けられない警告を手で外すためのもの。
+    """
+    base = Path(JOBS.data) if JOBS is not None else DEFAULT_DATA
+    path = base / 'analysis-exceptions.json'
+    try:
+        stamp = path.stat().st_mtime
+    except OSError:
+        return set()
+    if _EXCEPTIONS_CACHE[0] != stamp:
+        try:
+            raw = json.loads(path.read_text(encoding='utf-8-sig'))
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        _EXCEPTIONS_CACHE[0] = stamp
+        _EXCEPTIONS_CACHE[1] = {str(key): {int(i) for i in value if str(i).isdigit()}
+                                for key, value in raw.items() if isinstance(value, list)}
+    return _EXCEPTIONS_CACHE[1].get(manifest.parent.name, set())
+
+
+def mark_analysis_status(data: dict, manifest: Path) -> dict:
+    """試合ごとに解析状態を足す（既存のフィールドは変えない）。
+
+    - status が complete 以外: failed=true（盤面データが無い）。要修正は
+      analysisStatus='needs_correction'、それ以外は 'failed'。
+    - start_decision.final_rule が forced-empty-opening-export: 開始盤面の読み取り
+      誤り。盤面データは残っているので failed は変えず 'opening_failed'。
+    - quality_warning.suspicious: 試合の途中で盤面の一致率が低い。'quality_failed'。
+    - analysisReason に画面に出せる短い日本語を入れる（複数の原因は「。」で連結）。
+    status を持たない解析結果（Lab から取り込んだものなど）には何も足さない。
+    """
+    info = match_analysis_info(manifest)
+    if not info:
+        return data
+    excepted = analysis_exceptions(manifest)
+    for row in data.get('matches') or []:
+        try:
+            index = int(row.get('index') or 0)
+        except (TypeError, ValueError):
+            continue
+        item = info.get(index)
+        if not item:
+            continue
+        status = str(item.get('status') or '')
+        quality = item.get('quality') or {}
+        drift = item.get('drift') or {}
+        # エンジンの品質警告が出ていなくても、盤面のずれが続く試合は同じ扱いにする
+        suspicious = bool(quality.get('suspicious')) or bool(drift)
+        opening = bool(item.get('opening'))
+        if not status and not suspicious and not opening:
+            continue
+        reasons: list[str] = []
+        failed = bool(status and status != 'complete')
+        if failed:
+            reasons.append('盤面復元が途中で止まっています（要修正）'
+                           if status == 'needs_correction' else '盤面復元に失敗しました')
+        if opening:
+            reasons.append(OPENING_FAILED_REASON)
+        if quality.get('suspicious'):
+            reasons.append(describe_quality_warning(quality))
+        elif drift:
+            reasons.append(describe_drift(drift))
+        if status:
+            row['failed'] = failed
+            if failed:
+                row['analysisStatus'] = ('needs_correction'
+                                         if status == 'needs_correction' else 'failed')
+            else:
+                row['analysisStatus'] = 'complete'
+        row.pop('analysisReason', None)
+        if opening and not failed:
+            row['analysisStatus'] = 'opening_failed'
+        if suspicious and not failed and not opening:
+            row['analysisStatus'] = 'quality_failed'
+        if reasons:
+            row['analysisReason'] = '。'.join(reasons)
+        if index in excepted and not failed:
+            # 手で外した警告（盤面データはあるので「完了」として扱う）
+            row['analysisStatus'] = 'complete'
+            row.pop('analysisReason', None)
+    return data
+
+
+def decode_state_hash(url: str) -> dict | None:
+    """F/ の URL のハッシュ（base64url のJSON）を取り出す。"""
+    try:
+        fragment = str(url).split('#', 1)[1]
+    except IndexError:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(fragment + '=' * (-len(fragment) % 4))
+        return json.loads(raw.decode('utf-8'))
+    except (ValueError, KeyError, UnicodeDecodeError):
+        return None
+
+
+def lab_replay(video: dict, index: int) -> dict | None:
+    """取り込んだ動画（公開Lab由来）のリプレイを、保存してあるURLから組み立てる。"""
+    manifest = video.get('manifest') or ''
+    if not manifest:
+        return None
+    try:
+        data = json.loads(Path(manifest).read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError):
+        return None
+    match = next((item for item in data.get('matches') or []
+                  if int(item.get('index') or 0) == index), None)
+    if not match:
+        return None
+    simulator = match.get('labSimulator') or {}
+    # Lab は試合ごとに3つのURLを持つ。p1 / p2 は片側だけの1Pコレクションで、
+    # 両者の盤面が入っているのは combined（2P）だけ。盤面ビューワーには
+    # combined を渡さないと P1 しか表示されない。
+    combined = str(simulator.get('combined') or '')
+    p1 = str(simulator.get('p1') or '')
+    p2 = str(simulator.get('p2') or '')
+    if not combined and not p1 and not p2:
+        return None
+    state = decode_state_hash(combined) or decode_state_hash(p1) or decode_state_hash(p2)
+    return {
+        'urls': {'combined': combined or p1 or p2, 'p1': p1, 'p2': p2},
+        'simulatorData': state or {},
+        'imported': True
+    }
+
+
+def replay_file(manifest: Path, index: int) -> Path | None:
+    """試合のリプレイJSON（simulator フォルダ内の *.json）を返す。"""
+    try:
+        data = json.loads(manifest.read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError):
+        return None
+    for item in data.get('matches') or []:
+        if int(item.get('index', 0)) != index:
+            continue
+        combined = str((item.get('simulator') or {}).get('combined', ''))
+        if not combined:
+            return None
+        folder = Path(combined).parent
+        if not folder.is_dir() or folder.name != 'simulator':
+            return None
+        files = [f for f in sorted(folder.glob('*.json')) if f.name != 'profiles.json']
+        return files[0] if files else None
+    return None
+
+def pick_video_file() -> str:
+    """ローカルアプリなので、サーバー側でOSのファイル選択ダイアログを開く。"""
+    try:
+        result = subprocess.run(['powershell.exe', '-NoProfile', '-STA', '-Command', PICK_SCRIPT],
+                                capture_output=True, timeout=600,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    return result.stdout.decode('utf-8-sig', errors='replace').strip()
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = 'PPTLab/' + VERSION
+    protocol_version = 'HTTP/1.1'
+
+    # ---- 返却ヘルパ -------------------------------------------------------
+    def send_json(self, value, status: int = 200) -> None:
+        body = json.dumps(value, ensure_ascii=False).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_media(self, source: Path) -> None:
+        """ローカル動画を Range 対応で返す（<video> のシークに必要）。"""
+        size = source.stat().st_size
+        start, end = 0, size - 1
+        status = 200
+        header = self.headers.get('Range') or ''
+        match = re.match(r'bytes=(\d*)-(\d*)', header)
+        if match and size:
+            if match.group(1):
+                start = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) else size - 1
+            elif match.group(2):
+                start = max(0, size - int(match.group(2)))
+            if start >= size:
+                self.send_response(416)
+                self.send_header('Content-Range', f'bytes */{size}')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return None
+            end = min(end, size - 1)
+            status = 206
+        length = end - start + 1
+        mime, _ = mimetypes.guess_type(source.name)
+        self.send_response(status)
+        self.send_header('Content-Type', mime or 'application/octet-stream')
+        self.send_header('Content-Length', str(length))
+        self.send_header('Accept-Ranges', 'bytes')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        if status == 206:
+            self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+        self.end_headers()
+        with source.open('rb') as handle:
+            handle.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = handle.read(min(1 << 20, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+        return None
+    def send_error_json(self, message: str, status: int = 400) -> None:
+        self.send_json({'error': message}, status)
+
+    def read_json(self) -> dict:
+        length = int(self.headers.get('Content-Length') or 0)
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            value = json.loads(raw.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError('送信内容を読み取れませんでした') from error
+        if not isinstance(value, dict):
+            raise ValueError('送信内容の形式が正しくありません')
+        return value
+
+    # ---- ルーティング -----------------------------------------------------
+    def do_GET(self) -> None:
+        path = unquote(urlsplit(self.path).path)
+        try:
+            if path.startswith('/api/'):
+                return self.api_get(path)
+            if path == LAB_PREFIX:
+                # 画面は /ppt-lab/ に置いた（相対パスが公開版と同じになる）
+                return self.redirect(LAB_PREFIX + '/')
+            if path.startswith(LAB_PREFIX + '/'):
+                return self.serve_static(path[len(LAB_PREFIX):])
+            return self.serve_site(path)
+        except Exception as error:  # 想定外でも落とさず、画面に理由を出す
+            return self.send_error_json(str(error), 500)
+
+    def do_POST(self) -> None:
+        path = unquote(urlsplit(self.path).path)
+        try:
+            return self.api_post(path)
+        except ValueError as error:
+            return self.send_error_json(str(error), 400)
+        except Exception as error:
+            return self.send_error_json(str(error), 500)
+
+    def do_DELETE(self) -> None:
+        path = unquote(urlsplit(self.path).path)
+        try:
+            return self.api_delete(path)
+        except ValueError as error:
+            return self.send_error_json(str(error), 400)
+        except Exception as error:
+            return self.send_error_json(str(error), 500)
+
+    def api_get(self, path: str) -> None:
+        assert STORE is not None
+        if path == '/api/health':
+            return self.send_json({'ok': True, 'version': VERSION, 'startedAt': STARTED_AT})
+        if path == '/api/env':
+            if _ENV_CACHE['value'] is None or time.time() - _ENV_CACHE['at'] > 60:
+                _ENV_CACHE['value'] = {'engine': engine_path().is_file(),
+                                       'ffmpeg': find_ffmpeg() is not None,
+                                       'gpu': gpu_available(),
+                                       'python': sys.version.split()[0]}
+                _ENV_CACHE['at'] = time.time()
+            return self.send_json(_ENV_CACHE['value'])
+        if path == '/api/ramdisk':
+            return self.send_json(ram_disk_info())
+        if path == '/api/videos':
+            videos = STORE.videos()
+            settings = STORE.settings()
+            auto_tags = bool(settings.get('autoTags', True))
+            for video in videos:
+                players = video_players(video.get('manifest', ''), str(video.get('id') or ''))
+                video['players'] = players
+            if not settings.get('playerTagsSplit'):
+                # 1回だけ: 以前 tag_links に入れていたプレイヤー名（と OCR の旧名）を外す
+                STORE.split_player_tags({str(video['id']): [name for name in video['players'] if name]
+                                         + sorted(manifest_player_names(video.get('manifest', '')))
+                                         for video in videos})
+                STORE.set_setting('playerTagsSplit', True)
+            for video in videos:
+                # tags = 通常のタグ（黄色・緑）だけ。プレイヤータグ（青）は autoTags、配信者タグ（赤）は channel で別に渡す。
+                # 同じ名前でも別のタグとして扱う（例: プレイヤー「いんたい」と配信者「いんたい」）
+                video['tags'] = [name for name in STORE.tags_for(video['id']) if name != '動画解析']
+                video['autoTags'] = [name for name in video['players'] if name] if auto_tags else []
+                job = JOBS.latest_for_video(video['id']) if JOBS else None
+                if job:
+                    video['jobId'] = job['id']
+                    video['progress'] = round(job['progress'])
+                    video['message'] = job['message']
+                    video['error'] = job['error']
+                elif video.get('status') == 'failed':
+                    # 再起動後はメモリのジョブが無いので、DB に残した理由を出す
+                    video['error'] = STORE.last_job_message(str(video['id']))
+            STORE.prune_tags()
+            if any((not video.get('uploadDate') or not video.get('channel'))
+                   and video.get('status') != 'failed' for video in videos):
+                schedule_upload_dates()
+            return self.send_json({'videos': videos})
+        if path == '/api/tetofu':
+            return self.send_json({'tetofu': STORE.tetofu()})
+        if path == '/api/openings':
+            return self.send_json(openings_overview())
+        if path == '/api/publish':
+            return self.send_json(dict(PUBLISH))
+        if path == '/api/openings/export':
+            body = json.dumps(export_openings(), ensure_ascii=False, indent=1).encode('utf-8')
+            stamp = dt.datetime.now().strftime('%Y%m%d')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Disposition', f'attachment; filename="ppt-templates-{stamp}.pptopening.json"')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return None
+        if path == '/api/players/stats':
+            query = parse_qs(urlsplit(self.path).query)
+            name = str((query.get('name') or [''])[0]).strip()
+            if not name:
+                raise ValueError('プレイヤー名がありません')
+            period = str((query.get('period') or ['all'])[0])
+            return self.send_json(player_page(name, period if period in PLAYER_PERIODS else 'all'))
+        if path == '/api/data/info':
+            return self.send_json(data_info())
+        if path == '/api/settings/schema':
+            return self.send_json({'schema': settings_schema()})
+        if path == '/api/settings':
+            values = dict(SETTING_DEFAULTS)
+            values.update({k: v for k, v in STORE.settings().items() if k in SETTING_TYPES})
+            return self.send_json({'settings': values})
+        if path == '/api/models':
+            return self.send_json(models_payload())
+        if path == '/api/analysis/profiles':
+            return self.send_json({'profiles': PROFILES, 'active': STORE.settings().get('analysisProfile', 'standard')})
+        if path == '/api/names/mappings':
+            rows = STORE.name_mappings()
+            grouped = {}
+            for item in rows:
+                name = str(item['name'])
+                entry = grouped.setdefault(name, {'name': name, 'fingerprints': [],
+                                                  'hits': 0, 'updatedAt': item['updatedAt'],
+                                                  'image': ''})
+                entry['fingerprints'].append(item['fingerprint'])
+                entry['hits'] += int(item.get('hits') or 0)
+                if item['updatedAt'] > entry['updatedAt']:
+                    entry['updatedAt'] = item['updatedAt']
+                if not entry['image']:
+                    crop = CROP_DIR / (str(item['fingerprint']) + '.png')
+                    if crop.is_file():
+                        entry['image'] = f"/api/name-crops/{item['fingerprint']}.png"
+            mappings = sorted(grouped.values(), key=lambda item: -item['hits'])
+            return self.send_json({'mappings': mappings})
+        if path == '/api/tags':
+            return self.send_json({'tags': STORE.tags()})
+        if path == '/api/jobs':
+            return self.send_json({'jobs': STORE.jobs()})
+        if path.startswith('/api/videos/') and '/replay/' in path:
+            rest = path[len('/api/videos/'):]
+            video_id, _, tail = rest.partition('/replay/')
+            index_text = tail.strip('/')
+            video = STORE.video(video_id)
+            if not video or not video['manifest']:
+                return self.send_error_json('解析結果がありません', 404)
+            if not index_text.isdigit():
+                return self.send_error_json('試合の指定が正しくありません', 400)
+            replay = replay_file(Path(video['manifest']), int(index_text))
+            if not replay or not replay.is_file():
+                # 取り込んだ動画は、保存してあるLabのURLから組み立てる
+                fallback = lab_replay(video, int(index_text))
+                if fallback:
+                    return self.send_json(fallback)
+                return self.send_error_json('リプレイが見つかりません', 404)
+            body = replay.read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'max-age=3600')
+            self.end_headers()
+            self.wfile.write(body)
+            return None
+        if path.startswith('/api/videos/') and path.endswith('/thumb'):
+            video_id = path[len('/api/videos/'):-len('/thumb')]
+            video = STORE.video(video_id)
+            if not video:
+                return self.send_error_json('動画が見つかりません', 404)
+            image = video_thumbnail(video)
+            if image is None:
+                return self.send_error_json('サムネイルを作れません', 404)
+            body = image.read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/jpeg')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'max-age=86400')
+            self.end_headers()
+            self.wfile.write(body)
+            return None
+        if path.startswith('/api/videos/') and path.endswith('/media'):
+            video_id = path[len('/api/videos/'):-len('/media')]
+            video = STORE.video(video_id)
+            if not video:
+                return self.send_error_json('動画が見つかりません', 404)
+            source = Path(video['source'])
+            if source.suffix.lower() not in VIDEO_EXTENSIONS:
+                return self.send_error_json('動画ファイルではありません', 400)
+            if not source.is_file():
+                return self.send_error_json('動画ファイルが見つかりません', 404)
+            return self.send_media(source)
+        if path.startswith('/api/videos/') and path.endswith('/matches'):
+            video_id = path[len('/api/videos/'):-len('/matches')]
+            video = STORE.video(video_id)
+            if not video:
+                return self.send_error_json('動画が見つかりません', 404)
+            if not video['manifest'] or not Path(video['manifest']).is_file():
+                return self.send_error_json('解析結果がまだありません', 409)
+            manifest = Path(video['manifest'])
+            query = parse_qs(urlsplit(self.path).query)
+            if query.get('light', [''])[0] == '1':
+                return self.send_json(add_openings(mark_analysis_status(
+                    REVIEW.light(video_id, manifest), manifest), manifest))
+            data = REVIEW.load(video_id, manifest)
+            overrides = STORE.name_overrides_for(video_id)
+            if overrides:
+                for row in data.get('matches', []):
+                    for side in ('p1', 'p2'):
+                        fingerprint = row.get(side + 'Fingerprint')
+                        if fingerprint and fingerprint in overrides:
+                            row[side + 'Guess'] = overrides[fingerprint]
+                            row[side + 'Override'] = True
+                # 組（＝1エントリ）の候補名も、いま反映した上書きに合わせる
+                data = dict(data)
+                data['groups'] = group_guesses(data.get('groups') or [],
+                                               data.get('matches') or [])
+            return self.send_json(add_openings(mark_analysis_status(data, manifest), manifest))
+        if path.startswith('/api/videos/') and '/name-image/' in path:
+            rest = path[len('/api/videos/'):]
+            video_id, _, tail = rest.partition('/name-image/')
+            index_text, _, side = tail.partition('/')
+            if side not in ('p1', 'p2') or not index_text.isdigit():
+                return self.send_error_json('画像の指定が正しくありません', 400)
+            image = REVIEW.image_path(video_id, int(index_text), side)
+            if not image.is_file():
+                return self.send_error_json('画像がありません', 404)
+            body = image.read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/png')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'max-age=3600')
+            self.end_headers()
+            self.wfile.write(body)
+            return None
+        if path.startswith('/api/name-crops/'):
+            name = path[len('/api/name-crops/'):]
+            if not name.endswith('.png') or '/' in name or '\\' in name:
+                return self.send_error_json('画像の指定が正しくありません', 400)
+            image = CROP_DIR / name
+            if not image.is_file():
+                return self.send_error_json('画像がありません', 404)
+            body = image.read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/png')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'max-age=3600')
+            self.end_headers()
+            self.wfile.write(body)
+            return None
+        if path.startswith('/api/jobs/'):
+            job_id = path.rsplit('/', 1)[-1]
+            job = JOBS.get(job_id) if JOBS else None
+            if not job:
+                return self.send_error_json('ジョブが見つかりません', 404)
+            return self.send_json(job)
+        return self.send_error_json('不明なAPIです', 404)
+
+    def api_post(self, path: str) -> None:
+        assert STORE is not None
+        if path == '/api/publish':
+            return self.send_json(start_publish())
+        if path == '/api/openings/name':
+            body = self.read_json() or {}
+            key = str(body.get('key') or '')
+            STORE.set_opening_name(key, str(body.get('name') or ''),
+                                   OPENINGS.shape(key) if OPENINGS is not None else None)
+            return self.send_json({'ok': True, 'names': STORE.opening_names()})
+        if path == '/api/openings/color':
+            body = self.read_json() or {}
+            STORE.set_opening_color(str(body.get('name') or ''), str(body.get('color') or ''))
+            return self.send_json({'ok': True})
+        if path == '/api/openings/import':
+            body = self.read_json() or {}
+            return self.send_json(import_openings(body.get('data') or {}, bool(body.get('replace'))))
+        if path == '/api/names/rename':
+            body = self.read_json() or {}
+            old = str(body.get('from') or '').strip()
+            new = str(body.get('to') or '').strip()
+            if not old or not new:
+                raise ValueError('変更前と変更後の名前を入れてください')
+            changed = STORE.rename_name(old, new)
+            forget_all_names()
+            return self.send_json({'ok': True, 'changed': changed})
+        if path == '/api/names/merge':
+            body = self.read_json() or {}
+            source = str(body.get('from') or '').strip()
+            target = str(body.get('to') or '').strip()
+            if not source or not target:
+                raise ValueError('統合する名前を2つ選んでください')
+            changed = STORE.rename_name(source, target)
+            forget_all_names()
+            return self.send_json({'ok': True, 'changed': changed})
+        if path == '/api/ramdisk':
+            body = self.read_json() or {}
+            if str(body.get('action') or 'create') == 'create':
+                started = start_ram_disk_setup()
+                return self.send_json({'ok': True, 'started': started, 'info': ram_disk_info()})
+            return self.send_json({'ok': True, 'info': ram_disk_info()})
+        if path == '/api/settings':
+            body = self.read_json() or {}
+            for key, value in body.items():
+                kind = SETTING_TYPES.get(str(key))
+                if kind is None:
+                    continue
+                if kind == 'bool':
+                    value = bool(value)
+                elif kind == 'int':
+                    value = int(value)
+                else:
+                    value = str(value)
+                STORE.set_setting(str(key), value)
+            if 'autoApplyNames' in body:
+                wanted = bool(STORE.settings().get('autoApplyNames', True))
+                if wanted != AUTO_APPLY_NAMES[0]:
+                    AUTO_APPLY_NAMES[0] = wanted
+                    forget_all_names()
+            if str(body.get('useRamDisk', '')).strip().lower() in ('true', '1', 'on', 'yes'):
+                # オンにした瞬間に用意を始める（初回だけ UAC、以後は登録済みタスク）
+                start_ram_disk_setup()
+            values = dict(SETTING_DEFAULTS)
+            values.update({k: v for k, v in STORE.settings().items() if k in SETTING_TYPES})
+            return self.send_json({'ok': True, 'settings': values})
+        if path == '/api/models/install':
+            # `.tetracemodel`（ZIP）の生バイトを受け取る。Content-Length は必須。
+            length_text = (self.headers.get('Content-Length') or '').strip()
+            if not length_text.isdigit() or int(length_text) <= 0:
+                raise ValueError('ファイルのサイズが分かりません（Content-Length が必要です）')
+            length = int(length_text)
+            if length > models_registry.MAX_PACKAGE_BYTES:
+                # 読み切らずに断る。接続は閉じて、次のリクエストと混ざらないようにする。
+                self.close_connection = True
+                return self.send_error_json(
+                    f'ファイルが大きすぎます（{length / models_registry.MB:.1f}MB）。'
+                    f'上限は {models_registry.MAX_PACKAGE_BYTES / models_registry.MB:.0f}MB です',
+                    413)
+            raw = self.rfile.read(length)
+            if len(raw) != length:
+                raise ValueError('ファイルを最後まで受信できませんでした')
+            result = models_registry.install_package(raw, MODELS_DIR)
+            return self.send_json({'ok': True, 'id': result['id'], 'name': result['name'],
+                                   'warnings': result['warnings']})
+        if path == '/api/models/delete':
+            body = self.read_json() or {}
+            model_id = str(body.get('id') or '').strip()
+            if not model_id:
+                raise ValueError('削除するモデルを指定してください')
+            removed = models_registry.remove_model(MODELS_DIR, model_id)
+            # 選択中のモデルを消したら既定に戻す（次の解析で迷わないように）。
+            if active_model_id() == removed['id']:
+                STORE.set_setting('analysisProfile', models_registry.DEFAULT_MODEL_ID)
+            return self.send_json({'ok': True, 'id': removed['id'],
+                                   'name': removed['name'], 'active': active_model_id()})
+        if path == '/api/tags':
+            body = self.read_json()
+            return self.send_json(STORE.add_tag(str(body.get('name', '')), str(body.get('kind') or 'free')))
+        if path == '/api/tags/kind':
+            body = self.read_json()
+            STORE.set_tag_kind(str(body.get('name', '')), str(body.get('kind', '')))
+            return self.send_json({'ok': True})
+        if path == '/api/tags/apply':
+            body = self.read_json()
+            target = str(body.get('target', '')).strip()
+            tags = body.get('tags')
+            if not target:
+                raise ValueError('対象がありません')
+            if not isinstance(tags, list):
+                raise ValueError('タグの形式が正しくありません')
+            # 送られてくるのは自分で付けるタグだけ（プレイヤー名のタグは登場プレイヤーから決まる）
+            return self.send_json({'tags': STORE.set_tags(target, [str(tag) for tag in tags])})
+        if path == '/api/tetofu/tags':
+            body = self.read_json()
+            target = str(body.get('id', '')).strip()
+            tags = body.get('tags')
+            if not target:
+                raise ValueError('対象のテト譜がありません')
+            if not isinstance(tags, list):
+                raise ValueError('タグの形式が正しくありません')
+            return self.send_json({'tags': STORE.set_tags(target, [str(tag) for tag in tags])})
+        if path.startswith('/api/tetofu/') and path.endswith('/title'):
+            tetofu_id = path[len('/api/tetofu/'):-len('/title')]
+            if not STORE.tetofu_item(tetofu_id):
+                return self.send_error_json('テト譜が見つかりません', 404)
+            body = self.read_json()
+            title = str(body.get('title', '')).strip()
+            if not title:
+                raise ValueError('タイトルを入力してください')
+            STORE.set_tetofu_title(tetofu_id, title)
+            return self.send_json({'id': tetofu_id, 'title': title})
+        if path == '/api/tetofu':
+            body = self.read_json()
+            extra = {}
+            if body.get('videoId'):
+                extra = {'videoId': str(body.get('videoId')),
+                         'matchIndex': int(body.get('matchIndex') or 0),
+                         'scope': str(body.get('scope') or '')}
+                try:
+                    seconds = float(body.get('seconds'))
+                    if seconds >= 0:
+                        extra['seconds'] = round(seconds, 3)
+                except (TypeError, ValueError):
+                    pass
+            return self.send_json(STORE.add_tetofu(str(body.get('kind', '')),
+                                                   str(body.get('title', '')),
+                                                   str(body.get('url', '')), extra))
+        if path == '/api/videos':
+            body = self.read_json()
+            source = str(body.get('source', '')).strip()
+            if not source:
+                raise ValueError('動画のURLかファイルのパスを指定してください')
+            if '://' not in source:
+                candidate = Path(source)
+                if not candidate.is_file():
+                    raise ValueError('動画ファイルが見つかりません: ' + source[:200])
+                if candidate.suffix.lower() not in VIDEO_EXTENSIONS:
+                    raise ValueError('動画ファイルではありません: ' + candidate.suffix)
+            title = source if '://' in source else Path(source).stem
+            save_video = body.get('saveVideo')
+            if save_video is None:
+                save_video = bool(STORE.settings().get('downloadVideo', True))
+            elif isinstance(save_video, str):
+                save_video = save_video.strip().lower() not in ('0', 'false', 'off', 'no', '')
+            else:
+                save_video = bool(save_video)
+            video = STORE.add_video(title, source)
+            job_id = JOBS.start(video['id'], source, save_video) if JOBS else ''
+            return self.send_json({'id': video['id'], 'jobId': job_id,
+                                   'status': 'queued', 'saveVideo': save_video})
+        if path.startswith('/api/videos/') and path.endswith('/retry'):
+            # 失敗した動画を同じ入力でもう一度解析する（削除して追加し直さなくてよい）
+            video_id = path[len('/api/videos/'):-len('/retry')]
+            video = STORE.video(video_id)
+            if not video:
+                return self.send_error_json('動画が見つかりません', 404)
+            if str(video.get('status') or '') in ('queued', 'analyzing'):
+                raise ValueError('この動画はすでに解析待ちか解析中です')
+            source = str(video.get('source') or '').strip()
+            if not source:
+                raise ValueError('この動画には元の URL・ファイルの記録がありません')
+            body = self.read_json() or {}
+            save_video = body.get('saveVideo')
+            if save_video is None:
+                save_video = bool(STORE.settings().get('downloadVideo', True))
+            STORE.set_video_status(video_id, 'queued')
+            job_id = JOBS.start(video_id, source, bool(save_video)) if JOBS else ''
+            return self.send_json({'id': video_id, 'jobId': job_id, 'status': 'queued'})
+        if path.startswith('/api/videos/') and path.endswith('/title'):
+            video_id = path[len('/api/videos/'):-len('/title')]
+            video = STORE.video(video_id)
+            if not video:
+                return self.send_error_json('動画が見つかりません', 404)
+            body = self.read_json()
+            STORE.set_video_title(video_id, str(body.get('title', '')))
+            return self.send_json({'id': video_id, 'title': str(body.get('title', '')).strip()})
+        if path.startswith('/api/videos/') and path.endswith('/names'):
+            video_id = path[len('/api/videos/'):-len('/names')]
+            video = STORE.video(video_id)
+            if not video:
+                return self.send_error_json('動画が見つかりません', 404)
+            body = self.read_json()
+            updates = body.get('updates') or []
+            overrides_input = body.get('overrides') or []
+            if not isinstance(updates, list):
+                raise ValueError('名前の形式が正しくありません')
+            # confirm: 「表示どおりで正しい」として確定する（変更が無くても登録できる）
+            confirm = bool(body.get('confirm'))
+            confirmed_input = body.get('confirmed') or []
+            if not isinstance(confirmed_input, list):
+                raise ValueError('名前の形式が正しくありません')
+            if not updates and not overrides_input and not confirm:
+                raise ValueError('更新する名前がありません')
+            if not video['manifest'] or not Path(video['manifest']).is_file():
+                return self.send_error_json('解析結果がまだありません', 409)
+            cleaned = []
+            for update in updates:
+                try:
+                    index = int(update.get('index'))
+                except (TypeError, ValueError):
+                    raise ValueError('試合番号が正しくありません')
+                for side in ('p1', 'p2'):
+                    value = str(update.get(side) or '')
+                    if len(value) > 40:
+                        raise ValueError('名前は40文字までです')
+                cleaned.append({'index': index, 'p1': update.get('p1'), 'p2': update.get('p2')})
+            result = apply_names(Path(video['manifest']), cleaned) if cleaned else {'changed': 0}
+            for override in (body.get('overrides') or []):
+                fingerprint = str(override.get('fingerprint') or '').strip()
+                name = str(override.get('name') or '').strip()
+                if fingerprint and name:
+                    STORE.set_name_override(video_id, fingerprint, name)
+                elif fingerprint:
+                    STORE.clear_name_override(video_id, fingerprint)
+            # 次回のために「画像の指紋 → 確定した名前」を覚える（OCRより優先して使う）
+            try:
+                rows = REVIEW.load(video_id, Path(video['manifest'])).get('matches', [])
+                by_index = {int(row['index']): row for row in rows}
+                # 変更した名前に加えて、確定ボタンで「正しい」とされた名前も覚える
+                for update in [*updates, *(confirmed_input if confirm else [])]:
+                    row = by_index.get(int(update.get('index', 0)))
+                    if not row:
+                        continue
+                    for side in ('p1', 'p2'):
+                        name = str(update.get(side) or '').strip()
+                        fingerprint = row.get(side + 'Fingerprint')
+                        if name and fingerprint:
+                            STORE.remember_name(fingerprint, name)
+                            try:
+                                CROP_DIR.mkdir(parents=True, exist_ok=True)
+                                source = REVIEW.image_path(video_id, int(update.get('index', 0)), side)
+                                if source.is_file():
+                                    shutil.copyfile(source, CROP_DIR / f'{fingerprint}.png')
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+            if result['changed'] > 0 or confirm:
+                STORE.set_video_status(video_id, 'ready')
+            REVIEW.forget(video_id)
+            # 名前が変わったら自動タグも付け替える（0件になったタグは消す）。
+            # 名前確認の作業データ（REVIEW）と名前の記憶を更新した「あと」で作り直す。
+            # 先に作ると古い名前のまま覚えてしまい、一覧の検索で新しい名前が出てこない。
+            if cleaned:
+                try:
+                    # プレイヤー名のタグは保存しない（一覧を返すときに登場プレイヤーから作る）
+                    forget_video_players(str(video['manifest']))
+                    STORE.prune_tags()
+                except Exception:
+                    pass
+            status = 'ready' if (result['changed'] > 0 or confirm) else (video.get('status') or 'needs-names')
+            return self.send_json({'changed': result['changed'], 'status': status})
+        if path == '/api/videos/pick':
+            picked = pick_video_file()
+            if not picked:
+                return self.send_json({'cancelled': True})
+            return self.send_json({'path': picked, 'title': Path(picked).stem})
+        return self.send_error_json('不明なAPIです', 404)
+
+    def api_delete(self, path: str) -> None:
+        assert STORE is not None
+        if path == '/api/data/cache':
+            body = self.read_json() or {}
+            kind = str(body.get('kind') or '')
+            freed = 0
+            if kind == 'crops':
+                if CROP_DIR.exists():
+                    for item in CROP_DIR.glob('*.png'):
+                        try:
+                            freed += item.stat().st_size
+                            item.unlink()
+                        except OSError:
+                            pass
+            elif kind == 'analysis':
+                batches = ROOT_RUNTIME / 'data' / 'batches'
+                for item in list(batches.rglob('analysis-cache.v1.json')) if batches.exists() else []:
+                    try:
+                        freed += item.stat().st_size
+                        item.unlink()
+                    except OSError:
+                        pass
+            else:
+                raise ValueError('対象の指定が正しくありません')
+            return self.send_json({'ok': True, 'freed': freed})
+        if path == '/api/tags':
+            body = self.read_json()
+            STORE.delete_tag(str(body.get('name', '')))
+            return self.send_json({'ok': True})
+        if path == '/api/names/mappings':
+            body = self.read_json()
+            name = str(body.get('name', '')).strip()
+            if name:
+                removed = 0
+                for item in STORE.name_mappings():
+                    if str(item['name']) == name:
+                        removed += 1 if STORE.forget_name(item['fingerprint']) else 0
+                forget_all_names()
+                return self.send_json({'ok': True, 'removed': removed})
+            fingerprint = str(body.get('fingerprint', '')).strip()
+            if not fingerprint:
+                raise ValueError('対象の指定がありません')
+            removed = STORE.forget_name(fingerprint)
+            forget_all_names()
+            return self.send_json({'ok': True, 'removed': removed})
+        if path.startswith('/api/videos/'):
+            video_id = path[len('/api/videos/'):]
+            video = STORE.video(video_id)
+            if not video:
+                return self.send_error_json('動画が見つかりません', 404)
+            # DB の行を先に消す。ファイルが使用中で消せなくても、動画は消えたままにする。
+            STORE.delete_video(video_id)
+            try:
+                cleanup = purge_video_files(video)
+            except Exception as error:      # 想定外でも削除そのものは成功させる
+                cleanup = {'removed': [], 'warnings': [str(error)], 'freedBytes': 0}
+                log_cleanup(f'purge crashed id={video_id} error={error!r}')
+            return self.send_json({'ok': True, 'id': video_id,
+                                   'removed': cleanup['removed'],
+                                   'removedMB': round(cleanup['freedBytes'] / MB, 1),
+                                   'warnings': cleanup['warnings']})
+        if path.startswith('/api/tetofu/'):
+            tetofu_id = path[len('/api/tetofu/'):]
+            if not STORE.tetofu_item(tetofu_id):
+                return self.send_error_json('テト譜が見つかりません', 404)
+            STORE.delete_tetofu(tetofu_id)
+            return self.send_json({'ok': True, 'id': tetofu_id})
+        return self.send_error_json('不明なAPIです', 404)
+
+    # ---- 静的ファイル -----------------------------------------------------
+    def serve_static(self, path: str) -> None:
+        relative = 'index.html' if path in ('', '/') else path.lstrip('/')
+        target = (WEB_ROOT / relative).resolve()
+        if WEB_ROOT.resolve() not in target.parents and target != WEB_ROOT.resolve():
+            return self.send_error_json('参照先が不正です', 403)
+        if not target.is_file():
+            return self.send_error_json('ファイルがありません', 404)
+        body = target.read_bytes()
+        mime, _ = mimetypes.guess_type(target.name)
+        self.send_response(200)
+        self.send_header('Content-Type', (mime or 'application/octet-stream') + '; charset=utf-8'
+                         if (mime or '').startswith(('text/', 'application/json')) else
+                         (mime or 'application/octet-stream'))
+        self.send_header('Content-Length', str(len(body)))
+        # /ppt-lab/ は「直したら次に開いたとき必ず出る」画面。ブラウザの
+        # HTTP キャッシュに残すと、Service Worker を外しても古い HTML /
+        # JS / CSS が返るので、毎回取りに来させる（HTML だけでなく JS /
+        # CSS / 画像も同じ扱いでよい。ローカル配信なので費用は小さい）。
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt: str, *args) -> None:
+        if os.environ.get('PPT_LAB_VERBOSE'):
+            sys.stderr.write('%s - %s\n' % (self.address_string(), fmt % args))
+
+    def redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header('Location', location)
+        self.send_header('Content-Length', '0')
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+
+    # ---- 本体（ビューワー / シミュレータ）----------------------------------
+    def serve_site(self, path: str) -> None:
+        """シミュレータ / ビューワー / ハブを配信する（公開版と同じビルドを優先）。"""
+        relative = path.lstrip('/') or 'index.html'
+        if relative.endswith('/'):
+            relative += 'index.html'
+        first = relative.split('/', 1)[0]
+        if relative not in SITE_FILES and relative not in SITE_EXTRA and first not in SITE_DIRS:
+            return self.send_error_json('ファイルがありません', 404)
+        root = site_root()
+        target = (root / relative).resolve()
+        if root not in target.parents:
+            return self.send_error_json('参照先が不正です', 403)
+        if not target.is_file() and root is not SITE_ROOT.resolve():
+            # ビルドに無いものはリポジトリ直下から拾う
+            fallback = (SITE_ROOT.resolve() / relative).resolve()
+            if SITE_ROOT.resolve() in fallback.parents and fallback.is_file():
+                target = fallback
+        if not target.is_file():
+            return self.send_error_json('ファイルがありません', 404)
+        body = target.read_bytes()
+        mime = SITE_TYPES.get(target.suffix.lower())
+        if not mime:
+            mime, _ = mimetypes.guess_type(target.name)
+        self.send_response(200)
+        self.send_header('Content-Type', mime or 'application/octet-stream')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def make_visual_name_recall(crop_dir: Path, store, threshold: float = 0.985):
+    """過去の配信で確定した名前画像と、いま切り出した名前画像を照合する。
+
+    指紋は画素の完全一致ハッシュなので、配信が変わって画素が1つでもずれると
+    当たらない（実測: 同じ人でも配信ごとに別ハッシュになる）。ここでは
+    142x11 のサムネイルを z-score 正規化したベクトル同士の相関で見る。
+    実測で同じ人は 0.996 前後、別人は 0.5 以下なので 0.985 を境にする。
+    """
+    from namereview import SAME_IMAGE_THRESHOLD, THUMB_HEIGHT, THUMB_WIDTH
+
+    limit = threshold if threshold is not None else SAME_IMAGE_THRESHOLD
+    state = {'stamp': None, 'names': (), 'matrix': None, 'checked': 0.0}
+    lock = threading.Lock()
+
+    def snapshot():
+        """crop_dir の中身が変わったときだけ読み直す（毎回の走査を避ける）。"""
+        # 走査そのものも 1 回 70ms ほどかかり、1 回の集計で数百回呼ばれる
+        # （起動直後のプレイヤー集計が 40 秒かかっていた）。2 秒以内は前回の結果を使う。
+        with lock:
+            if state['stamp'] is not None and time.monotonic() - state['checked'] < 2.0:
+                return state
+        # os.scandir の DirEntry.stat() は Windows ではディレクトリ走査の結果を
+        # 使うので、ファイルごとの stat が要らない（Path.stat だと 1 回の照合で
+        # 画像の枚数分の stat が走り、一覧の初回表示が数分かかっていた）。
+        entries = []
+        try:
+            with os.scandir(crop_dir) as scan:
+                for entry in scan:
+                    if entry.name.lower().endswith('.png') and entry.is_file():
+                        entries.append((entry.path, entry.stat().st_mtime_ns))
+        except OSError:
+            entries = []
+        entries.sort()
+        files = [Path(path) for path, _mtime in entries]
+        stamp = (str(crop_dir), len(files),
+                 max((mtime for _path, mtime in entries), default=0))
+        with lock:
+            state['checked'] = time.monotonic()
+            if state['stamp'] == stamp:
+                return state
+            state.update({'stamp': stamp, 'names': (), 'matrix': None})
+            if not files:
+                return state
+            try:
+                import numpy as np
+                from PIL import Image
+            except Exception:
+                return state
+            rows = []
+            fingerprints = []
+            for path in files:
+                try:
+                    with Image.open(path) as image:
+                        thumb = image.convert('L').resize(
+                            (THUMB_WIDTH, THUMB_HEIGHT), Image.LANCZOS)
+                        pixels = np.asarray(thumb, dtype=np.float32).reshape(-1)
+                except (OSError, ValueError):
+                    continue
+                deviation = float(pixels.std())
+                if deviation < 1.0:  # _normalize と同じ判定（平坦な画像は捨てる）
+                    continue
+                rows.append((pixels - pixels.mean()) / deviation)
+                fingerprints.append(path.stem)
+            named = store.names_for_fingerprints(fingerprints) if rows else {}
+            keep = [i for i, fingerprint in enumerate(fingerprints) if named.get(fingerprint)]
+            if not keep:
+                return state
+            state['matrix'] = np.stack([rows[i] for i in keep])
+            state['names'] = tuple(named[fingerprints[i]] for i in keep)
+            return state
+
+    def recall(vector) -> str | None:
+        if vector is None:
+            return None
+        data = snapshot()
+        matrix = data['matrix'] if data else None
+        if matrix is None:
+            return None
+        try:
+            import numpy as np
+            query = np.asarray(vector, dtype=np.float32).reshape(-1)
+        except Exception:
+            return None
+        if query.size != matrix.shape[1]:
+            return None
+        scores = matrix @ query / query.size  # _correlation と同じ「積の平均」
+        best = int(scores.argmax())
+        if float(scores[best]) < limit:
+            return None
+        return data['names'][best]
+
+    return recall
+
+
+def main() -> int:
+    global STORE, JOBS, REVIEW
+    parser = argparse.ArgumentParser(description='PPT Lab local server')
+    parser.add_argument('--port', type=int, default=8765)
+    parser.add_argument('--data', type=Path, default=DEFAULT_DATA)
+    parser.add_argument('--open', action='store_true')
+    parser.add_argument('--orphans', action='store_true',
+                        help='videos から参照されていないバッチを一覧する（削除はしません）')
+    args = parser.parse_args()
+
+    require_imaging()
+    STORE = Store(args.data)
+    STORE.reset_stuck_videos()
+    JOBS = JobManager(STORE, args.data, TOOLS_ROOT, RUNTIME)
+    if args.orphans:
+        # 一覧を出すだけ。**ここでは何も消さない**（誤爆を避けるため）。
+        print(json.dumps(orphan_batches(), ensure_ascii=False, indent=1), flush=True)
+        return 0
+    global PLAYER_DISK_FILE, MOVE_TIMES, DRIFT
+    PLAYER_DISK_FILE = args.data / 'cache' / 'players.json'
+    global MATCH_SUMMARY_FILE
+    MATCH_SUMMARY_FILE = args.data / 'cache' / 'match-summary.json'
+    MOVE_TIMES = MoveTimes(args.data / 'cache' / 'move-times.json')
+    DRIFT = DriftCache(args.data / 'cache' / 'board-drift.json')
+    # 設定「プレイヤー名の記憶を自動適用」がオフなら、記憶から名前を引かない（OCR のまま出す）
+    AUTO_APPLY_NAMES[0] = bool(STORE.settings().get('autoApplyNames', True))
+
+    def gated(recall):
+        return lambda *args, **kwargs: recall(*args, **kwargs) if AUTO_APPLY_NAMES[0] else None
+
+    REVIEW = NameReview(args.data / 'cache', find_ffmpeg(), gated(STORE.recall_name),
+                        gated(STORE.recall_name_by_text),
+                        gated(make_visual_name_recall(CROP_DIR, STORE)), crop_dir=CROP_DIR)
+    # プレイヤー集計用のまとめを裏で作っておく（起動直後の最初の集計を待たせない）
+    schedule_summary_warm(delay=1.0)
+    global OPENINGS
+    OPENINGS = OpeningCache(args.data / 'cache' / 'openings.json')
+    threading.Thread(target=warm_openings, daemon=True).start()
+    ensure_site_build()
+    server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
+    url = f'http://127.0.0.1:{server.server_port}/ppt-lab/'
+    print(url, flush=True)
+    # 未参照バッチの点検は裏で走らせる（一覧をログに残すだけで、削除はしない）
+    threading.Thread(target=scan_orphans_quietly, daemon=True,
+                     name='ppt-orphan-scan').start()
+    if args.open:
+        threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

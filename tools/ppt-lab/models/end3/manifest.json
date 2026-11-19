@@ -1,0 +1,27 @@
+{
+  "schema": "ppt-end-state-model/v1",
+  "name": "end3-scene-classifier",
+  "created": "2026-11-02",
+  "purpose": "結果画面だけを 引き分け / 1P勝利 / 2P勝利 の3クラスに分類する",
+  "input": {"name": "frames", "shape": ["batch", 1, 90, 160], "dtype": "float32",
+            "crop": "largest-centered-16:9", "normalization": "luma uint8 / 127.5 - 1.0"},
+  "output": {"name": "logits", "shape": ["batch", 3]},
+  "labels": ["draw", "p1", "p2"],
+  "training": {
+    "dataset": "tools/ppt-scene-classifier/dataset-14 (終了フレームのみ)",
+    "manifest": "tools/ppt-scene-classifier/artifacts-end3/dataset.json",
+    "selectionCheckpoint": "tools/ppt-scene-classifier/artifacts-end3/scene-classifier-selection.pt",
+    "epochs": 10,
+    "architecture": "tiny",
+    "flipEndLabels": true,
+    "syntheticDraws": true,
+    "validationEndAccuracy": 0.9544,
+    "testEndAccuracy": 0.9550
+  },
+  "validation": {
+    "video-53d7-matches": "138/138 agreement with detect-winners",
+    "video-5802-matches": "185/186 agreement with detect-winners",
+    "latest-3player-segment": "match1=P1, match2=P2, match3=P2 (all correct)"
+  },
+  "usage": "tools/ppt-end3-winner.py が結果画面を切り出してこのモデルに通す"
+}

@@ -1,0 +1,37 @@
+{
+  "schema": "tetrace-model/v1",
+  "id": "tetrace-v1.0-ppt",
+  "name": "Tetrace-V1.0-PPT",
+  "version": "1.0",
+  "description": "ぷよぷよテトリス2 の動画解析モデル。エンジン v81＋盤面・シーン・NEXT/HOLD の各ネット＋設定の一組",
+  "createdAt": "2026-11-17",
+  "includes": {
+    "engine": "engine/TetrisVideoRecovery_stream.exe",
+    "config": "engine/tetris_recover.ini",
+    "scene": "models/scene-classifier.onnx",
+    "board": "models/tetris.onnx",
+    "next": "models/next_hold.onnx"
+  },
+  "env": {
+    "TR_NVDEC_QUEUE_FRAME_STRIDE": "1",
+    "TR_OPENING_PIECE_FLEXIBLE": "1",
+    "TR_OPENING_RESOLVE": "1",
+    "TR_BATCH_WORKERS": "2",
+    "TR_BATCH_RAM_RESERVE_MB": "2048"
+  },
+  "sha256": {
+    "engine/TetrisVideoRecovery_stream.exe": "d841732db6c1d0d167ab63ff4fb1be943da73e5c293a4d11a0d4e7bc9491e424",
+    "engine/tetris_recover.ini": "f9edabafcb4fcaeb92b43280e386c113947e2ff9a5bcb3c689291d68f835f484",
+    "models/scene-classifier.onnx": "55efd493f8e01e3c96b2e104f2e35540c2321c603d3ec66335222393b7e1dd39",
+    "models/tetris.onnx": "da60d1c9a32939f0d607a0393db842b994d801f877c5e24dcfaca5d301d5b7f2",
+    "models/next_hold.onnx": "b32435fa64aa54dbf96cad33d702524bb9f531933c24989acba52b5e6fbb5d65"
+  },
+  "origin": {
+    "engineBuild": "v81-segment-window (frozen/REGRESSION-LOG.jsonl: v81-segment-window-b)",
+    "engineSourceCommit": "b843b0d0",
+    "scene": "frozen/scene-classifier-v3-unrelated-20261112.onnx",
+    "next": "frozen/next_hold-v7b-emptyhold-T1-20261112.onnx"
+  },
+  "runtimeRequired": "CUDA/cuDNN/onnxruntime/ffmpeg の DLL（tools/video-recovery-runtime/bin、または fullBundle の runtime/）",
+  "updatedAt": "2026-11-18"
+}
